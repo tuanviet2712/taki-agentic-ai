@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, ExternalLink, Eye, Send } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clapperboard, Clock, ExternalLink, Eye, Send } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api, useApi } from "../lib/api";
 import { CONTENT_STATUS, KIND_LABEL, ddmm, hhmm, num, timeAgo, type Tone } from "../lib/format";
 import { Badge, Button, Card, Empty, JevBadge, Loading, Modal, PageHeader, PlatformIcon, cx, platformName, useToast } from "../components/ui";
@@ -23,7 +24,7 @@ const JOB_STATUS: Record<string, { label: string; tone: Tone }> = {
 const scoreTone = (s: number): Tone => (s >= 70 ? "green" : s >= 40 ? "amber" : "gray");
 const chName = (p: string) => CH_LABEL[p] ?? platformName(p);
 
-type QueueItem = { key: string; contentId: string; title: string; channel: string; body?: string; at?: string | null; status: { label: string; tone: Tone } };
+type QueueItem = { key: string; contentId: string; kind?: string; title: string; channel: string; body?: string; at?: string | null; status: { label: string; tone: Tone } };
 
 export function Publish() {
   const toast = useToast();
@@ -47,9 +48,9 @@ export function Publish() {
     const seen = new Set<string>();
     for (const j of jobs ?? []) if (["scheduled", "queued", "running", "failed"].includes(j.status)) {
       seen.add(j.content_item_id);
-      out.push({ key: j.id, contentId: j.content_item_id, title: j.title, channel: j.channel, body: j.body, at: j.scheduled_at, status: j.simulated && (j.status === "done" || j.status === "draft_uploaded") ? { label: "Mô phỏng · chưa đăng thật", tone: "amber" } : JOB_STATUS[j.status] ?? { label: j.status, tone: "gray" } });
+      out.push({ key: j.id, contentId: j.content_item_id, kind: j.kind, title: j.title, channel: j.channel, body: j.body, at: j.scheduled_at, status: j.simulated && (j.status === "done" || j.status === "draft_uploaded") ? { label: "Mô phỏng · chưa đăng thật", tone: "amber" } : JOB_STATUS[j.status] ?? { label: j.status, tone: "gray" } });
     }
-    for (const c of approved ?? []) if (!seen.has(c.id)) out.push({ key: c.id, contentId: c.id, title: c.title, channel: c.channel, body: c.body, at: c.scheduled_at ?? null, status: CONTENT_STATUS.approved });
+    for (const c of approved ?? []) if (!seen.has(c.id)) out.push({ key: c.id, contentId: c.id, kind: c.kind, title: c.title, channel: c.channel, body: c.body, at: c.scheduled_at ?? null, status: CONTENT_STATUS.approved });
     return out;
   }, [jobs, approved]);
 
@@ -112,7 +113,9 @@ export function Publish() {
                       <p className="truncate text-sm font-medium text-ink">{q.title}</p>
                       <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted"><Badge tone={q.status.tone}>{q.status.label}</Badge>{q.at && <span>{ddmm(q.at)} {hhmm(q.at)}</span>}</p>
                     </div>
-                    <Button size="sm" variant="soft" icon={Send} onClick={() => setConfirm(q)}>Đăng ngay</Button>
+                    {q.kind === "video_script"
+                      ? <Link to={`/video-flow?from=${q.contentId}`}><Button size="sm" variant="soft" icon={Clapperboard}>Tạo video</Button></Link>
+                      : <Button size="sm" variant="soft" icon={Send} onClick={() => setConfirm(q)}>Đăng ngay</Button>}
                   </div>
                 ))}
               </div>

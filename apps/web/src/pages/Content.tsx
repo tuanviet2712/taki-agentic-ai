@@ -95,7 +95,7 @@ export function Content() {
                 <div className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap rounded-xl bg-soft p-4 text-sm leading-relaxed text-ink scroll-thin">{d.body}</div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button icon={Pencil} onClick={() => setEditing({ title: d.title ?? "", body: d.body ?? "" })}>Chỉnh sửa</Button>
-                  {d.kind === "video_script" && <Link to={`/video-flow?from=${d.id}`}><Button variant="soft">Sản xuất trên Flow</Button></Link>}
+                  {d.kind === "video_script" && <Link to={`/video-flow?from=${d.id}`}><Button variant="soft">Tạo video</Button></Link>}
                   {d.task_id && <Button icon={RefreshCw} loading={busy === "regen"} onClick={() => run("regen", () => api.post(`content/${d.id}/regenerate`), "Agent đang viết lại nội dung này")}>Tạo lại</Button>}
                   {canPublish && <Button variant="success" icon={Send} onClick={() => setConfirmPublish(true)}>Đăng ngay</Button>}
                   {d.status === "awaiting_approval" && d.approval?.id && <Link to={`/approvals?id=${d.approval.id}`}><Button variant="primary" icon={ShieldCheck}>Mở trang duyệt</Button></Link>}

@@ -42,7 +42,17 @@ export function VideoFlow() {
   useEffect(() => {
     const from = params.get("from");
     if (!from) return;
-    api.get(`content/${from}`).then((c) => set({ title: c.title, brief: c.body, brand: "taki", tool: "cinematic", sourceContentId: c.id, channels: [c.channel ?? "tiktok"].filter((x) => CHANNELS.includes(x)) })).catch(() => {});
+    // Kịch bản → đúng skill + lời đọc đã làm sạch (script-video.ts), không dán nguyên kịch bản sản xuất.
+    api.get(`content/${from}/video-plan`).then((p) => {
+      const i = p.input;
+      setForm((f: any) => ({
+        ...f, tool: i.tool, title: i.title, brief: i.brief, brand: "taki", sourceContentId: i.sourceContentId, product: i.product ?? "", voice: i.voice ?? "",
+        hookTitle: i.hookTitle ?? "", cta: i.cta ?? "", durationSec: i.durationSec ?? f.durationSec, channels: (i.channels ?? []).filter((x: string) => CHANNELS.includes(x)),
+        images: (i.images ?? []).map((m: any) => ({ ...m, name: m.path.split("/").pop() })), video: { ...f.video, ...(i.video ?? {}) },
+      }));
+      setSelected(i.tool);
+      if (p.missing?.length) toast(`Kịch bản "${p.title}": ${p.missing.join("; ")}`, "info");
+    }).catch((e) => toast(e.message, "err"));
   }, [params]);
 
   /** Upload images; with `role` the image fills that slot (replacing what was there), else it is an extra reference. */
@@ -112,6 +122,8 @@ export function VideoFlow() {
         {fb.data?.running && (fbAccount ? <><Button size="sm" variant="ghost" onClick={() => showFlow("normal")}>Xem Chrome Flow</Button><Button size="sm" variant="ghost" onClick={() => showFlow("parked")}>Cất Chrome Flow</Button></> : <Button size="sm" variant="soft" onClick={login}>Đăng nhập Chrome Flow</Button>)}
         <span className="w-full text-xs text-muted">Chrome Flow là cửa sổ Chrome riêng (cất ở mép phải màn hình) mang sẵn đăng nhập của profile đã chọn — AI tự bấm bên trong Tool Flow, không đụng tới Chrome Sếp đang dùng. Không cần bấm gì, chỉ có thông báo khi video xong.</span>
       </div>
+
+      <ScriptsToVideo />
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
         <Card title="Tạo video mới">
@@ -488,5 +500,59 @@ function ImageSlots({ slots, images, onUpload, onRemove, onRole, note, extras }:
         </div>
       )}
     </div>
+  );
+}
+
+/** Kịch bản đã duyệt → đúng skill tạo video (chọn tool + lời đọc sạch ở máy chủ). Flow tốn tín dụng → chỉ chạy khi Sếp bấm. */
+function ScriptsToVideo() {
+  const list = useApi<any[]>("video-scripts", ["creative.", "approval.", "task."]);
+  const [ask, setAsk] = useState<any | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [, setParams] = useSearchParams();
+  const toast = useToast();
+  const plans = (list.data ?? []).filter((p) => !p.error && !(p.job && p.job.status === "done"));
+  if (!list.data || !plans.length) return null;
+  const run = async () => {
+    if (!ask) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`content/${ask.contentId}/make-video`);
+      toast(r.already ? "Kịch bản này đang có video chạy rồi" : `Đã bắt đầu tạo video bằng ${r.tool} — xong sẽ báo và gửi Sếp duyệt`);
+      setAsk(null); list.reload();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2">Kịch bản đã duyệt → tạo video <Badge tone="blue">{plans.length}</Badge></span>}>
+      <p className="-mt-1 mb-3 text-xs text-muted">Hệ thống tự chọn skill hợp với từng kịch bản và chỉ đưa lời đọc đã duyệt vào video (bỏ mốc cảnh, ghi chú nội bộ). Video xong dùng đúng Caption đã duyệt và gắn lại vào kịch bản gốc.</p>
+      <div className="divide-y divide-line">
+        {plans.map((p) => {
+          const Icon = TOOL_ICON[p.tool] ?? Film;
+          const running = p.job && ["queued", "running"].includes(p.job.status);
+          return (
+            <div key={p.contentId} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-ink">{p.title}</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted"><Icon className="h-3.5 w-3.5" /><b className="text-ink">{p.toolLabel}</b> · {p.scenes} cảnh · ~{p.durationSec}s{p.paidCredits ? " · tốn tín dụng Flow" : " · chạy trên máy, không tốn tín dụng"}</p>
+                <p className="mt-0.5 text-xs text-muted">{p.reason}</p>
+                {p.missing?.length > 0 && <ul className="mt-1 list-disc pl-4 text-xs text-amber-700 dark:text-amber-300">{p.missing.map((m: string) => <li key={m}>{m}</li>)}</ul>}
+                {running && <p className="mt-1 text-xs"><Badge tone="blue">{STATUS[p.job.status]?.[0] ?? p.job.status}</Badge> {p.job.step}</p>}
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setParams({ from: p.contentId })}>Mở để chỉnh</Button>
+                <Button size="sm" variant="primary" icon={Play} disabled={Boolean(running) || p.missing?.length > 0} onClick={() => setAsk(p)}>{running ? "Đang tạo" : "Tạo video"}</Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <Modal open={Boolean(ask)} onClose={() => setAsk(null)} title="Tạo video từ kịch bản?" footer={<><Button variant="ghost" onClick={() => setAsk(null)}>Hủy</Button><Button variant="primary" loading={busy} onClick={run}>Bắt đầu</Button></>}>
+        {ask && <div className="space-y-2 text-sm text-ink">
+          <p><b>{ask.title}</b></p>
+          <p>Skill: <b>{ask.toolLabel}</b> · {ask.scenes} cảnh · khoảng {ask.durationSec} giây · mất khoảng {ask.minutes} phút.</p>
+          {ask.paidCredits && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">Chạy trên Google Flow bằng Chrome Flow — <b>tốn tín dụng Flow</b> của tài khoản đã chọn. Chạy 1 video/lần, video sau xếp hàng.</p>}
+          <p className="text-xs text-muted">Xong sẽ có thông báo; video vào "Duyệt & Phê duyệt" để Sếp xem trước khi đăng.</p>
+        </div>}
+      </Modal>
+    </Card>
   );
 }

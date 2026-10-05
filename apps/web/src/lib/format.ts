@@ -58,6 +58,7 @@ export const CONTENT_STATUS: Record<string, { label: string; tone: Tone }> = {
   in_review: { label: "Đang review", tone: "violet" }, awaiting_approval: { label: "Chờ duyệt", tone: "amber" }, approved: { label: "Đã duyệt", tone: "blue" },
   scheduled: { label: "Đã lên lịch", tone: "blue" }, published: { label: "Đã xuất bản", tone: "green" }, rejected: { label: "Bị từ chối", tone: "red" },
   blocked: { label: "Bị chặn", tone: "red" }, manual_publish: { label: "Đăng thủ công", tone: "gray" },
+  video_made: { label: "Đã thành video", tone: "green" },
 };
 export const CONV_STATE: Record<string, { label: string; tone: Tone }> = {
   new: { label: "Mới", tone: "blue" }, bot_active: { label: "Bot đang trả lời", tone: "violet" }, awaiting_customer: { label: "Chờ khách", tone: "gray" },

@@ -5,13 +5,18 @@ import { z } from "zod";
 import { audit, bizSettings, byId, defaultBizId, q, update, type Row } from "@dotaka/db";
 import {
   FLOW_TOOLS, FLOW_URL, UPLOAD_DIR, cancelVideoJob, connectFlowProfile, flowBrowserStatus, flowSettings, listChromeProfiles, openFlowLogin, openInProfile,
-  profileAvatarPath, setStockKeys, setWindowState, startVideoJob, toolUrlFor, transcribe, videoAiFile, videoAiStatus, voiceOver, drivingPreset,
+  profileAvatarPath, makeVideoFromScript, planVideoFromScript, scriptsAwaitingVideo, setStockKeys, setWindowState, startVideoJob, toolUrlFor, transcribe, videoAiFile, videoAiStatus, voiceOver, drivingPreset,
 } from "@dotaka/orchestrator";
 import { AppError, uuidv7 } from "@dotaka/shared";
 import { routes } from "../http.ts";
 
 export function creativeRoutes(app: FastifyInstance) {
   const r = routes(app);
+
+  // ---- Kịch bản đã duyệt → đúng skill tạo video (script-video.ts) ----
+  r.get("/v1/video-scripts", ({ bizId }) => scriptsAwaitingVideo(bizId));
+  r.get("/v1/content/:id/video-plan", ({ bizId, params }) => planVideoFromScript(bizId, params.id));
+  r.post("/v1/content/:id/make-video", ({ bizId, params, actor }) => makeVideoFromScript(bizId, params.id, actor));
 
   // ---- Local video AI (MoneyPrinterTurbo, LivePortrait, faster-whisper, Edge TTS) ----
   r.get("/v1/video-ai/status", () => videoAiStatus());

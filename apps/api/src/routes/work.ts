@@ -177,7 +177,7 @@ export function workRoutes(app: FastifyInstance) {
     return schedulePublish(bizId, c.id, { now: true });
   });
   r.post("/v1/publish-jobs/:id/retry", ({ bizId, params, actor }) => retryPublishJob(bizId, params.id, actor));
-  r.get("/v1/publish-jobs", ({ bizId }) => q.all(`SELECT j.*, c.title, c.channel, c.body FROM publish_job j JOIN content_item c ON c.id = j.content_item_id WHERE j.biz_id = ? ORDER BY j.scheduled_at DESC LIMIT 50`, bizId));
+  r.get("/v1/publish-jobs", ({ bizId }) => q.all(`SELECT j.*, c.title, c.channel, c.body, c.kind FROM publish_job j JOIN content_item c ON c.id = j.content_item_id WHERE j.biz_id = ? ORDER BY j.scheduled_at DESC LIMIT 50`, bizId));
 
   // ---------------- Knowledge (RAG) ----------------
   r.get("/v1/knowledge/docs", ({ bizId }) => q.all<Row>("SELECT * FROM knowledge_doc WHERE biz_id = ? ORDER BY updated_at DESC", bizId).map((d) => ({ ...d, chunks: q.scalar("SELECT COUNT(*) FROM knowledge_chunk WHERE doc_id = ?", d.id) })));

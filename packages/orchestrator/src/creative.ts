@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "nod
 import { listChromeProfiles } from "./chrome-profiles.ts";
 import { browserPublish, chromeLock, publishRoute, routeReason } from "./browser-publish.ts";
 import { publishText } from "./publishing.ts";
+import { parseVideoScript } from "./script-video.ts";
 import { connectorForChannel } from "./connections.ts";
 import { NEWS_SKILL_DIR, REMOTION_NEWS, ensureVideoBins, finishMaterialJob, runAutoVideo, runPortrait, videoAiStatus } from "./video-ai.ts";
 import { ensureFlowBrowser, flowAccounts, flowMcpConfig, flowSource, openFlowLogin, syncFlowProfile } from "./flow-browser.ts";
@@ -635,10 +636,15 @@ export async function completeVideoJob(jobId: string, res: z.infer<typeof FlowRe
     size: statSync(finalPath).size, meta: { tool: input.tool, skill: `${tool.skill} v${skill?.version ?? "?"}`, scenes: res.scenes, redone: res.redoneScenes },
   });
   const scriptText = res.script.map((s) => `[Cảnh ${s.canh}] ${s.loi_thoai}`).join("\n");
+  // Video làm từ kịch bản đã duyệt (Nội dung → Tạo video): dùng Caption ĐÃ DUYỆT của kịch bản, gắn ngược về kịch bản gốc.
+  const source = job.source_content_id ? byId<Row>("content_item", job.source_content_id) : undefined;
+  const approvedCaption = source?.kind === "video_script" ? parseVideoScript(source.body)?.caption : undefined;
+  const caption = approvedCaption || res.caption;
   const ci = insert("content_item", {
-    biz_id: bizId, agent_key: "creative", kind: "video", channel: input.channels[0], title: input.title,
-    body: `${res.caption}\n\n---\nLời thoại:\n${scriptText}`, status: "in_review", asset_id: asset.id,
+    biz_id: bizId, agent_key: "creative", kind: "video", channel: input.channels[0], title: input.title, goal_id: source?.goal_id ?? null,
+    body: `${caption}\n\n---\nLời thoại:\n${scriptText}`, status: "in_review", asset_id: asset.id,
   });
+  if (source) update("content_item", source.id, { status: "video_made", asset_id: asset.id });
   update("creative_job", jobId, { status: "done", step: "Đã xong, chờ duyệt", asset_id: asset.id, content_item_id: ci.id, ended_at: nowIso() });
 
   // Review: technical checks in code + script/caption through the normal Review Agent (Jev + MKT QA)

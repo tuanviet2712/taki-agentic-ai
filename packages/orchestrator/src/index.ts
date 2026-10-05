@@ -32,6 +32,7 @@ export * from "./automations.ts";
 export * from "./zalo-followup.ts";
 export * from "./messenger-sync.ts";
 export * from "./nurture.ts";
+export * from "./script-video.ts";
 export * from "./chrome-profiles.ts";
 export * from "./flow-browser.ts";
 export * from "./assistant.ts";
