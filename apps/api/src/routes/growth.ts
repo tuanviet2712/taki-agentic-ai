@@ -12,7 +12,9 @@ export function growthRoutes(app: FastifyInstance) {
   const r = routes(app);
 
   // ---------------- Channels & posts ----------------
-  r.get("/v1/channels", ({ bizId }) => q.all("SELECT * FROM channel WHERE biz_id = ?", bizId));
+  // publishLive: whether "Đăng" on this channel reaches the real page. Publishing (publishing.ts runPublishJob) only has
+  // sandbox publishers today, so it is false for every channel until a live publisher exists.
+  r.get("/v1/channels", ({ bizId }) => q.all<Row>("SELECT * FROM channel WHERE biz_id = ?", bizId).map((c) => ({ ...c, publishLive: false })));
   r.get("/v1/posts", ({ bizId }) => q.all<Row>(`SELECT p.*, c.platform channel, c.name channel_name FROM post p JOIN channel c ON c.id = p.channel_id WHERE p.biz_id = ? ORDER BY p.published_at DESC LIMIT 60`, bizId).map((p) => ({
     ...p,
     score: q.get("SELECT score, low_data, components, reasons, computed_at FROM post_score WHERE post_id = ? ORDER BY computed_at DESC LIMIT 1", p.id),

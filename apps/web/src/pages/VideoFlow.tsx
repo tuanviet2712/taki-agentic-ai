@@ -288,7 +288,7 @@ function JobDetail({ id }: { id: string }) {
         {j.result?.redoneScenes?.length > 0 && <p className="text-xs text-muted">Cảnh làm lại: {j.result.redoneScenes.map((r: any) => `#${r.scene} (${r.reason})`).join("; ")}</p>}
         {j.approval?.status === "pending" && <Link to={`/approvals?id=${j.approval.id}`}><Button size="sm" variant="primary">Duyệt video →</Button></Link>}
         {j.drafts?.length > 0 && (
-          <div className="space-y-1">{j.drafts.map((d: any) => <p key={d.id} className="flex items-center gap-2 text-xs"><PlatformIcon p={d.platform} size={14} />{d.name}: {d.status === "draft_uploaded" ? <a href={d.draft_url} target="_blank" rel="noreferrer" className="text-blue-600">đã lên nháp</a> : d.status}{d.error ? ` · ${d.error}` : ""}</p>)}</div>
+          <div className="space-y-1">{j.drafts.map((d: any) => <p key={d.id} className="flex items-center gap-2 text-xs"><PlatformIcon p={d.platform} size={14} />{d.name}: {d.status === "draft_uploaded" ? (d.simulated ? <Badge tone="amber">nháp mô phỏng · chưa lên kênh thật</Badge> : <a href={d.draft_url} target="_blank" rel="noreferrer" className="text-blue-600">đã lên nháp</a>) : d.status}{d.error ? ` · ${d.error}` : ""}</p>)}</div>
         )}
         {(j.log ?? []).length > 0 && (
           <details open={j.status === "running"}>

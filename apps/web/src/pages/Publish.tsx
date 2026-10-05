@@ -43,7 +43,7 @@ export function Publish() {
     const seen = new Set<string>();
     for (const j of jobs ?? []) if (["scheduled", "queued", "running", "failed"].includes(j.status)) {
       seen.add(j.content_item_id);
-      out.push({ key: j.id, contentId: j.content_item_id, title: j.title, channel: j.channel, body: j.body, at: j.scheduled_at, status: JOB_STATUS[j.status] ?? { label: j.status, tone: "gray" } });
+      out.push({ key: j.id, contentId: j.content_item_id, title: j.title, channel: j.channel, body: j.body, at: j.scheduled_at, status: j.simulated && (j.status === "done" || j.status === "draft_uploaded") ? { label: "Mô phỏng · chưa đăng thật", tone: "amber" } : JOB_STATUS[j.status] ?? { label: j.status, tone: "gray" } });
     }
     for (const c of approved ?? []) if (!seen.has(c.id)) out.push({ key: c.id, contentId: c.id, title: c.title, channel: c.channel, body: c.body, at: c.scheduled_at ?? null, status: CONTENT_STATUS.approved });
     return out;
@@ -75,7 +75,7 @@ export function Publish() {
               <div className="flex items-center gap-2"><PlatformIcon p={p} size={28} /><p className="font-semibold text-ink">{chName(p)}</p></div>
               <p className="mt-2 truncate text-xs text-muted">{ch?.name ?? "Chưa kết nối"}</p>
               <div className="mt-2 flex items-center justify-between">
-                {ch ? <Badge tone={ch.enabled ? "green" : "gray"}>{ch.enabled ? "Đang kết nối" : "Tạm tắt"}</Badge> : <Badge>Chưa có</Badge>}
+                {ch ? <Badge tone={!ch.enabled ? "gray" : ch.publishLive ? "green" : "amber"}>{!ch.enabled ? "Tạm tắt" : ch.publishLive ? "Đăng thật" : "Mô phỏng"}</Badge> : <Badge>Chưa có</Badge>}
                 <span className="text-xs text-muted">{postCount(p)} bài</span>
               </div>
             </div>
@@ -118,6 +118,11 @@ export function Publish() {
         </div>
       </div>
 
+      {((posts ?? []).some((p) => p.simulated) || (jobs ?? []).some((j) => j.simulated)) && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+          <b>Đăng bài đang ở chế độ MÔ PHỎNG.</b> Các bài gắn nhãn "Mô phỏng" CHƯA lên Facebook / TikTok / Zalo / website thật — kênh chưa nối tài khoản thật nên hệ thống chỉ chạy thử luồng duyệt → đăng. Số tiếp cận và bình luận của những bài này là số giả lập.
+        </div>
+      )}
       <Card title={<span className="flex flex-wrap items-center gap-2">Bài đã đăng & điểm hiệu quả <JevBadge source={jevSource} /></span>}>
         <p className="-mt-1 mb-3 text-xs text-muted">Bình luận được Jev phân loại (ý định mua, câu hỏi, khen, tiêu cực, spam). Sandbox nén thời gian: 1 giờ trên nền tảng ≈ 1 phút thực.</p>
         {loading ? <Loading /> : !posts?.length ? <Empty>Chưa có bài nào được đăng.</Empty> : (
@@ -167,7 +172,7 @@ function PostRow({ p, m, s, isOpen, onToggle, onDetail }: { p: any; m: any; s: a
         <td className="py-3 pr-3">
           <div className="flex gap-2">
             <PlatformIcon p={p.channel} size={22} />
-            <div className="min-w-0"><p className="max-w-[280px] truncate font-medium text-ink">{p.title}</p><p className="text-xs text-muted">{KIND_LABEL[p.kind] ?? p.kind} · {p.channel_name}</p></div>
+            <div className="min-w-0"><p className="max-w-[280px] truncate font-medium text-ink">{p.title}</p><p className="text-xs text-muted">{KIND_LABEL[p.kind] ?? p.kind} · {p.channel_name}</p>{p.simulated ? <Badge tone="amber">Mô phỏng · chưa đăng thật</Badge> : null}</div>
           </div>
         </td>
         <td className="px-3 py-3 text-xs text-muted">{timeAgo(p.published_at)}{p.metrics?.mark && <p>mốc đo {p.metrics.mark}</p>}</td>

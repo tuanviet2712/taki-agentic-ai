@@ -45,17 +45,19 @@ export async function runPublishJob(publishJobId: string) {
   const channel = byId<Row>("channel", job.channel_id)!;
   const c = connector(platformForChannel(channel.platform));
   update("publish_job", job.id, { status: "posting" });
+  // Sandbox publisher = nothing reaches the real page: recorded and announced as "mô phỏng", never as "đã đăng".
+  const simulated = c.mode !== "live" ? 1 : 0;
   const res = await c.publishPost!({ channelExternalId: channel.external_id, text: ci.body, kind: ci.kind }, job.idempotency_key);
   update("publish_job", job.id, { status: "verifying" });
   const ok = await c.verifyPost!(res.externalId);
   if (!ok) throw new Error("Xác minh sau đăng thất bại");
   const kind = ci.kind === "social_video" ? "reel" : ci.kind === "seo_article" ? "article" : "image";
   const post = q.get<Row>("SELECT id FROM post WHERE channel_id = ? AND external_id = ?", channel.id, res.externalId)
-    ?? insert("post", { biz_id: job.biz_id, channel_id: channel.id, external_id: res.externalId, content_item_id: ci.id, kind, title: ci.title, body: ci.body, published_at: nowIso(), permalink: res.permalink, ad_status: "none" });
-  update("publish_job", job.id, { status: "done", post_id: post.id });
+    ?? insert("post", { biz_id: job.biz_id, channel_id: channel.id, external_id: res.externalId, content_item_id: ci.id, kind, title: ci.title, body: ci.body, published_at: nowIso(), permalink: res.permalink, ad_status: "none", simulated });
+  update("publish_job", job.id, { status: "done", post_id: post.id, simulated });
   update("content_item", ci.id, { status: "published" });
-  emit(job.biz_id, "post.published", { postId: post.id, title: ci.title });
-  audit(job.biz_id, "publishing", "post.published", { type: "post", id: post.id }, { permalink: res.permalink });
+  emit(job.biz_id, "post.published", { postId: post.id, title: ci.title, channel: channel.name, simulated: !!simulated });
+  audit(job.biz_id, "publishing", simulated ? "post.published_simulated" : "post.published", { type: "post", id: post.id }, { permalink: res.permalink, channel: channel.name, simulated: !!simulated });
   for (const [mark, h] of [["1h", 1], ["6h", 6], ["24h", 24], ["72h", 72]] as const) {
     enqueue("ads", "posts.snapshot", { postId: post.id, mark }, { bizId: job.biz_id, runAt: new Date(Date.now() + h * HOUR_MS), idempotencyKey: `snap:${post.id}:${mark}` });
   }

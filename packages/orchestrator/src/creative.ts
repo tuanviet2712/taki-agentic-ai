@@ -709,7 +709,8 @@ export async function runDraftUpload(publishJobId: string) {
   update("publish_job", pj.id, { status: "posting" });
   const caption = String(ci.body).split("\n---\n")[0];
   const r = await c.uploadDraft({ channelExternalId: channel.external_id, videoPath: asset.path, caption }, pj.idempotency_key);
-  update("publish_job", pj.id, { status: "draft_uploaded", draft_url: r.draftUrl });
+  const simulated = c.mode !== "live" ? 1 : 0;
+  update("publish_job", pj.id, { status: "draft_uploaded", draft_url: r.draftUrl, simulated });
   const left = q.scalar<number>("SELECT COUNT(*) FROM publish_job WHERE content_item_id = ? AND mode = 'draft' AND status != 'draft_uploaded'", ci.id);
   if (!left) {
     update("content_item", ci.id, { status: "draft_on_channel" });
@@ -717,7 +718,7 @@ export async function runDraftUpload(publishJobId: string) {
     emit(pj.biz_id, "creative.updated", { status: "drafted" });
   }
   audit(pj.biz_id, "publishing", "post.draft_uploaded", { type: "publish_job", id: pj.id }, { channel: channel.name, draftUrl: r.draftUrl, mode: c.mode });
-  emit(pj.biz_id, "post.published", { title: `Nháp trên ${channel.name}: ${ci.title}` });
+  emit(pj.biz_id, "post.published", { title: `Nháp trên ${channel.name}: ${ci.title}`, channel: channel.name, simulated: !!simulated });
 }
 
 // ---------------- Chrome Flow ← chosen profile ----------------

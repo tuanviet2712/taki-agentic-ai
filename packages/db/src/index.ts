@@ -50,11 +50,19 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   // CEO feedback on Ngân Nguyệt answers (👍/👎 + note) — "Phản hồi" tab
   ["assistant_message", "feedback", "TEXT"],
   ["assistant_message", "feedback_note", "TEXT"],
+  // 1 = went through a sandbox publisher: nothing reached the real page/channel (shown as "Mô phỏng" everywhere)
+  ["publish_job", "simulated", "INTEGER NOT NULL DEFAULT 0"],
+  ["post", "simulated", "INTEGER NOT NULL DEFAULT 0"],
 ];
 function migrate(d: DatabaseSync) {
   for (const [table, column, ddl] of MIGRATIONS) {
     const cols = d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (!cols.some((c) => c.name === column)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+    if (!cols.some((c) => c.name === column)) {
+      d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+      // Backfill: before this column existed every publish went through the sandbox publisher.
+      if (column === "simulated" && table === "publish_job") d.exec("UPDATE publish_job SET simulated = 1 WHERE status IN ('done','draft_uploaded') OR draft_url LIKE 'https://sandbox.taki.vn/%'");
+      if (column === "simulated" && table === "post") d.exec("UPDATE post SET simulated = 1 WHERE permalink LIKE 'https://sandbox.taki.vn/%' OR permalink IS NULL");
+    }
   }
 }
 

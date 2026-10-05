@@ -100,7 +100,7 @@ export function creativeRoutes(app: FastifyInstance) {
     return {
       ...j, asset: j.asset_id ? byId("creative_asset", j.asset_id) : null,
       content: j.content_item_id ? byId("content_item", j.content_item_id) : null,
-      drafts: j.content_item_id ? q.all("SELECT p.id, p.status, p.draft_url, p.error, c.platform, c.name FROM publish_job p JOIN channel c ON c.id = p.channel_id WHERE p.content_item_id = ? AND p.mode = 'draft'", j.content_item_id) : [],
+      drafts: j.content_item_id ? q.all("SELECT p.id, p.status, p.draft_url, p.error, p.simulated, c.platform, c.name FROM publish_job p JOIN channel c ON c.id = p.channel_id WHERE p.content_item_id = ? AND p.mode = 'draft'", j.content_item_id) : [],
       approval: q.get("SELECT id, status FROM approval WHERE subject_type = 'creative_job' AND subject_id = ? ORDER BY created_at DESC LIMIT 1", j.id),
     };
   });

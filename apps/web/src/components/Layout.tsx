@@ -78,7 +78,7 @@ export function Layout({ children }: { children: ReactNode }) {
     const map: Record<string, (p: any) => string | null> = {
       "approval.created": (p) => `Cần duyệt: ${p.title ?? "mục mới"}`,
       "conversation.handoff": (p) => `Chuyển người: ${(p.reasons ?? []).join(", ")}`,
-      "post.published": (p) => `Đã đăng: ${p.title}`,
+      "post.published": (p) => (p.simulated ? `Mô phỏng (CHƯA đăng thật lên ${p.channel ?? "kênh"}): ${p.title}` : `Đã đăng: ${p.title}`),
       "action.executed": (p) => `Đã thực hiện ${p.type} · ${p.target ?? ""}`,
       "alert.raised": (p) => p.text,
       "proposal.created": (p) => `Đề xuất học: ${p.title}`,
