@@ -44,6 +44,44 @@ export function mediaOf(ci: Row): { path: string; mime: string } | undefined {
   return { path: asset.path, mime: asset.mime ?? (asset.kind === "video" ? "video/mp4" : "image/jpeg") };
 }
 
+// ---------------- What actually goes on the channel ----------------
+/**
+ * Text that is posted, never the raw production body:
+ *  - video_script (HOOK / [0-3s] scenes / 🎙 / CTA / Caption): only the "Caption:" section, and ONLY together with the
+ *    finished video — a script alone is not a post;
+ *  - video (caption + "---\nLời thoại:"): the caption before "---";
+ *  - other kinds: the body.
+ * Then a last guard: anything that still looks like a production note / script / unverified-claim marker is refused.
+ */
+export function publishText(ci: Row, hasMedia: boolean): { text: string } | { error: string } {
+  const body = String(ci.body ?? "");
+  let text = body;
+  if (ci.kind === "video_script") {
+    if (!hasMedia) return { error: "Đây là KỊCH BẢN video — phải làm xong video rồi mới đăng (không đăng kịch bản thành bài chữ)" };
+    const m = /(?:^|\n)Caption:\s*([\s\S]+)$/.exec(body);
+    if (!m) return { error: "Kịch bản không có phần Caption — sửa nội dung rồi đăng lại" };
+    text = m[1];
+  } else if (ci.kind === "video" || ci.kind === "social_video") {
+    text = body.split("\n---\n")[0];
+  }
+  text = text.trim();
+  if (!text) return { error: "Nội dung đăng đang trống" };
+  const leak = internalLeak(text);
+  if (leak) return { error: `Nội dung còn ${leak} — Sếp sửa lại trong Nội dung rồi đăng (hệ thống không tự đăng)` };
+  return { text };
+}
+const LEAKS: [RegExp, string][] = [
+  [/ghi chú nội bộ|internal note/i, "ghi chú nội bộ"],
+  [/\[\d+\s*-\s*\d+s\]|^\s*\[Cảnh \d+\]/im, "chỉ dẫn cảnh quay của kịch bản"],
+  [/🎙|🅣|^\s*HOOK:|^\s*Lời thoại:/im, "nhãn soạn thảo kịch bản (HOOK / lời thoại)"],
+  [/⚠️|\bTODO\b|\bTBD\b/, "dấu chờ xác nhận (⚠️/TODO)"],
+  [/(cần|chờ)[^.\n]{0,60}(xác nhận|chốt)[^.\n]{0,40}(trước khi|bản final|công bố)/i, "câu nhắc nội bộ chờ xác nhận"],
+];
+export function internalLeak(text: string): string | null {
+  for (const [re, what] of LEAKS) if (re.test(text)) return what;
+  return null;
+}
+
 /**
  * Real or nothing. Route per channel (Kênh đăng): API with the Page token → Chrome Flow agent → otherwise refuse with
  * the reason. A job already "posting" after a crash is never re-posted (needs a human check: it may be live already).
@@ -71,16 +109,24 @@ export async function runPublishJob(publishJobId: string) {
     return;
   }
   const media = mediaOf(ci);
+  const pt = publishText(ci, Boolean(media));
+  if ("error" in pt) {
+    update("publish_job", job.id, { status: "failed", error: `${pt.error} — bài CHƯA được đăng` });
+    update("content_item", ci.id, { status: "manual_publish" });
+    emit(job.biz_id, "alert.raised", { level: "warning", text: `"${ci.title}": ${pt.error}` });
+    audit(job.biz_id, "publishing", "post.publish_refused", { type: "content_item", id: ci.id }, { channel: channel.name, reason: pt.error });
+    return;
+  }
   update("publish_job", job.id, { status: "posting" });
   let res: { externalId: string; permalink: string };
   try {
     if (route === "api") {
       const c = connectorForChannel(channel);
-      res = await c.publishPost!({ channelExternalId: channel.external_id, text: ci.body, kind: ci.kind, media }, job.idempotency_key);
+      res = await c.publishPost!({ channelExternalId: channel.external_id, text: pt.text, kind: ci.kind, media }, job.idempotency_key);
       update("publish_job", job.id, { status: "verifying" });
       if (c.verifyPost && !(await c.verifyPost(res.externalId))) throw new Error("Xác minh sau đăng thất bại");
     } else {
-      const r = await browserPublish(channel, { text: ci.body, mediaPath: media?.path, mode: "publish", tag: `pub-${job.id}` });
+      const r = await browserPublish(channel, { text: pt.text, mediaPath: media?.path, mode: "publish", tag: `pub-${job.id}` });
       res = { externalId: r.permalink || `chrome:${job.id}`, permalink: r.permalink };
     }
   } catch (e) {
@@ -91,7 +137,7 @@ export async function runPublishJob(publishJobId: string) {
   }
   const kind = ci.kind === "social_video" ? "reel" : ci.kind === "seo_article" ? "article" : "image";
   const post = q.get<Row>("SELECT id FROM post WHERE channel_id = ? AND external_id = ?", channel.id, res.externalId)
-    ?? insert("post", { biz_id: job.biz_id, channel_id: channel.id, external_id: res.externalId, content_item_id: ci.id, kind, title: ci.title, body: ci.body, published_at: nowIso(), permalink: res.permalink, ad_status: "none", simulated: 0 });
+    ?? insert("post", { biz_id: job.biz_id, channel_id: channel.id, external_id: res.externalId, content_item_id: ci.id, kind, title: ci.title, body: pt.text, published_at: nowIso(), permalink: res.permalink, ad_status: "none", simulated: 0 });
   update("publish_job", job.id, { status: "done", post_id: post.id, simulated: 0, error: null });
   update("content_item", ci.id, { status: "published" });
   emit(job.biz_id, "post.published", { postId: post.id, title: ci.title, channel: channel.name, simulated: false, via: route });

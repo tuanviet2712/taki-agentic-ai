@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { listChromeProfiles } from "./chrome-profiles.ts";
 import { browserPublish, chromeLock, publishRoute, routeReason } from "./browser-publish.ts";
+import { publishText } from "./publishing.ts";
 import { connectorForChannel } from "./connections.ts";
 import { NEWS_SKILL_DIR, REMOTION_NEWS, ensureVideoBins, finishMaterialJob, runAutoVideo, runPortrait, videoAiStatus } from "./video-ai.ts";
 import { ensureFlowBrowser, flowAccounts, flowMcpConfig, flowSource, openFlowLogin, syncFlowProfile } from "./flow-browser.ts";
@@ -717,8 +718,14 @@ export async function runDraftUpload(publishJobId: string) {
     emit(pj.biz_id, "creative.updated", { status: "approved" });
     return;
   }
+  const pt = publishText(ci, true);
+  if ("error" in pt) {
+    update("publish_job", pj.id, { status: "failed", error: `${pt.error} — video CHƯA lên kênh` });
+    emit(pj.biz_id, "alert.raised", { level: "warning", text: `Video "${ci.title}": ${pt.error}` });
+    return;
+  }
   update("publish_job", pj.id, { status: "posting" });
-  const caption = String(ci.body).split("\n---\n")[0];
+  const caption = pt.text;
   let draftUrl: string;
   try {
     if (route === "api") draftUrl = (await api.uploadDraft!({ channelExternalId: channel.external_id, videoPath: asset.path, caption }, pj.idempotency_key)).draftUrl;
