@@ -130,6 +130,25 @@ export const FLOW_TOOLS = {
       "Tool dùng hộp thoại alert/confirm của trình duyệt: khi có dialog, đọc nội dung bằng snapshot rồi browser_handle_dialog — accept với thông báo, dismiss với \"Xoá toàn bộ…\".",
     ],
   },
+  "review-gia-dung": {
+    skill: "flow-review-gia-dung", label: "Review đồ gia dụng", toolTitle: "TOOL REVIEW GIA DỤNG", minutes: 35,
+    hint: "Ảnh đồ gia dụng (bắt buộc, 1–3 ảnh) + công dụng, thông số, giá/ưu đãi, tên thương hiệu/shop; ảnh KOC nếu có (thiếu thì AI tự sinh)",
+    toolUrl: "https://flow.google.com/project/b8bbfcb1-c140-4d8f-955b-008d1138bb7f/tool/c126d178-1bd0-49e8-bc27-c6b53870a42b",
+    slots: [
+      { role: "Sản phẩm 1", label: "Sản phẩm (ảnh tổng thể)", hint: "Ô 1 · ảnh thật rõ dáng, màu — bắt buộc", required: true },
+      { role: "Sản phẩm 2", label: "Chi tiết / đang dùng", hint: "Ô 2 · tuỳ chọn" },
+      { role: "Sản phẩm 3", label: "Phụ kiện / màu khác", hint: "Ô 3 · tuỳ chọn" },
+      { role: "KOC mẫu", label: "KOC / người review", hint: "\"Dùng KOC Mẫu\" — thiếu thì AI tự sinh" },
+    ],
+    // Read from the Tool's own source on 2026-10-05 (shared tool c126d178 "TOOL REVIEW GIA DỤNG", account tuan0931579009).
+    uiMap: [
+      "Màn chào \"TOOL REVIEW GIA DỤNG\" → \"Bắt đầu sản xuất\". Tool KHÔNG lưu phiên. Cột trái \"AI STUDIO\" từ trên xuống: 1. Hình ảnh Sản phẩm (3 ô +) · 2. Thông tin sản phẩm (textarea \"Mô tả công dụng, tính năng, ưu đãi...\") · 3. Nhân vật KOC (2 nút \"AI Tự Sinh\" / \"Dùng KOC Mẫu\", chọn Dùng KOC Mẫu mới hiện ô \"Tải ảnh KOC mẫu\") · 4. Thiết lập AI (\"Tên Thương Hiệu\" mặc định GIA DỤNG VIỆT, dropdown \"Model Video\") · nút \"TẠO SHOWROOM GỐC\" · 5. Xuất bản: \"LÊN KỊCH BẢN KOC\", \"SẢN XUẤT TOÀN BỘ CLIPS\", \"TẢI GÓI ZIP\" (không bấm).",
+      "Bấm ô ảnh sản phẩm / ô KOC → Flow mở hộp \"Select media\" (NGOÀI iframe, trong trang chính): tải ảnh mới bằng \"Upload media\" + browser_file_upload, hoặc chọn ảnh có sẵn. Gán: \"Sản phẩm 1/2/3\" → ô 1/2/3; \"KOC mẫu\" → bấm \"Dùng KOC Mẫu\" rồi ô \"Tải ảnh KOC mẫu\"; không có ảnh KOC → để \"AI Tự Sinh\".",
+      "LUÔN sửa \"Tên Thương Hiệu\" (tên này đi vào lời thoại): thương hiệu/shop trong brief, không có thì tên sản phẩm. Ô Thông tin sản phẩm là nguồn DUY NHẤT của kịch bản và kịch bản KHÔNG sửa tay được trong Tool: viết đủ công dụng, thông số, giá/ưu đãi có trong brief, không thêm số liệu không có.",
+      "\"TẠO SHOWROOM GỐC\" (1 ảnh 9:16) — cả 5 clip dùng ảnh này làm khung đầu. Chụp màn hình soát CÓ NGƯỜI REVIEW (bị chặn chính sách thì Tool tự tạo ảnh chỉ có sản phẩm mà vẫn báo xong) và đúng sản phẩm; hộp đỏ \"Lỗi Policy\" → bỏ từ nhạy cảm khỏi ô thông tin rồi tạo lại.",
+      "\"LÊN KỊCH BẢN KOC\" → đọc 5 dòng \"Kịch bản:\" dưới 5 ô clip (sai thương hiệu/giá/số liệu → bấm lại, ≤ 2 lần). \"SẢN XUẤT TOÀN BỘ CLIPS\" chạy 5 clip cùng lúc; Tool KHÔNG tự thử lại — ô nào hết vòng tiến độ mà vẫn trống (nút \"TẠO CLIP\") là lỗi → bấm \"TẠO CLIP\" ở ô đó; clip sai → \"LÀM LẠI\". Đủ 5 clip → taki-flow-save (5 clip theo thứ tự ô 01→05).",
+    ],
+  },
   "cooking-director": {
     skill: "flow-cooking-director-video", label: "Flow Cooking Director v2", minutes: 45, hint: "3 ảnh (chân dung người dẫn, món ăn, bao bì/góc bếp) + tên, giá, điểm nổi bật", toolUrl: null, uiMap: [],
     slots: [
@@ -153,7 +172,7 @@ export const FLOW_TOOLS = {
     slots: [{ role: "Nhân vật", label: "Ảnh chân dung", hint: "Chính diện, rõ mặt, 1 người", required: true }],
   },
 } as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait"; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
-export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "cooking-director" | "cinematic" | "auto-video" | "portrait";
+export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "cooking-director" | "cinematic" | "auto-video" | "portrait";
 export const engineOf = (tool: string) => FLOW_TOOLS[tool]?.engine ?? "flow";
 
 export const CreativeInput = z.object({
