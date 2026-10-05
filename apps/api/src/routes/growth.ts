@@ -25,7 +25,7 @@ export function growthRoutes(app: FastifyInstance) {
     const p = byId<Row>("post", params.id);
     if (!p || p.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy bài", 404);
     return {
-      ...p, scores: q.all("SELECT * FROM post_score WHERE post_id = ? ORDER BY computed_at", p.id),
+      ...p, channel_name: byId<Row>("channel", p.channel_id)?.name ?? null, scores: q.all("SELECT * FROM post_score WHERE post_id = ? ORDER BY computed_at", p.id),
       snapshots: q.all("SELECT mark, metrics, captured_at FROM post_metric_snapshot WHERE post_id = ? ORDER BY captured_at", p.id),
       comments: q.all("SELECT * FROM post_comment WHERE post_id = ? ORDER BY created_at", p.id),
       ads: q.all("SELECT a.* FROM ad a JOIN post_ad_link l ON l.ad_id = a.id WHERE l.post_id = ?", p.id),

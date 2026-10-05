@@ -28,6 +28,10 @@ function normThread(t: any, pageId: string): MessengerThread | null {
 }
 
 export function metaPageConnector(pageToken: string, pageId: string): Connector {
+  /** Real public URL from Facebook (new Pages use a profile id, so "facebook.com/<page>_<post>" is not a working link). */
+  const permalinkOf = async (postId: string, fallback: string) => {
+    try { return String((await graphGet(pageToken, postId, { fields: "permalink_url" })).permalink_url ?? fallback); } catch { return fallback; }
+  };
   return {
     platform: "meta", mode: "live", limits: { requestsPerMinute: 60, concurrency: 2 },
     async health() {
@@ -44,11 +48,11 @@ export function metaPageConnector(pageToken: string, pageId: string): Connector 
       if (spec.media?.mime.startsWith("image/")) {
         const r = await graphUpload(pageToken, `${spec.channelExternalId}/photos`, { caption: spec.text, published: "true" }, spec.media);
         const id = String(r.post_id ?? r.id);
-        return { externalId: id, permalink: `https://www.facebook.com/${id}` };
+        return { externalId: id, permalink: await permalinkOf(id, `https://www.facebook.com/${id}`) };
       }
       const r = await graphPost(pageToken, `${spec.channelExternalId}/feed`, { message: spec.text });
       const id = String(r.id);
-      return { externalId: id, permalink: `https://www.facebook.com/${id}` };
+      return { externalId: id, permalink: await permalinkOf(id, `https://www.facebook.com/${id}`) };
     },
     async uploadDraft(spec) {
       // Unpublished video: the CEO publishes / schedules it from Meta Business Suite.

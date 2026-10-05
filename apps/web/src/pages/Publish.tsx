@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, Eye, Send } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, ExternalLink, Eye, Send } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { CONTENT_STATUS, KIND_LABEL, ddmm, hhmm, num, timeAgo, type Tone } from "../lib/format";
 import { Badge, Button, Card, Empty, JevBadge, Loading, Modal, PageHeader, PlatformIcon, cx, platformName, useToast } from "../components/ui";
@@ -171,7 +171,7 @@ function PostRow({ p, m, s, isOpen, onToggle, onDetail }: { p: any; m: any; s: a
         <td className="py-3 pr-3">
           <div className="flex gap-2">
             <PlatformIcon p={p.channel} size={22} />
-            <div className="min-w-0"><p className="max-w-[280px] truncate font-medium text-ink">{p.title}</p><p className="text-xs text-muted">{KIND_LABEL[p.kind] ?? p.kind} · {p.channel_name}</p>{p.simulated ? <Badge tone="amber">Mô phỏng · chưa đăng thật</Badge> : null}</div>
+            <div className="min-w-0"><p className="max-w-[280px] truncate font-medium text-ink">{p.title}</p><p className="text-xs text-muted">{KIND_LABEL[p.kind] ?? p.kind} · {p.channel_name}{p.content_item_id ? "" : " · bài có sẵn trên trang"}</p>{p.simulated ? <Badge tone="amber">Mô phỏng · chưa đăng thật</Badge> : p.permalink ? <a href={p.permalink} target="_blank" rel="noreferrer" className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">Xem bài công khai <ExternalLink className="h-3 w-3" /></a> : null}</div>
           </div>
         </td>
         <td className="px-3 py-3 text-xs text-muted">{timeAgo(p.published_at)}{p.metrics?.mark && <p>mốc đo {p.metrics.mark}</p>}</td>
@@ -283,6 +283,12 @@ function PostDetail({ id, onClose }: { id: string | null; onClose: () => void })
     <Modal open={!!id} onClose={onClose} wide title={ready ? p.title : "Chi tiết bài đăng"}>
       {!ready ? <Loading /> : (
         <div className="space-y-5">
+          {p.permalink && !p.simulated && (
+            <a href={p.permalink} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-700 hover:bg-blue-500/15 dark:text-blue-300">
+              <span className="min-w-0"><b>Bài công khai trên {p.channel_name ?? "kênh"}</b><span className="block truncate text-xs opacity-80">{p.permalink}</span></span>
+              <ExternalLink className="h-4 w-4 shrink-0" />
+            </a>
+          )}
           <div>
             <p className="mb-2 text-sm font-semibold text-ink">Chỉ số theo mốc thời gian</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
