@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { audit, bizSettings, byId, defaultBizId, q, update, type Row } from "@dotaka/db";
@@ -121,6 +122,19 @@ export function creativeRoutes(app: FastifyInstance) {
     const path = join(UPLOAD_DIR, `${uuidv7().slice(-12)}_${safe}`);
     writeFileSync(path, Buffer.from(p.data.replace(/^data:[^;]+;base64,/, ""), "base64"));
     audit(defaultBizId(), "CEO", "upload.file", undefined, { path });
+    return { path, size: statSync(path).size };
+  });
+
+  // Large raw footage (AI tự edit từ video gốc): raw binary body streamed straight to disk — no base64, up to 4 GB.
+  app.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
+  app.put("/v1/uploads/stream", { bodyLimit: 4 * 1024 * 1024 * 1024 }, async (req) => {
+    const name = String((req.query as Row).name ?? "");
+    const safe = basename(name).replace(/[^\w.\-]+/g, "_").slice(-80);
+    if (!/\.(mp4|mov|m4v|webm|mkv|avi|mp3|m4a|wav)$/i.test(safe)) throw new AppError("BAD_TYPE", "Chỉ nhận video (mp4/mov/m4v/webm/mkv/avi) hoặc âm thanh (mp3/m4a/wav)");
+    mkdirSync(UPLOAD_DIR, { recursive: true });
+    const path = join(UPLOAD_DIR, `${uuidv7().slice(-12)}_${safe}`);
+    await pipeline(req.body as NodeJS.ReadableStream, createWriteStream(path));
+    audit(defaultBizId(), "CEO", "upload.file", undefined, { path, size: statSync(path).size });
     return { path, size: statSync(path).size };
   });
 

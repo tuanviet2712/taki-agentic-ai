@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Clapperboard, CookingPot, Newspaper, UserRound, Wand2, ExternalLink, Film, Globe, ImagePlus, Loader2, Mic, PersonStanding, Play, Shirt, Sparkles, Square, Store, Trash2, UtensilsCrossed } from "lucide-react";
-import { api, useApi } from "../lib/api";
+import { Clapperboard, CookingPot, Newspaper, Scissors, UserRound, Wand2, ExternalLink, Film, Globe, ImagePlus, Loader2, Mic, PersonStanding, Play, Shirt, Sparkles, Square, Store, Trash2, UtensilsCrossed } from "lucide-react";
+import { api, apiUrl, useApi } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, cx, inputCls, useToast } from "../components/ui";
 
-const TOOL_ICON: Record<string, any> = { "review-do-an-vat": UtensilsCrossed, "review-thoi-trang": Shirt, "nguoi-que-so-sanh": PersonStanding, "nhan-hieu": Mic, "koc-thoi-trang-nu": Sparkles, "review-gia-dung": CookingPot, "review-nha-hang": Store, "cooking-director": Clapperboard, cinematic: Film, "auto-video": Wand2, "news-video": Newspaper, portrait: UserRound };
+const TOOL_ICON: Record<string, any> = { "review-do-an-vat": UtensilsCrossed, "review-thoi-trang": Shirt, "nguoi-que-so-sanh": PersonStanding, "nhan-hieu": Mic, "koc-thoi-trang-nu": Sparkles, "review-gia-dung": CookingPot, "review-nha-hang": Store, "cooking-director": Clapperboard, cinematic: Film, "auto-video": Wand2, "news-video": Newspaper, "edit-source": Scissors, portrait: UserRound };
 const STATUS: Record<string, [string, any]> = {
   queued: ["Chờ trình duyệt", "gray"], running: ["Đang sản xuất", "blue"], done: ["Xong, chờ duyệt", "green"],
   approved: ["Đã duyệt", "blue"], drafted: ["Đã lên nháp kênh", "green"],
@@ -36,6 +36,25 @@ export function VideoFlow() {
   const ownBrand = dnaInfo.data?.data?.company?.brand || dnaInfo.data?.data?.company?.name || "Thương hiệu của Sếp";
   const setV = (p: any) => setForm((f: any) => ({ ...f, video: { ...f.video, ...p } }));
   const [confirm, setConfirm] = useState(false);
+  const [upPct, setUpPct] = useState<number | null>(null);
+  /** Video gốc (có thể vài GB): gửi thẳng dạng luồng, có % tiến độ — không qua base64. */
+  const uploadSources = async (files: FileList | null) => {
+    for (const f of Array.from(files ?? [])) {
+      if (!/\.(mp4|mov|m4v|webm|mkv|avi|mp3|m4a|wav)$/i.test(f.name)) { toast(`${f.name}: chỉ nhận video/âm thanh`, "err"); continue; }
+      try {
+        const r = await new Promise<any>((res, rej) => {
+          const x = new XMLHttpRequest();
+          x.open("PUT", apiUrl(`/v1/uploads/stream?name=${encodeURIComponent(f.name)}`));
+          x.setRequestHeader("content-type", "application/octet-stream");
+          x.upload.onprogress = (e) => e.lengthComputable && setUpPct(Math.round((e.loaded / e.total) * 100));
+          x.onload = () => { try { const j = JSON.parse(x.responseText); x.status < 300 ? res(j) : rej(new Error(j.message ?? `Lỗi ${x.status}`)); } catch { rej(new Error(`Lỗi ${x.status}`)); } };
+          x.onerror = () => rej(new Error("Mất kết nối khi tải lên"));
+          x.send(f);
+        });
+        setForm((x: any) => ({ ...x, video: { ...x.video, materials: [...x.video.materials, { path: r.path, name: `${f.name} · ${(f.size / 1048576).toFixed(0)} MB` }] } }));
+      } catch (e: any) { toast(`${f.name}: ${e.message}`, "err"); } finally { setUpPct(null); }
+    }
+  };
   const [allJobs, setAllJobs] = useState(false); // list shows the 3 latest runs unless expanded
   const [busy, setBusy] = useState(false);
   const set = (p: any) => setForm((f: any) => ({ ...f, ...p }));
@@ -88,6 +107,7 @@ export function VideoFlow() {
       const { images, video, ...rest } = form;
       const v = engine === "moneyprinter"
         ? { source: video.source, flowJobId: video.source === "flow" ? video.flowJobId || undefined : undefined, materials: video.source === "local" ? video.materials.map((m: any) => m.path) : undefined, scriptReady: video.scriptReady || undefined, terms: video.terms || undefined, voiceName: video.voiceName, voiceRate: Number(video.voiceRate), bgm: video.bgm, aspect: video.aspect, clipDuration: Number(video.clipDuration) }
+        : engine === "edit" ? { materials: video.materials.map((m: any) => m.path), aspect: video.aspect === "9:16" ? "9:16" : "16:9" }
         : engine === "liveportrait" ? { driving: video.drivingPath ? undefined : video.driving, drivingPath: video.drivingPath || undefined, voiceText: video.voiceText || undefined, voiceName: video.voiceName, seconds: Number(video.seconds) } : undefined;
       const brief = form.brief.trim().length >= 5 ? form.brief : `${form.title} — ${tool?.label ?? ""}`;
       const slotRoles = new Set((tool?.slots ?? []).map((x: any) => x.role));
@@ -101,19 +121,19 @@ export function VideoFlow() {
   };
 
   const tool = tools.data?.find((t) => t.key === form.tool);
-  const engine: "flow" | "moneyprinter" | "liveportrait" | "news" = tool?.engine ?? "flow";
+  const engine: "flow" | "moneyprinter" | "liveportrait" | "news" | "edit" = tool?.engine ?? "flow";
   const flowDone = (jobs.data ?? []).filter((j: any) => !["auto-video", "portrait", "news-video"].includes(j.tool) && ["done", "approved", "drafted"].includes(j.status));
   const hasBrowser = !!settings.data?.chromeProfileDir;
   const fbAccount = fb.data?.accounts?.includes(settings.data?.chromeProfileEmail) ? settings.data.chromeProfileEmail : fb.data?.accounts?.[0];
   const showFlow = async (state: "normal" | "parked") => { try { await api.post("creative/flow-browser/window", { state }); } catch (e: any) { toast(e.message, "err"); } };
   const login = async () => { try { await api.post("creative/flow-browser/login"); toast("Đã mở Chrome Flow ở trang đăng nhập Google — Sếp đăng nhập 1 lần", "info"); fb.reload(); } catch (e: any) { toast(e.message, "err"); } };
   const cliOk = sys?.llm?.provider === "claude_cli";
-  const ready = engine === "flow" ? hasBrowser && cliOk : engine === "moneyprinter" ? cliOk && !!vai.data?.moneyprinter?.installed : engine === "news" ? cliOk && !!vai.data?.remotion?.installed : !!vai.data?.liveportrait?.installed;
+  const ready = engine === "flow" ? hasBrowser && cliOk : engine === "moneyprinter" ? cliOk && !!vai.data?.moneyprinter?.installed : engine === "news" ? cliOk && !!vai.data?.remotion?.installed : engine === "edit" ? cliOk : !!vai.data?.liveportrait?.installed;
   const current = selected ?? jobs.data?.[0]?.id ?? null;
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Sản xuất video" subtitle="Google Flow (AI tạo cảnh, chạy trong Tool của skill) · Video tự động từ cảnh có sẵn + giọng đọc Việt · Ảnh chân dung cử động — xong thì Review, gửi duyệt và đăng nháp lên kênh." />
+      <PageHeader title="Sản xuất video" subtitle="Google Flow (AI tạo cảnh, chạy trong Tool của skill) · AI tự edit từ video gốc Sếp tải lên · Video tự động từ cảnh có sẵn + giọng đọc Việt · Ảnh chân dung cử động — xong thì Review, gửi duyệt và đăng nháp lên kênh." />
 
       <div className={cx("flex flex-wrap items-center gap-3 rounded-2xl border p-4 text-sm", ready ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/10")}>
         <Globe className="h-5 w-5" />
@@ -147,7 +167,7 @@ export function VideoFlow() {
                 <p>Cần: {tool.hint}</p>
                 {engine === "flow"
                   ? <p>Tool Flow: {tool.toolUrl ? <a href={tool.toolUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600">{tool.label}<ExternalLink className="h-3 w-3" /></a> : <span>agent tự tìm "{tool.label}" trong mục Tools của Flow</span>}</p>
-                  : <p>{engine === "moneyprinter" ? "MoneyPrinterTurbo (MIT) + Claude CLI viết lời + Edge TTS giọng Việt" : engine === "news" ? "Skill news-to-video: Claude CLI + Edge TTS + whisper + Remotion (phụ đề karaoke, đồ hoạ động)" : "LivePortrait (MIT, dò mặt MediaPipe — dùng thương mại được)"} · chạy trên máy Sếp{vai.data && !(engine === "moneyprinter" ? vai.data.moneyprinter.installed : engine === "news" ? vai.data.remotion?.installed : vai.data.liveportrait.installed) ? " · CHƯA CÀI — chạy pnpm video-ai:install" : ""}</p>}
+                  : <p>{engine === "edit" ? "Claude CLI + whisper (nghe lời) + ffmpeg (cắt ghép) + phụ đề tiếng Việt" : engine === "moneyprinter" ? "MoneyPrinterTurbo (MIT) + Claude CLI viết lời + Edge TTS giọng Việt" : engine === "news" ? "Skill news-to-video: Claude CLI + Edge TTS + whisper + Remotion (phụ đề karaoke, đồ hoạ động)" : "LivePortrait (MIT, dò mặt MediaPipe — dùng thương mại được)"} · chạy trên máy Sếp{vai.data && engine !== "edit" && !(engine === "moneyprinter" ? vai.data.moneyprinter.installed : engine === "news" ? vai.data.remotion?.installed : vai.data.liveportrait.installed) ? " · CHƯA CÀI — chạy pnpm video-ai:install" : ""}</p>}
               </div>
             )}
             <div className="grid gap-3 sm:grid-cols-2">
@@ -156,11 +176,23 @@ export function VideoFlow() {
                 <select className={inputCls} value={form.brand} onChange={(e) => set({ brand: e.target.value })}><option value="other">Kênh khác / khách hàng</option><option value="taki">{ownBrand} (áp DNA)</option></select>
               </Field>
               <Field label="Sản phẩm"><input className={inputCls} value={form.product} onChange={(e) => set({ product: e.target.value })} /></Field>
-              {engine !== "liveportrait" && <Field label="Thời lượng (giây)" hint={engine === "flow" ? `${Math.max(1, Math.ceil((Number(form.durationSec) || 8) / 8))} cảnh × 8 giây` : `~${Math.round((Number(form.durationSec) || 30) * 3)} từ lời đọc`}><input type="number" className={inputCls} value={form.durationSec} onChange={(e) => set({ durationSec: e.target.value })} /></Field>}
+              {engine !== "liveportrait" && <Field label="Thời lượng (giây)" hint={engine === "flow" ? `${Math.max(1, Math.ceil((Number(form.durationSec) || 8) / 8))} cảnh × 8 giây` : engine === "edit" ? "Độ dài video sau khi cắt" : `~${Math.round((Number(form.durationSec) || 30) * 3)} từ lời đọc`}><input type="number" className={inputCls} value={form.durationSec} onChange={(e) => set({ durationSec: e.target.value })} /></Field>}
               {engine === "flow" && <Field label="Model Veo (nếu Tool cho chọn)" hint="Lite rẻ nhất · Quality đẹp nhất, tốn credit hơn">
                 <select className={inputCls} value={form.veoModel} onChange={(e) => set({ veoModel: e.target.value })}>{["Veo 3.1 - Lite", "Veo 3.1 - Fast", "Veo 3.1 - Quality"].map((m) => <option key={m} value={m}>{m}</option>)}</select>
               </Field>}
             </div>
+            {engine === "edit" && (
+              <div className="space-y-3 rounded-xl border border-line p-3">
+                <p className="text-xs font-medium text-ink">Video gốc của Sếp <span className="font-normal text-muted">(quay điện thoại, livestream, bài giảng, podcast… — tải nhiều file được, tối đa 4 GB/file)</span></p>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {form.video.materials.map((m: any, i: number) => <span key={m.path} className="flex items-center gap-1 rounded-lg border border-line px-2 py-1">{m.name}<button onClick={() => setV({ materials: form.video.materials.filter((_: any, j: number) => j !== i) })}><Trash2 className="h-3 w-3 text-muted" /></button></span>)}
+                  <label className={cx("flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-line px-3 py-1 text-muted hover:bg-soft", upPct !== null && "pointer-events-none opacity-60")}>{upPct !== null ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Đang tải {upPct}%</> : <><Film className="h-3.5 w-3.5" />Tải video gốc</>}<input type="file" accept="video/*,audio/*" multiple className="hidden" onChange={(e) => void uploadSources(e.target.files)} /></label>
+                </div>
+                <Field label="Khung hình" hint={form.video.aspect === "9:16" ? "Video ngang sẽ được cắt giữa khung theo người nói" : "Giữ toàn bộ khung gốc, thêm viền trên/dưới"}>
+                  <select className={inputCls} value={form.video.aspect === "9:16" ? "9:16" : "16:9"} onChange={(e) => setV({ aspect: e.target.value })}><option value="9:16">Dọc 9:16 (TikTok/Reels/Shorts)</option><option value="16:9">Giữ khung gốc</option></select>
+                </Field>
+              </div>
+            )}
             {engine === "moneyprinter" && (
               <div className="space-y-3 rounded-xl border border-line p-3">
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -217,7 +249,7 @@ export function VideoFlow() {
                 {form.video.voiceText && <select className={inputCls} value={form.video.voiceName} onChange={(e) => setV({ voiceName: e.target.value })}>{(vai.data?.tts?.voices ?? []).map((v: any) => <option key={v.id} value={v.id}>{v.label}</option>)}</select>}
               </div>
             )}
-            <Field label={engine === "news" ? "Link bài báo + ghi chú" : "Thông tin sản phẩm / chủ đề / kịch bản"} hint={engine === "news" && form.brief && !/https?:\/\//.test(form.brief) ? "Cần có link bài báo (http…)" : undefined}><textarea rows={6} className={inputCls} value={form.brief} onChange={(e) => set({ brief: e.target.value })} placeholder={engine === "news" ? "https://vnexpress.net/... \nGhi chú (tuỳ chọn): giọng nữ, nhấn mạnh số liệu..." : "Giá, vị, điểm nổi bật, ưu đãi, link affiliate… hoặc chủ đề phim + thông điệp"} /></Field>
+            <Field label={engine === "news" ? "Link bài báo + ghi chú" : engine === "edit" ? "Yêu cầu edit" : "Thông tin sản phẩm / chủ đề / kịch bản"} hint={engine === "news" && form.brief && !/https?:\/\//.test(form.brief) ? "Cần có link bài báo (http…)" : undefined}><textarea rows={6} className={inputCls} value={form.brief} onChange={(e) => set({ brief: e.target.value })} placeholder={engine === "news" ? "https://vnexpress.net/... \nGhi chú (tuỳ chọn): giọng nữ, nhấn mạnh số liệu..." : engine === "edit" ? "Vd: Cắt 1 video 45 giây từ buổi livestream, lấy đoạn nói về 3 sai lầm khi dùng AI, mở đầu bằng câu gây tò mò nhất, bỏ đoạn đọc bình luận…" : "Giá, vị, điểm nổi bật, ưu đãi, link affiliate… hoặc chủ đề phim + thông điệp"} /></Field>
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="Giọng"><input className={inputCls} value={form.voice} onChange={(e) => set({ voice: e.target.value })} placeholder="Nữ, miền Bắc, xưng chị" /></Field>
               <Field label="Tiêu đề hook"><input className={inputCls} value={form.hookTitle} onChange={(e) => set({ hookTitle: e.target.value })} /></Field>
@@ -233,7 +265,7 @@ export function VideoFlow() {
                 <button key={c} onClick={() => set({ channels: form.channels.includes(c) ? form.channels.filter((x: string) => x !== c) : [...form.channels, c] })} className={cx("flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs", form.channels.includes(c) ? "border-blue-500 bg-blue-500/10" : "border-line")}><PlatformIcon p={c} size={14} />{c}</button>
               ))}</div>
             </div>
-            <div className="flex justify-end"><Button variant="primary" icon={Play} disabled={!ready || !form.title || (engine !== "liveportrait" && form.brief.length < 5) || (engine === "news" && !/https?:\/\/\S+/.test(form.brief)) || !form.channels.length || (tool?.slots ?? []).some((sl: any) => sl.required && !form.images.some((i: any) => i.role === sl.role)) || (engine === "moneyprinter" && form.video.source === "flow" && !form.video.flowJobId) || (engine === "moneyprinter" && form.video.source === "local" && !form.video.materials.length)} onClick={() => setConfirm(true)}>Bắt đầu sản xuất</Button></div>
+            <div className="flex justify-end"><Button variant="primary" icon={Play} disabled={!ready || !form.title || (engine !== "liveportrait" && form.brief.length < 5) || (engine === "news" && !/https?:\/\/\S+/.test(form.brief)) || !form.channels.length || (tool?.slots ?? []).some((sl: any) => sl.required && !form.images.some((i: any) => i.role === sl.role)) || (engine === "moneyprinter" && form.video.source === "flow" && !form.video.flowJobId) || (engine === "moneyprinter" && form.video.source === "local" && !form.video.materials.length) || (engine === "edit" && (!form.video.materials.length || upPct !== null))} onClick={() => setConfirm(true)}>Bắt đầu sản xuất</Button></div>
           </div>
         </Card>
 
@@ -267,7 +299,8 @@ export function VideoFlow() {
           {engine !== "flow" ? (
             <ul className="list-disc space-y-1 pl-5 text-muted">
               <li>Chạy trên máy Sếp, <b>không tốn tín dụng Flow</b>, không cần bấm gì (khoảng {tool?.minutes} phút{engine === "liveportrait" ? `; ${form.video.seconds} giây clip` : ""}). Có thông báo khi xong.</li>
-              {engine === "news" ? <li>Claude CLI đọc bài, viết lời đọc (không bịa số liệu, ghi nguồn báo + ảnh), tạo giọng Việt, phụ đề karaoke, đồ hoạ Remotion, chuẩn âm thanh -14 LUFS → Review → hộp Duyệt → đăng bản nháp lên {form.channels.join(", ")} sau khi duyệt.</li>
+              {engine === "edit" ? <li>Claude CLI nghe toàn bộ {form.video.materials.length} video gốc (whisper), chọn đoạn hay theo yêu cầu, giữ nguyên lời người nói, cắt ghép {form.video.aspect === "9:16" ? "dọc 9:16" : "giữ khung gốc"} + phụ đề, hook, CTA → Review → hộp Duyệt → đăng bản nháp lên {form.channels.join(", ")} sau khi duyệt. Video gốc không bị sửa.</li>
+                : engine === "news" ? <li>Claude CLI đọc bài, viết lời đọc (không bịa số liệu, ghi nguồn báo + ảnh), tạo giọng Việt, phụ đề karaoke, đồ hoạ Remotion, chuẩn âm thanh -14 LUFS → Review → hộp Duyệt → đăng bản nháp lên {form.channels.join(", ")} sau khi duyệt.</li>
                 : engine === "moneyprinter" ? <li>Claude CLI viết lời đọc{form.video.scriptReady ? " (giữ nguyên lời Sếp)" : ""}, MoneyPrinterTurbo ghép cảnh + giọng Việt + phụ đề → Review → hộp Duyệt → đăng bản nháp lên {form.channels.join(", ")} sau khi duyệt.</li>
                 : <li>Clip cử động vào thư viện video (dùng làm đoạn mở đầu / chèn vào video khác), không tự đăng.</li>}
             </ul>

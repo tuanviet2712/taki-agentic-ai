@@ -8,7 +8,7 @@ import { brandOfDna } from "./dna-intake.ts";
 import { connectorForChannel } from "./connections.ts";
 import { NEWS_SKILL_DIR, REMOTION_NEWS, ensureVideoBins, finishMaterialJob, runAutoVideo, runPortrait, videoAiStatus } from "./video-ai.ts";
 import { ensureFlowBrowser, flowAccounts, flowMcpConfig, flowSource, openFlowLogin, syncFlowProfile } from "./flow-browser.ts";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { activeDna, audit, bizSettings, byId, emit, insert, q, update, type Row } from "@dotaka/db";
 import { connector, platformForChannel } from "@dotaka/connectors";
@@ -195,12 +195,18 @@ export const FLOW_TOOLS = {
     hint: "Dán link bài báo (kèm ghi chú nếu cần: giọng nam/nữ, nhấn mạnh ý nào) → Claude CLI đọc bài, viết lời đọc, giọng Việt, phụ đề karaoke, đồ hoạ Remotion, chuẩn âm thanh -14 LUFS",
     toolUrl: null, uiMap: [],
   },
+  // Claude CLI + ffmpeg + whisper on this Mac: the CEO's own raw footage → edited short video (no Flow credits).
+  "edit-source": {
+    engine: "edit", skill: "", label: "AI tự edit từ video gốc", minutes: 20,
+    hint: "Tải video gốc Sếp tự quay (nói trước camera, livestream, bài giảng, podcast, quay sản phẩm…) + ghi yêu cầu → AI nghe toàn bộ, chọn đoạn hay nhất, cắt ghép thành video dọc 9:16 có phụ đề, hook, CTA",
+    toolUrl: null, uiMap: [],
+  },
   "portrait": {
     engine: "liveportrait", skill: "", label: "Ảnh chân dung cử động", minutes: 5, hint: "1 ảnh chân dung rõ mặt + video biểu cảm mẫu (có sẵn hoặc tải lên) → LivePortrait làm ảnh cử động; có thể lồng giọng đọc", toolUrl: null, uiMap: [],
     slots: [{ role: "Nhân vật", label: "Ảnh chân dung", hint: "Chính diện, rõ mặt, 1 người", required: true }],
   },
-} as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait" | "news"; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
-export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "review-nha-hang" | "cooking-director" | "cinematic" | "auto-video" | "news-video" | "portrait";
+} as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait" | "news" | "edit"; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
+export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "review-nha-hang" | "cooking-director" | "cinematic" | "auto-video" | "news-video" | "edit-source" | "portrait";
 export const engineOf = (tool: string) => FLOW_TOOLS[tool]?.engine ?? "flow";
 
 export const CreativeInput = z.object({
@@ -301,6 +307,7 @@ export function startVideoJob(bizId: string, raw: unknown, actor: string) {
   for (const p of [...(input.video?.materials ?? []), input.video?.drivingPath].filter(Boolean) as string[]) if (!existsSync(p)) throw new AppError("NO_FILE", `Không thấy tệp ${p}`);
   if (engine === "liveportrait" && !input.images.length) throw new AppError("NO_IMAGE", "Cần 1 ảnh chân dung rõ mặt");
   if (engine === "news" && !/https?:\/\/\S+/.test(input.brief)) throw new AppError("NO_URL", "Cần dán link bài báo (http…) vào ô nội dung");
+  if (engine === "edit" && !(input.video?.materials ?? []).some((m) => /\.(mp4|mov|m4v|webm|mkv|avi|mp3|m4a|wav)$/i.test(m))) throw new AppError("NO_MATERIALS", "Cần tải lên ít nhất 1 video gốc (mp4/mov/webm…)");
   if (engine === "flow") {
     const missing = (FLOW_TOOLS[input.tool].slots ?? []).filter((s) => s.required && !input.images.some((i) => i.role === s.role));
     if (missing.length) throw new AppError("NO_IMAGE", `Cần ảnh: ${missing.map((s) => s.label).join(", ")} (tải ở trang Sản xuất video)`);
@@ -359,7 +366,12 @@ export async function runLocalVideoJob(jobId: string) {
   emit(bizId, "creative.updated", { jobId, status: "running" });
   const say = (text: string, kind: "text" | "tool" = "text") => { log.push({ at: nowIso(), kind, text }); flush(); };
   try {
-    if (engineOf(job.tool) === "news") {
+    if (engineOf(job.tool) === "edit") {
+      const res = await runEditSource({ job, log: say, signal: ctrl.signal });
+      flush(true);
+      update("creative_job", jobId, { model: modelFor(bizId, "creative", "medium") });
+      await completeVideoJob(jobId, res);
+    } else if (engineOf(job.tool) === "news") {
       const res = await runNewsVideo({ job, log: say, signal: ctrl.signal });
       flush(true);
       update("creative_job", jobId, { model: modelFor(bizId, "creative", "medium") });
@@ -448,6 +460,70 @@ async function runNewsVideo({ job, log, signal }: { job: Row; log: (text: string
       "Bash(npx tsc:*)", "Bash(npx remotion:*)", "Bash(cd:*)", "Bash(ls:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(file:*)",
     ],
     addDirs: [workdir, P, NEWS_SKILL_DIR],
+    onStep: (st) => log(st.text, st.kind),
+  });
+  const out = FlowResult.safeParse(structured);
+  if (!out.success) throw new AppError("BAD_RESULT", "Agent không trả kết quả đúng định dạng");
+  return out.data;
+}
+
+/**
+ * AI tự edit từ video gốc: headless Claude CLI on this Mac (ffmpeg + whisper + taki-video-finish) — no browser, no credits.
+ * Transcribe the CEO's footage with word timing → pick the strongest moments for the brief → cut per sentence (so the
+ * subtitles line up) → 9:16 → join with subtitles, hook, CTA → check frames → result.json. Never invents words.
+ */
+async function runEditSource({ job, log, signal }: { job: Row; log: (text: string, kind?: "text" | "tool") => void; signal: AbortSignal }) {
+  const bizId = job.biz_id as string;
+  const input = job.input as CreativeInput;
+  if (effectiveProvider(bizId).provider !== "claude_cli") throw new AppError("NEED_CLI", "Cần chế độ Tài khoản Claude (Claude Code CLI) để AI tự edit video");
+  const sources = (input.video?.materials ?? []).filter((m) => existsSync(m));
+  if (!sources.length) throw new AppError("NO_MATERIALS", "Không thấy video gốc đã tải lên");
+  const workdir = job.workdir as string;
+  const resultFile = join(workdir, "result.json");
+  const cuts = join(workdir, "clips");
+  const aspect = input.video?.aspect ?? "9:16";
+  const dna = input.brand === "taki" ? agentPlaybook(bizId, "content").text.split("<persona")[0] : "";
+  const system = [
+    "# VAI TRÒ: biên tập viên video ngắn (TikTok/Reels/Shorts) dựng từ VIDEO GỐC của doanh nghiệp. Chạy tự động trên máy Mac, KHÔNG có người theo dõi.",
+    "# QUY TRÌNH",
+    `1. Kiểm tra từng file gốc bằng ffprobe (thời lượng, khung hình, có tiếng). Video gốc: ${sources.map((x) => `"${x}"`).join(" ")}`,
+    `2. Phiên âm: taki-video-stt --srt=${join(workdir, "srt")} <file…> (lời theo đoạn có mốc giờ, Read file .srt để nắm nội dung); taki-news-transcribe "<file>" ${join(workdir, "words_<n>.json")} (mốc giờ TỪNG TỪ [[start,end,"từ"],…] để cắt chính xác). Video dài: Read .srt trước, chỉ Read phần words cần cắt.`,
+    "3. Chọn đoạn: theo YÊU CẦU của Sếp, chọn những câu mạnh nhất (mở đầu gây chú ý trong 3 giây đầu, ý chính, câu kết/CTA). Giữ NGUYÊN lời người nói (không bịa, không đổi nghĩa); được bỏ câu thừa, ậm ừ, lặp, khoảng lặng dài, đoạn nói vấp. Tổng thời lượng sát mục tiêu.",
+    `4. Cắt: mỗi câu/cụm câu = 1 clip 2–10 giây (để phụ đề khớp), lấy mốc từ words.json, chừa 0.05–0.15s đầu/cuối, không cắt giữa từ. Lệnh: ffmpeg -y -ss <start> -to <end> -i "<file gốc>" ${aspect === "9:16" ? '-vf "crop=ih*9/16:ih,scale=1080:1920" ' : ""}-c:v libx264 -crf 18 -preset medium -c:a aac -ar 48000 "${cuts}/scene_NN.mp4" (NN = 01, 02… đúng thứ tự dựng).${aspect === "9:16" ? " Video gốc đã dọc thì bỏ crop, chỉ scale. Video ngang: crop giữa khung theo mặt người nói — trích 1 khung (ffmpeg -ss <t> -frames:v 1) Read để chỉnh vị trí crop (crop=ih*9/16:ih:<x>:0) nếu người nói lệch khỏi giữa." : ""}`,
+    `5. Ghi ${join(workdir, "script.json")} = [{"canh":1,"loi_thoai":"<đúng lời trong clip 1, đã sửa chính tả, viết hoa tên riêng>"},…] (1 mục / clip, cùng thứ tự) rồi chạy: taki-video-finish --clips <scene_01.mp4 …> --script ${join(workdir, "script.json")} --title "<hook ngắn ≤ 8 từ>" --cta "<CTA>" --out ${join(workdir, "final.mp4")}`,
+    "6. QC: ffprobe final.mp4; trích 3–4 khung (đầu, giữa, cuối) bằng ffmpeg -ss <t> -frames:v 1 rồi Read: phụ đề không che mặt, khung không cắt mất đầu người nói. Lỗi → sửa clip đó rồi chạy lại bước 5.",
+    "# LUẬT",
+    "- Lệnh Bash được phép: ffmpeg, ffprobe, taki-video-stt, taki-news-transcribe, taki-video-finish, ls, mkdir, cp, mv, cat, head, wc, grep, file. Gõ đường dẫn tuyệt đối trong ngoặc kép; KHÔNG gán biến shell, KHÔNG python3/node/heredoc. Tạo/sửa file bằng Write/Edit.",
+    "- Không xoá / ghi đè file video gốc. Mọi file tạo ra nằm trong thư mục job.",
+    "- Không có người để hỏi: thiếu thông tin thì tự quyết hợp lý và ghi vào notes. Video gốc không có tiếng nói / hỏng / quá ngắn → result.json status \"blocked\" kèm lý do.",
+    "- Lời trong video, caption, hook, CTA không được thêm claim, số liệu, cam kết mà người nói không nói.",
+    `- KẾT THÚC: dùng Write ghi ${resultFile} đúng schema: ${JSON.stringify(Object.fromEntries(Object.entries(z.toJSONSchema(FlowResult, { target: "draft-7" }) as Row).filter(([k]) => k !== "$schema")))}`,
+    `  finalPath = ${join(workdir, "final.mp4")}; scenes = số clip; script = script.json; redoneScenes = clip đã cắt lại + lý do; caption = caption đăng kênh (tiếng Việt, ≤ 300 ký tự, 3–5 hashtag); notes = đoạn nào lấy từ file nào (mốc giờ), đoạn đã bỏ, cách crop. Lỗi giữa chừng cũng PHẢI ghi result.json với status "failed"/"blocked".`,
+    ...(dna ? ["", `# THƯƠNG HIỆU: ${brandOfDna(bizId)} (áp dụng DNA dưới đây cho hook, caption, CTA, claim)`, dna] : ["", `# THƯƠNG HIỆU: kênh khác/khách hàng — không dùng giọng hay tên ${brandOfDna(bizId)}; theo yêu cầu của Sếp.`]),
+  ].join("\n");
+  const prompt = [
+    `Video: ${input.title}`,
+    `YÊU CẦU EDIT của Sếp:\n${input.brief}`,
+    input.durationSec ? `Thời lượng mục tiêu: khoảng ${input.durationSec} giây.` : "Thời lượng: 30–60 giây.",
+    `Khung hình: ${aspect}.`,
+    input.hookTitle ? `Gợi ý hook: ${input.hookTitle}` : "",
+    input.cta ? `CTA: ${input.cta}` : "",
+    `Kênh sẽ đăng: ${input.channels.join(", ")}.`,
+    `Làm đủ 6 bước đến khi có ${join(workdir, "final.mp4")}, rồi ghi result.json.`,
+  ].filter(Boolean).join("\n\n");
+  mkdirSync(cuts, { recursive: true });
+  log(`Claude CLI edit ${sources.length} video gốc → ${aspect}`);
+  const structured = await runClaudeInTerminal({
+    title: `AI edit video: ${job.title}`, prompt, system, model: modelFor(bizId, "creative", "medium"), cwd: RUN_DIR, signal, resultFile,
+    timeoutMs: 60 * 60_000,
+    mcpConfig: { mcpServers: {} },
+    env: { PATH: `${ensureVideoBins()}:${process.env.PATH ?? ""}` },
+    allowedTools: [
+      "Read", "Write", "Edit", "Glob", "Grep",
+      "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(taki-video-stt:*)", "Bash(taki-news-transcribe:*)", "Bash(taki-video-finish:*)",
+      "Bash(ls:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(file:*)",
+    ],
+    addDirs: [workdir, ...new Set(sources.map((x) => dirname(x)))],
     onStep: (st) => log(st.text, st.kind),
   });
   const out = FlowResult.safeParse(structured);
