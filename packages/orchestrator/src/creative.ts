@@ -149,6 +149,23 @@ export const FLOW_TOOLS = {
       "\"LÊN KỊCH BẢN KOC\" → đọc 5 dòng \"Kịch bản:\" dưới 5 ô clip (sai thương hiệu/giá/số liệu → bấm lại, ≤ 2 lần). \"SẢN XUẤT TOÀN BỘ CLIPS\" chạy 5 clip cùng lúc; Tool KHÔNG tự thử lại — ô nào hết vòng tiến độ mà vẫn trống (nút \"TẠO CLIP\") là lỗi → bấm \"TẠO CLIP\" ở ô đó; clip sai → \"LÀM LẠI\". Đủ 5 clip → taki-flow-save (5 clip theo thứ tự ô 01→05).",
     ],
   },
+  "review-nha-hang": {
+    skill: "flow-review-nha-hang-shop", label: "Review nhà hàng · quán · shop", toolTitle: "TOOL TẠO VIDEO REVIEW NHÀ HÀNG - QUÁN XÁ", minutes: 40,
+    hint: "Ảnh thật mặt tiền + không gian (bắt buộc), tên, địa chỉ, loại hình, món/dịch vụ nổi bật, giá, giờ mở cửa, ưu đãi; ảnh người review nếu có (không có thì AI tạo nhân vật ảo)",
+    toolUrl: "https://flow.google.com/project/b8bbfcb1-c140-4d8f-955b-008d1138bb7f/tool/159cfd94-4f1a-481a-bd77-9e297bd1ae24",
+    slots: [
+      { role: "Mặt tiền", label: "Mặt tiền (ngoài quán)", hint: "Ô MẶT TIỀN · cảnh 1 · ảnh thật thấy biển hiệu — bắt buộc", required: true },
+      { role: "Không gian", label: "Không gian bên trong", hint: "Ô KHÔNG GIAN · cảnh 2 trở đi · ảnh thật — bắt buộc", required: true },
+      { role: "Người review", label: "Người review (KOC)", hint: "Ô ẢNH NHÂN VẬT THAM CHIẾU — thiếu thì tạo nhân vật ảo" },
+    ],
+    // Read from the Tool's own source on 2026-10-05 (shared tool 159cfd94 "TOOL TẠO VIDEO REVIEW NHÀ HÀNG - QUÁN XÁ", account tuan0931579009).
+    uiMap: [
+      "3 cột: trái \"Thiết lập Review\" · giữa 3 tab \"Kịch bản\" / \"Ảnh (9:16)\" / \"Video (9:16)\" · phải \"Quy trình Sản xuất\" với 3 nút theo thứ tự \"Tạo kịch bản\" → \"Tạo N ảnh (…)\" → \"Tạo N clip (…)\". Tool KHÔNG lưu phiên. Dropdown là nút tự vẽ (bấm giá trị hiện tại → bấm dòng chọn).",
+      "Cột trái: \"Tên cửa hàng/quán\", \"Địa chỉ cụ thể\", \"Ý tưởng kịch bản\" (BẮT BUỘC — trống thì alert; là ô duy nhất mang nội dung vào kịch bản: viết món/dịch vụ, giá, giờ, ưu đãi có trong brief, không thêm gì), \"Tổng thời lượng\" 8s…64s (số đoạn = ÷8; theo thời lượng job, làm tròn bội 8), \"Khung hình\", \"Model Ảnh\", \"Model Video\" (Omni Flash / Veo 3.1 Lite / Fast / Quality), 3 ô ảnh, \"Loại hình kinh doanh\", \"Giọng văn / Phong cách\", thanh \"Mức độ đánh giá\" (chỉ hiển thị).",
+      "Ô ảnh mở hộp \"Select media\" của Flow (NGOÀI iframe): \"Upload media\" + browser_file_upload, hoặc chọn ảnh có sẵn. Gán: \"Mặt tiền\" → ô MẶT TIỀN (cảnh 1), \"Không gian\" → ô KHÔNG GIAN (cảnh 2+), \"Người review\" → ô ẢNH NHÂN VẬT THAM CHIẾU; không có ảnh người review → nút \"Tạo Nhân vật ảo (FREE)\". Thiếu ảnh mặt tiền/không gian THẬT → dừng, status \"blocked\" (không để AI vẽ quán không có thật).",
+      "Tab Kịch bản: thẻ \"Đoạn n (8s)\", nút bút (sửa) mở textarea; sửa mỗi đoạn thành câu nói 16–22 từ, bỏ mô tả cảnh/chú thích. KHÔNG bấm nút micro (ghi âm từ micro máy). Tab Ảnh: nhãn NGOÀI QUÁN / TRONG QUÁN, nút tạo lại từng ảnh. Tab Video: nút \"Thử lại\" khi lỗi, nút refresh để làm lại; taki-flow-save CHỈ khi đang mở tab Video (tab khác không có thẻ video). Hộp thoại alert (\"Vui lòng nhập ý tưởng…\", \"Vui lòng sản xuất ảnh mẫu trước!\") → browser_handle_dialog accept rồi bổ sung bước thiếu.",
+    ],
+  },
   "cooking-director": {
     skill: "flow-cooking-director-video", label: "Flow Cooking Director v2", minutes: 45, hint: "3 ảnh (chân dung người dẫn, món ăn, bao bì/góc bếp) + tên, giá, điểm nổi bật", toolUrl: null, uiMap: [],
     slots: [
@@ -172,7 +189,7 @@ export const FLOW_TOOLS = {
     slots: [{ role: "Nhân vật", label: "Ảnh chân dung", hint: "Chính diện, rõ mặt, 1 người", required: true }],
   },
 } as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait"; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
-export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "cooking-director" | "cinematic" | "auto-video" | "portrait";
+export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "review-nha-hang" | "cooking-director" | "cinematic" | "auto-video" | "portrait";
 export const engineOf = (tool: string) => FLOW_TOOLS[tool]?.engine ?? "flow";
 
 export const CreativeInput = z.object({
