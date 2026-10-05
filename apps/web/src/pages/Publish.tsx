@@ -37,6 +37,10 @@ export function Publish() {
   const [busy, setBusy] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  // Chỉ bài HỆ THỐNG đã đăng công khai thành công (không gồm bài có sẵn trên Fanpage / bài mô phỏng), mới nhất trước.
+  const published = (posts ?? []).filter((p) => p.content_item_id && !p.simulated && p.permalink);
+  const shown = showAll ? published : published.slice(0, 1);
 
   const queue = useMemo<QueueItem[]>(() => {
     const out: QueueItem[] = [];
@@ -122,9 +126,10 @@ export function Publish() {
           <b>Đăng bài đang ở chế độ MÔ PHỎNG.</b> Các bài gắn nhãn "Mô phỏng" CHƯA lên Facebook / TikTok / Zalo / website thật — kênh chưa nối tài khoản thật nên hệ thống chỉ chạy thử luồng duyệt → đăng. Số tiếp cận và bình luận của những bài này là số giả lập.
         </div>
       )}
-      <Card title={<span className="flex flex-wrap items-center gap-2">Bài đã đăng & điểm hiệu quả <JevBadge source={jevSource} /></span>}>
+      <Card title={<span className="flex flex-wrap items-center gap-2">{showAll ? "Bài đã đăng công khai" : "Bài đăng công khai gần nhất"} <JevBadge source={jevSource} /></span>}
+        action={published.length > 1 && <Button size="sm" variant="ghost" onClick={() => setShowAll(!showAll)}>{showAll ? "Chỉ bài gần nhất" : `Xem tất cả (${published.length})`}</Button>}>
         <p className="-mt-1 mb-3 text-xs text-muted">Bình luận được Jev phân loại (ý định mua, câu hỏi, khen, tiêu cực, spam).</p>
-        {loading ? <Loading /> : !posts?.length ? <Empty>Chưa có bài nào được đăng.</Empty> : (
+        {loading ? <Loading /> : !published.length ? <Empty>Chưa có bài nào được hệ thống đăng công khai thành công.</Empty> : (
           <div className="overflow-x-auto scroll-thin">
             <table className="w-full min-w-[760px] text-sm">
               <thead><tr className="border-b border-line text-left text-xs text-muted">
@@ -132,7 +137,7 @@ export function Publish() {
                 <th className="px-3 font-medium">Điểm</th><th className="px-3 font-medium">Bình luận (Jev)</th><th className="px-3" />
               </tr></thead>
               <tbody>
-                {posts.map((p) => {
+                {shown.map((p) => {
                   const m = p.metrics?.metrics ?? {};
                   const s = p.score;
                   const isOpen = open === p.id;
