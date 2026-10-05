@@ -106,6 +106,28 @@ export async function graphPost(token: string, path: string, params: Record<stri
   }
 }
 
+/** Multipart upload of a local file (Page photos/videos). Videos go to graph-video. NEVER retried (a retry double-posts). */
+export async function graphUpload(token: string, path: string, fields: Record<string, string>, file: { path: string; mime: string }, video = false): Promise<any> {
+  const { readFileSync } = await import("node:fs");
+  const { basename } = await import("node:path");
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.set(k, v);
+  form.set("source", new Blob([readFileSync(file.path)], { type: file.mime }), basename(file.path));
+  const base = BASE().replace("graph.facebook.com", video ? "graph-video.facebook.com" : "graph.facebook.com");
+  let res: Response;
+  try {
+    res = await fetch(`${base}/${path}`, { method: "POST", body: form, headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10 * 60_000) });
+  } catch (e) {
+    throw new ConnectorError("InvalidRequest", `Meta: tải tệp lên không nhận được phản hồi (${e instanceof Error ? e.message : e}) — kiểm tra trên Trang trước khi thử lại`);
+  }
+  const text = await res.text();
+  let json: any = {};
+  try { json = JSON.parse(text); } catch { /* non-JSON */ }
+  if (json?.error) throw graphError(json.error, res.status);
+  if (!res.ok) throw new ConnectorError(res.status >= 500 ? "Transient" : "InvalidRequest", `Meta: tải tệp lên lỗi HTTP ${res.status}`);
+  return json;
+}
+
 /** Delete — used ONLY to clean up objects this system created seconds earlier in a failed chain. */
 export async function graphDelete(token: string, path: string): Promise<void> {
   await call("DELETE", `${BASE()}/${path}`, token).catch(() => {});

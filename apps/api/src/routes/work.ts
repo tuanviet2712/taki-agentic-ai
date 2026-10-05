@@ -4,7 +4,7 @@ import { CreateGoal, DecideApproval } from "@dotaka/contracts";
 import { retrieve } from "@dotaka/chat-engine";
 import { activeDna, audit, byId, insert, q, update, type Row } from "@dotaka/db";
 import { judge, norm, passageHeuristic, passageQuestions } from "@dotaka/jev";
-import { createGoal, decideApproval, enqueue, learnDaily, retryTask, schedulePublish } from "@dotaka/orchestrator";
+import { chromeLock, createGoal, decideApproval, enqueue, learnDaily, retryPublishJob, retryTask, schedulePublish } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
 import { routes } from "../http.ts";
 
@@ -171,11 +171,12 @@ export function workRoutes(app: FastifyInstance) {
   });
   r.post("/v1/content/:id/publish-now", ({ bizId, params }) => {
     const c = byId<Row>("content_item", params.id);
-    if (!c || !["approved", "scheduled"].includes(c.status)) throw new AppError("NOT_APPROVED", "Chỉ đăng được nội dung đã duyệt");
+    if (!c || !["approved", "scheduled", "manual_publish"].includes(c.status)) throw new AppError("NOT_APPROVED", "Chỉ đăng được nội dung đã duyệt");
     const existing = q.get<Row>("SELECT * FROM publish_job WHERE content_item_id = ? AND status = 'scheduled'", c.id);
-    if (existing) { enqueue("publish", "publish.run", { publishJobId: existing.id }, { bizId, idempotencyKey: `pubnow:${existing.id}` }); return existing; }
+    if (existing) { enqueue("publish", "publish.run", { publishJobId: existing.id }, { bizId, idempotencyKey: `pubnow:${existing.id}`, lockKey: chromeLock(byId<Row>("channel", existing.channel_id)!) }); return existing; }
     return schedulePublish(bizId, c.id, { now: true });
   });
+  r.post("/v1/publish-jobs/:id/retry", ({ bizId, params, actor }) => retryPublishJob(bizId, params.id, actor));
   r.get("/v1/publish-jobs", ({ bizId }) => q.all(`SELECT j.*, c.title, c.channel, c.body FROM publish_job j JOIN content_item c ON c.id = j.content_item_id WHERE j.biz_id = ? ORDER BY j.scheduled_at DESC LIMIT 50`, bizId));
 
   // ---------------- Knowledge (RAG) ----------------

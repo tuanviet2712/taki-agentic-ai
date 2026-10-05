@@ -164,6 +164,16 @@ export async function openFlowLogin(opts: { channel?: string | null; dir?: strin
   });
 }
 
+/** Open any page in Chrome Flow, window brought on screen (e.g. Facebook / TikTok login for "Đăng qua Chrome"). */
+export async function openInFlowChrome(url: string, opts: { channel?: string | null; dir?: string | null } = {}) {
+  await ensureFlowBrowser({ ...opts, show: true });
+  await withBrowser(async (b) => {
+    const page = await b.contexts()[0].newPage();
+    await page.goto(url, { timeout: 30_000 }).catch(() => {});
+    await page.bringToFront();
+  });
+}
+
 /** Playwright MCP server config that attaches the agent to Chrome Flow (files it saves go to outputDir). */
 export function flowMcpConfig(outputDir: string) {
   const cli = join(import.meta.dirname, "..", "node_modules", "@playwright", "mcp", "cli.js");

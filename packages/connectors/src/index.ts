@@ -39,7 +39,20 @@ export interface Connector {
   updateStatus?(ad: AdRef, status: "active" | "paused", key: string): Promise<{ ok: true }>;
   updateBudget?(ad: AdRef, amount: number, key: string): Promise<{ ok: true }>;
   createAdFromPost?(spec: { postExternalId: string; name: string; dailyBudget: number; template: unknown; accountExternalId?: string; pageExternalId?: string; startPaused?: boolean; currency?: string }, key: string): Promise<{ externalId: string; campaignExternalId: string; status?: "active" | "paused"; meta?: Record<string, unknown> }>;
-  publishPost?(spec: { channelExternalId: string; text: string; kind: string }, key: string): Promise<{ externalId: string; permalink: string }>;
+  /** `media`: local file of the post (video/image from Video Flow or upload). */
+  publishPost?(spec: { channelExternalId: string; text: string; kind: string; media?: PostMedia }, key: string): Promise<{ externalId: string; permalink: string }>;
+  /** Comment on a published post as the Page. */
+  postComment?(spec: { postExternalId: string; text: string }, key: string): Promise<{ externalId: string; permalink?: string }>;
+  /** Public reply right under a customer's comment (Facebook: POST /{comment-id}/comments as the Page). */
+  replyToComment?(spec: { commentExternalId: string; text: string }, key: string): Promise<{ externalId: string }>;
+  /** Private Reply: one inbox message to the commenter (recipient {comment_id}), once per comment, within 7 days. Returns the PSID. */
+  privateReply?(spec: { commentExternalId: string; text: string }, key: string): Promise<{ recipientId: string; messageId: string }>;
+  /** New comments of a post (fallback when there is no webhook). since = ISO time. */
+  listComments?(spec: { postExternalId: string; since?: string }): Promise<FeedComment[]>;
+  /** Messenger threads of the Page, newest first (since = stop paging older than this). */
+  listConversations?(spec: { pageId: string; since?: string; limit: number }): Promise<MessengerThread[]>;
+  /** Messages of one thread, newest first. */
+  listConversationMessages?(threadId: string, spec: { pageId: string; since?: string; limit: number }): Promise<MessengerSyncMessage[]>;
   verifyPost?(externalId: string): Promise<boolean>;
   fetchPostMetrics?(post: PostRef, mark: "1h" | "6h" | "24h" | "72h"): Promise<{ reach: number; reactions: number; comments: number; shares: number; saves: number }>;
   sendMessage?(spec: { conversationExternalId: string; text: string }, key: string): Promise<{ externalId: string }>;
@@ -50,6 +63,16 @@ export interface Connector {
 
 // Own module: meta/create.ts extends it at load time, which a circular import through this file would break.
 export { ConnectorError } from "./errors.ts";
+export type PostMedia = { path: string; mime: string };
+/** One Messenger message read through Graph (mid = message id, same as the webhook's message.mid). */
+export type MessengerSyncMessage = { mid: string; text: string; fromPage: boolean; createdTime: string; hasAttachment: boolean };
+/** One Messenger thread: the customer is the participant who is not the Page (psid = page-scoped id). */
+export type MessengerThread = {
+  threadId: string; updatedTime: string; customer: { psid: string; name: string | null };
+  messages: MessengerSyncMessage[]; hasMoreMessages: boolean;
+};
+/** One comment read from the platform (webhook feed or polling). */
+export type FeedComment = { commentId: string; postId: string; parentId?: string | null; fromId?: string | null; fromName?: string | null; message: string; createdTime?: string | null };
 import { ConnectorError } from "./errors.ts";
 
 // ---------------- Sandbox implementations ----------------

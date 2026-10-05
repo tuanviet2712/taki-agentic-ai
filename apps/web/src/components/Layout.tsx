@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import {
+import { Radio,
   Activity, Bell, BookOpen, BrainCircuit, Clapperboard, Columns2, CreditCard, FileClock, FileText, Home, Library, Link2, Bot, CalendarDays, ChartLine, CheckCircle2,
   ChevronDown, LayoutTemplate, Megaphone, Menu, MessageCircle, MessagesSquare, MonitorCog, Moon, Network, Octagon, Play, Rocket, Send, Settings, SlidersHorizontal, Sparkles, Sun, Target, X,
 } from "lucide-react";
@@ -24,6 +24,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     { to: "/content", label: "Nội dung", icon: FileText },
     { to: "/video-flow", label: "Sản xuất video", icon: Clapperboard },
     { to: "/publish", label: "Đăng bài", icon: Send },
+    { to: "/channels", label: "Kênh đăng", icon: Radio },
     { to: "/chat", label: "Chat & Khách hàng", icon: MessageCircle, badge: "unread" },
     { to: "/zalo", label: "Follow-up Zalo", icon: MessagesSquare },
   ] },

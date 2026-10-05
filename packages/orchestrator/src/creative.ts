@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { listChromeProfiles } from "./chrome-profiles.ts";
+import { browserPublish, chromeLock, publishRoute, routeReason } from "./browser-publish.ts";
+import { connectorForChannel } from "./connections.ts";
 import { NEWS_SKILL_DIR, REMOTION_NEWS, ensureVideoBins, finishMaterialJob, runAutoVideo, runPortrait, videoAiStatus } from "./video-ai.ts";
 import { ensureFlowBrowser, flowAccounts, flowMcpConfig, flowSource, openFlowLogin, syncFlowProfile } from "./flow-browser.ts";
 import { basename, join, resolve } from "node:path";
@@ -688,7 +690,7 @@ export function scheduleDrafts(bizId: string, jobId: string, actor: string) {
       biz_id: bizId, content_item_id: job.content_item_id, channel_id: channel.id, scheduled_at: nowIso(), status: "scheduled",
       idempotency_key: `draft:${job.id}:${channel.id}`, mode: "draft", asset_id: job.asset_id,
     });
-    enqueue("publish", "publish.draft", { publishJobId: pj.id }, { bizId, idempotencyKey: `draftrun:${pj.id}` });
+    enqueue("publish", "publish.draft", { publishJobId: pj.id }, { bizId, idempotencyKey: `draftrun:${pj.id}`, lockKey: chromeLock(channel) });
     created.push(pj.id);
   }
   update("content_item", job.content_item_id, { status: "approved" });
@@ -704,11 +706,11 @@ export async function runDraftUpload(publishJobId: string) {
   const ci = byId<Row>("content_item", pj.content_item_id)!;
   const channel = byId<Row>("channel", pj.channel_id)!;
   if (!asset || !existsSync(asset.path)) throw new PermanentError("Không thấy file video để đăng nháp");
-  const c = connector(platformForChannel(channel.platform));
-  if (!c.uploadDraft) throw new PermanentError(`Kênh ${channel.platform} chưa hỗ trợ đăng nháp`);
-  // Real or nothing (see publishing.ts): no live draft uploader yet → refuse instead of a simulated draft.
-  if (c.mode !== "live") {
-    const error = `Chưa có bộ đăng nháp thật cho ${channel.name} (${channel.platform}) — video CHƯA lên kênh, hệ thống không chạy mô phỏng`;
+  // Real or nothing (Kênh đăng): Page API draft (unpublished video) → Chrome Flow agent "Lưu bản nháp" → refuse.
+  const route = publishRoute(channel);
+  const api = connectorForChannel(channel);
+  if (route === "none" || (route === "api" && !api.uploadDraft)) {
+    const error = `${channel.name} (${channel.platform}): ${route === "none" ? routeReason(channel) : "API kênh này chưa hỗ trợ bản nháp"} — video CHƯA lên kênh`;
     update("publish_job", pj.id, { status: "failed", error });
     q.run("UPDATE creative_job SET step = ? WHERE content_item_id = ?", `Đã duyệt — chưa lên nháp: ${error}`, ci.id);
     emit(pj.biz_id, "alert.raised", { level: "warning", text: `Video "${ci.title}": ${error}` });
@@ -717,17 +719,25 @@ export async function runDraftUpload(publishJobId: string) {
   }
   update("publish_job", pj.id, { status: "posting" });
   const caption = String(ci.body).split("\n---\n")[0];
-  const r = await c.uploadDraft({ channelExternalId: channel.external_id, videoPath: asset.path, caption }, pj.idempotency_key);
-  const simulated = c.mode !== "live" ? 1 : 0;
-  update("publish_job", pj.id, { status: "draft_uploaded", draft_url: r.draftUrl, simulated });
+  let draftUrl: string;
+  try {
+    if (route === "api") draftUrl = (await api.uploadDraft!({ channelExternalId: channel.external_id, videoPath: asset.path, caption }, pj.idempotency_key)).draftUrl;
+    else draftUrl = (await browserPublish(channel, { text: caption, mediaPath: asset.path, mode: "draft", tag: `draft-${pj.id}` })).permalink;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    update("publish_job", pj.id, { status: "failed", error });
+    emit(pj.biz_id, "alert.raised", { level: "warning", text: `Video "${ci.title}" chưa lên nháp ${channel.name}: ${error}` });
+    throw new PermanentError(error);
+  }
+  update("publish_job", pj.id, { status: "draft_uploaded", draft_url: draftUrl, simulated: 0, error: null });
   const left = q.scalar<number>("SELECT COUNT(*) FROM publish_job WHERE content_item_id = ? AND mode = 'draft' AND status != 'draft_uploaded'", ci.id);
   if (!left) {
     update("content_item", ci.id, { status: "draft_on_channel" });
     q.run("UPDATE creative_job SET status = 'drafted', step = 'Đã lên nháp kênh' WHERE content_item_id = ?", ci.id);
     emit(pj.biz_id, "creative.updated", { status: "drafted" });
   }
-  audit(pj.biz_id, "publishing", "post.draft_uploaded", { type: "publish_job", id: pj.id }, { channel: channel.name, draftUrl: r.draftUrl, mode: c.mode });
-  emit(pj.biz_id, "post.published", { title: `Nháp trên ${channel.name}: ${ci.title}`, channel: channel.name, simulated: !!simulated });
+  audit(pj.biz_id, "publishing", "post.draft_uploaded", { type: "publish_job", id: pj.id }, { channel: channel.name, draftUrl, via: route });
+  emit(pj.biz_id, "post.published", { title: `Nháp trên ${channel.name}: ${ci.title}`, channel: channel.name, simulated: false, via: route });
 }
 
 // ---------------- Chrome Flow ← chosen profile ----------------

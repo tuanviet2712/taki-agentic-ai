@@ -6,6 +6,7 @@ import { CONVERSION_EVENTS, OBJECTIVE, toObjective } from "./meta/objectives.ts"
 import { buildTargeting, estimateReach, listPixels, searchInterests, searchLocations, templateTargeting } from "./meta/targeting.ts";
 import { AdCreateError, activateBoost, cleanupPartial, createBoost, readDailyBudget, readStatus, storyIdOf, validateBoost, type BoostSpec, type CreatedAd } from "./meta/create.ts";
 import { FIT_LABEL, assessPosts, fetchPostsDetailed } from "./meta/posts.ts";
+export { metaPageConnector } from "./meta/page.ts";
 import { CONVERSION_ACTIONS, RESULT_SETTING, countConversions, mapObjective } from "./meta/conversions.ts";
 
 /**

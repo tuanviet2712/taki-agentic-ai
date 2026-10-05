@@ -4,6 +4,9 @@ import { COMMENT_LABELS, commentHeuristic, commentQuestions, judge, norm, postFi
 import { FORMULA_VERSION, scorePost } from "@dotaka/scoring";
 import { nowIso, seeded } from "@dotaka/shared";
 import { PermanentError, enqueue } from "./queue.ts";
+import { browserPublish, chromeLock, publishRoute, routeReason } from "./browser-publish.ts";
+import { connectorForChannel } from "./connections.ts";
+import { existsSync } from "node:fs";
 
 /** Sandbox time compression: 1 platform-hour = TIME_SCALE_SECONDS real seconds (default 60). */
 export const HOUR_MS = (Number(process.env.TIME_SCALE_SECONDS ?? 60) || 3600) * 1000;
@@ -29,46 +32,86 @@ export function schedulePublish(bizId: string, contentItemId: string, opts: { no
   }
   const job = insert("publish_job", { biz_id: bizId, content_item_id: ci.id, channel_id: channel.id, scheduled_at: when.toISOString(), status: "scheduled", idempotency_key: `pub:${ci.id}:${channel.id}` });
   update("content_item", ci.id, { status: "scheduled", scheduled_at: when.toISOString() });
-  enqueue("publish", "publish.run", { publishJobId: job.id }, { bizId, runAt: when, idempotencyKey: `pubrun:${job.id}` });
+  enqueue("publish", "publish.run", { publishJobId: job.id }, { bizId, runAt: when, idempotencyKey: `pubrun:${job.id}`, lockKey: chromeLock(channel) });
   audit(bizId, "publishing", "publish.scheduled", { type: "content_item", id: ci.id }, { at: when.toISOString(), channel: channel.name });
   return job;
 }
 
+/** Local media file of a content item (finished video / image), for API uploads and Chrome file pickers. */
+export function mediaOf(ci: Row): { path: string; mime: string } | undefined {
+  const asset = ci.asset_id ? byId<Row>("creative_asset", ci.asset_id) : undefined;
+  if (!asset?.path || !existsSync(asset.path)) return undefined;
+  return { path: asset.path, mime: asset.mime ?? (asset.kind === "video" ? "video/mp4" : "image/jpeg") };
+}
+
+/**
+ * Real or nothing. Route per channel (Kênh đăng): API with the Page token → Chrome Flow agent → otherwise refuse with
+ * the reason. A job already "posting" after a crash is never re-posted (needs a human check: it may be live already).
+ */
 export async function runPublishJob(publishJobId: string) {
   const job = byId<Row>("publish_job", publishJobId);
-  if (!job || job.status === "done") return;
+  if (!job || job.status === "done" || job.status === "needs_check") return;
+  if (job.status === "posting" || job.status === "verifying") {
+    update("publish_job", job.id, { status: "needs_check", error: "Lần đăng trước bị ngắt giữa chừng — kiểm tra trên kênh xem bài đã lên chưa rồi bấm Đăng lại nếu cần" });
+    return;
+  }
   if (isKilled(job.biz_id, "publish")) {
     update("publish_job", job.id, { status: "failed", error: "Kill switch đăng bài đang bật" });
     return;
   }
   const ci = byId<Row>("content_item", job.content_item_id)!;
   const channel = byId<Row>("channel", job.channel_id)!;
-  const c = connector(platformForChannel(channel.platform));
-  // Real or nothing: there is no live publisher yet, and the CEO tests the system for real — never simulate a publish.
-  if (c.mode !== "live") {
-    const error = `Chưa có bộ đăng thật cho ${channel.name} (${channel.platform}) — bài CHƯA được đăng, hệ thống không chạy mô phỏng`;
+  const route = publishRoute(channel);
+  if (route === "none") {
+    const error = `${channel.name} (${channel.platform}): ${routeReason(channel)} — bài CHƯA được đăng (mở Kênh đăng để liên kết API hoặc đăng qua Chrome)`;
     update("publish_job", job.id, { status: "failed", error });
     update("content_item", ci.id, { status: "manual_publish" });
     emit(job.biz_id, "alert.raised", { level: "warning", text: `"${ci.title}": ${error}` });
-    audit(job.biz_id, "publishing", "post.publish_refused", { type: "content_item", id: ci.id }, { channel: channel.name, reason: "no_live_publisher" });
+    audit(job.biz_id, "publishing", "post.publish_refused", { type: "content_item", id: ci.id }, { channel: channel.name, reason: routeReason(channel) });
     return;
   }
+  const media = mediaOf(ci);
   update("publish_job", job.id, { status: "posting" });
-  const simulated = 0;
-  const res = await c.publishPost!({ channelExternalId: channel.external_id, text: ci.body, kind: ci.kind }, job.idempotency_key);
-  update("publish_job", job.id, { status: "verifying" });
-  const ok = await c.verifyPost!(res.externalId);
-  if (!ok) throw new Error("Xác minh sau đăng thất bại");
+  let res: { externalId: string; permalink: string };
+  try {
+    if (route === "api") {
+      const c = connectorForChannel(channel);
+      res = await c.publishPost!({ channelExternalId: channel.external_id, text: ci.body, kind: ci.kind, media }, job.idempotency_key);
+      update("publish_job", job.id, { status: "verifying" });
+      if (c.verifyPost && !(await c.verifyPost(res.externalId))) throw new Error("Xác minh sau đăng thất bại");
+    } else {
+      const r = await browserPublish(channel, { text: ci.body, mediaPath: media?.path, mode: "publish", tag: `pub-${job.id}` });
+      res = { externalId: r.permalink || `chrome:${job.id}`, permalink: r.permalink };
+    }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    update("publish_job", job.id, { status: "failed", error });
+    emit(job.biz_id, "alert.raised", { level: "warning", text: `Đăng "${ci.title}" lên ${channel.name} lỗi: ${error}` });
+    throw new PermanentError(error); // never auto-retry a publish: it may have gone through
+  }
   const kind = ci.kind === "social_video" ? "reel" : ci.kind === "seo_article" ? "article" : "image";
   const post = q.get<Row>("SELECT id FROM post WHERE channel_id = ? AND external_id = ?", channel.id, res.externalId)
-    ?? insert("post", { biz_id: job.biz_id, channel_id: channel.id, external_id: res.externalId, content_item_id: ci.id, kind, title: ci.title, body: ci.body, published_at: nowIso(), permalink: res.permalink, ad_status: "none", simulated });
-  update("publish_job", job.id, { status: "done", post_id: post.id, simulated });
+    ?? insert("post", { biz_id: job.biz_id, channel_id: channel.id, external_id: res.externalId, content_item_id: ci.id, kind, title: ci.title, body: ci.body, published_at: nowIso(), permalink: res.permalink, ad_status: "none", simulated: 0 });
+  update("publish_job", job.id, { status: "done", post_id: post.id, simulated: 0, error: null });
   update("content_item", ci.id, { status: "published" });
-  emit(job.biz_id, "post.published", { postId: post.id, title: ci.title, channel: channel.name, simulated: !!simulated });
-  audit(job.biz_id, "publishing", simulated ? "post.published_simulated" : "post.published", { type: "post", id: post.id }, { permalink: res.permalink, channel: channel.name, simulated: !!simulated });
-  for (const [mark, h] of [["1h", 1], ["6h", 6], ["24h", 24], ["72h", 72]] as const) {
-    enqueue("ads", "posts.snapshot", { postId: post.id, mark }, { bizId: job.biz_id, runAt: new Date(Date.now() + h * HOUR_MS), idempotencyKey: `snap:${post.id}:${mark}` });
+  emit(job.biz_id, "post.published", { postId: post.id, title: ci.title, channel: channel.name, simulated: false, via: route });
+  audit(job.biz_id, "publishing", "post.published", { type: "post", id: post.id }, { permalink: res.permalink, channel: channel.name, via: route });
+  // Metrics snapshots only for API channels (Chrome-published posts have no reliable id to read insights from).
+  if (route === "api") for (const [mark, h] of [["1h", 1], ["6h", 6], ["24h", 24], ["72h", 72]] as const) {
+    enqueue("ads", "posts.snapshot", { postId: post.id, mark }, { bizId: job.biz_id, runAt: new Date(Date.now() + h * 3600_000), idempotencyKey: `snap:${post.id}:${mark}` });
   }
+}
+
+/** "Đăng lại" for a failed / needs_check job — the CEO confirmed on the channel that it is not live. */
+export function retryPublishJob(bizId: string, publishJobId: string, actor: string) {
+  const job = byId<Row>("publish_job", publishJobId);
+  if (!job || job.biz_id !== bizId) throw new PermanentError("Không thấy lệnh đăng");
+  if (!["failed", "needs_check"].includes(job.status)) throw new PermanentError("Chỉ đăng lại được lệnh lỗi / cần kiểm tra");
+  const channel = byId<Row>("channel", job.channel_id)!;
+  update("publish_job", job.id, { status: "scheduled", error: null, scheduled_at: nowIso() });
+  enqueue("publish", job.mode === "draft" ? "publish.draft" : "publish.run", { publishJobId: job.id }, { bizId, idempotencyKey: `pubretry:${job.id}:${Date.now()}`, lockKey: chromeLock(channel) });
+  audit(bizId, actor, "publish.retried", { type: "publish_job", id: job.id }, {});
+  return byId("publish_job", job.id);
 }
 
 // ---------------- Post Scanner: snapshots, comments, scoring (spec §7, §9) ----------------

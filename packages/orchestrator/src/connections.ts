@@ -1,5 +1,5 @@
 import { audit, byId, defaultBizId, emit, insert, q, tx, update, type Row } from "@dotaka/db";
-import { ConnectorError, configureTelegram, connector, live, platformDef, type AdRef, type Connector, type PlatformKey } from "@dotaka/connectors";
+import { ConnectorError, configureTelegram, connector, live, platformDef, platformForChannel, type AdRef, type Connector, type PlatformKey } from "@dotaka/connectors";
 import { AppError, decryptSecret, encryptSecret, logger, nowIso } from "@dotaka/shared";
 
 /**
@@ -191,6 +191,23 @@ export function connectorForConnection(conn: Row | undefined | null, platform: P
   liveCache.set(conn.id, { at: conn.updated_at, c });
   return c;
 }
+/**
+ * Publisher for a channel: the live Facebook Page connector when the channel came from a LIVE Meta connection and
+ * has its page token; otherwise the platform sandbox (mode "sandbox" — publishing refuses it, see publishing.ts).
+ */
+export function connectorForChannel(channel: Row): Connector {
+  const conn = channel.connection_id ? byId<Row>("connection", channel.connection_id) : undefined;
+  if (conn?.mode === "live" && conn.status !== "revoked" && channel.platform === "facebook" && channel.secret_ciphertext) {
+    try {
+      const pageToken = decryptSecret(channel.secret_ciphertext);
+      if (pageToken && pageToken !== "{}") return live.metaPageConnector(pageToken, channel.external_id);
+    } catch (e) {
+      logger.warn("page_connector.decrypt_failed", { channel: channel.id, error: String(e) });
+    }
+  }
+  return connector(platformForChannel(channel.platform));
+}
+
 export function connectorForAccount(accountId: string | null | undefined, platform: PlatformKey) {
   const acc = accountId ? byId<Row>("ad_account", accountId) : undefined;
   const conn = acc?.connection_id ? byId<Row>("connection", acc.connection_id) : undefined;

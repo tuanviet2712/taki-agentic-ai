@@ -301,7 +301,7 @@ function JobDetail({ id }: { id: string }) {
   );
 }
 
-function BrowserPicker({ open, current, onClose, onSaved }: { open: boolean; current: any; onClose: () => void; onSaved: () => void }) {
+export function BrowserPicker({ open, current, onClose, onSaved }: { open: boolean; current: any; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [data, setData] = useState<{ profiles: any[] } | null>(null);
   const [search, setSearch] = useState("");

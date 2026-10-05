@@ -28,7 +28,7 @@ export const PLATFORMS: PlatformDef[] = [
     guide: [
       "Vào business.facebook.com → Cài đặt doanh nghiệp → Người dùng hệ thống → Thêm (vai trò Quản trị viên).",
       "Gán tài sản: các Tài khoản quảng cáo + Trang (quyền toàn quyền).",
-      "Bấm 'Tạo mã' → chọn app → tick ads_management, ads_read, business_management, pages_show_list, pages_read_engagement, pages_manage_ads → hết hạn: Không bao giờ.",
+      "Bấm 'Tạo mã' → chọn app → tick ads_management, ads_read, business_management, pages_show_list, pages_read_engagement, pages_manage_ads, pages_manage_posts (đăng bài), pages_manage_engagement (trả lời bình luận), pages_messaging (Messenger) → hết hạn: Không bao giờ.",
       "Dán token vào đây. Hệ thống tự tìm tài khoản quảng cáo và Fanpage.",
     ],
   },

@@ -129,6 +129,10 @@ export interface AgentRunOptions {
   addDirs: string[];
   cwd: string;
   chrome?: boolean;
+  /** MCP servers for this run (e.g. Playwright attached to Chrome Flow); only these are loaded (--strict-mcp-config). */
+  mcpConfig?: object;
+  /** Extra environment for the agent process. */
+  env?: Record<string, string>;
   timeoutMs?: number;
   /** Called for each tool call / text step so the UI can show live progress. */
   onStep?: (step: { at: string; kind: "tool" | "text"; text: string }) => void;
@@ -165,9 +169,10 @@ export function runClaudeAgent(o: AgentRunOptions): Promise<AgentRunResult> {
       "--allowedTools", ...o.allowedTools,
       "--no-session-persistence", "--setting-sources", "",
       ...(o.chrome ? ["--chrome"] : ["--no-chrome"]),
+      ...(o.mcpConfig ? ["--mcp-config", JSON.stringify(o.mcpConfig), "--strict-mcp-config"] : []),
       ...o.addDirs.flatMap((d) => ["--add-dir", d]),
     ];
-    const child = spawn(BIN, args, { cwd: o.cwd, env: childEnv(), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(BIN, args, { cwd: o.cwd, env: { ...childEnv(), ...(o.env ?? {}) }, stdio: ["pipe", "pipe", "pipe"] });
     let buf = "";
     let err = "";
     let final: any = null;
