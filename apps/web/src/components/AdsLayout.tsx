@@ -7,6 +7,7 @@ import {
 import { useApi } from "../lib/api";
 import { num } from "../lib/format";
 import { Avatar, cx } from "./ui";
+import { AccountMenu } from "./Account";
 
 /**
  * "AI Agent Ads" workspace shell: own header, grouped top navigation, announcement banner and footer,
@@ -90,16 +91,8 @@ export function AdsLayout({ children }: { children: ReactNode }) {
             </button>
             <Moon className={cx("h-4 w-4", dark ? "text-blue-400" : "text-muted")} />
           </div>
-          <div className="relative">
-            <button onClick={() => setMenu(menu === "user" ? null : "user")} className="flex items-center gap-1"><Avatar name={sys?.operator ?? "TAKI"} size={36} /><ChevronDown className="h-4 w-4 text-muted" /></button>
-            {menu === "user" && (
-              <div className="absolute right-0 top-12 z-40 w-64 rounded-2xl border border-line bg-card p-2 shadow-xl">
-                <div className="px-3 py-2"><p className="font-semibold text-ink">{sys?.operator}</p><p className="text-xs text-muted">CEO: {sys?.ceo}</p></div>
-                <Link to="/" className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-ink hover:bg-soft"><ArrowLeft className="h-4 w-4" />Về hệ thống Agentic AI</Link>
-                <Link to="/settings" className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-ink hover:bg-soft"><Settings className="h-4 w-4" />Cài đặt chung</Link>
-              </div>
-            )}
-          </div>
+          <AccountMenu profile={sys?.profile} canLogout={false} onLogout={() => {}}
+            extra={(close) => <Link to="/" onClick={close} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-soft"><ArrowLeft className="h-4 w-4" />Về hệ thống Agentic AI</Link>} />
         </div>
         <nav className="flex gap-0 overflow-x-auto px-2 pb-2 scroll-thin md:px-6">
           {ADS_NAV.map((g, gi) => (

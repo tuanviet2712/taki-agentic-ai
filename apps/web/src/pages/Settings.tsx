@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, FileClock, Link2, MonitorCog, OctagonX, Save } from "lucide-react";
+import { AlertTriangle, FileClock, Link2, MonitorCog, OctagonX, Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../lib/api";
 import { LlmPanel } from "../components/LlmPanel";
+import { AccountForm } from "../components/Account";
 import { AGENT_LABEL, num, timeAgo, vndFull } from "../lib/format";
 import type { Tone } from "../lib/format";
 import { Avatar, Badge, Button, Card, Empty, Field, JevBadge, Loading, Modal, PageHeader, PlatformIcon, Toggle, cx, inputCls, useToast } from "../components/ui";
@@ -86,6 +87,7 @@ export function Settings() {
   const { data, reload, setData } = useApi<any>("settings", ["alert."]);
   const { data: sys } = useApi<any>("system");
   const { data: usage } = useApi<any>("usage");
+  const { data: users, reload: reloadUsers } = useApi<UserRow[]>("users");
   const [f, setF] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -178,17 +180,8 @@ export function Settings() {
       </div>
 
       <div className="grid gap-6">
-        <Card title="Người dùng & phân quyền">
-          <div className="divide-y divide-line">
-            {data.users.map((u: any) => (
-              <div key={u.id} className="flex items-center gap-3 py-2.5">
-                <Avatar name={u.name} size={34} />
-                <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-ink">{u.name}</p><p className="truncate text-xs text-muted">{u.email} · hoạt động {timeAgo(u.last_active_at)}</p></div>
-                <Badge tone={ROLE[u.role]?.tone ?? "gray"}>{ROLE[u.role]?.label ?? u.role}</Badge>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <Card title="Tài khoản của tôi"><AccountForm /></Card>
+        <UsersCard users={users ?? []} onChange={reloadUsers} />
       </div>
 
       <Card title="Chi phí AI (7 ngày)">
@@ -209,5 +202,68 @@ export function Settings() {
       </Card>
 
     </div>
+  );
+}
+
+type UserRow = { id: string; name: string; email: string; role: string; status: string; last_active_at: string | null };
+
+/** Người dùng & phân quyền của doanh nghiệp đang xem: thêm / sửa / tạm khoá / xoá. */
+function UsersCard({ users, onChange }: { users: UserRow[]; onChange: () => void }) {
+  const toast = useToast();
+  const [edit, setEdit] = useState<null | { id?: string; name: string; email: string; role: string; status: string }>(null);
+  const [del, setDel] = useState<UserRow | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!edit) return;
+    setBusy(true);
+    try {
+      const body = { name: edit.name, email: edit.email, role: edit.role, status: edit.status };
+      if (edit.id) await api.put(`users/${edit.id}`, body); else await api.post("users", body);
+      toast(edit.id ? "Đã cập nhật người dùng" : "Đã thêm người dùng");
+      setEdit(null); onChange();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  };
+  const remove = async () => {
+    if (!del) return;
+    setBusy(true);
+    try { await api.del(`users/${del.id}`); toast(`Đã xoá ${del.name}`); setDel(null); onChange(); }
+    catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  };
+  return (
+    <Card title="Người dùng & phân quyền" action={<Button size="sm" icon={Plus} onClick={() => setEdit({ name: "", email: "", role: "sales", status: "active" })}>Thêm người</Button>}>
+      <p className="mb-3 text-xs text-muted">Vai trò dùng để ghi nhận ai làm gì. Hệ thống chạy trên máy Sếp và chưa có đăng nhập theo từng người, nên chưa giới hạn quyền theo vai trò.</p>
+      {users.length === 0 ? <Empty>Chưa có người dùng — thêm người cùng vận hành để ghi nhận ai làm gì.</Empty> : (
+        <div className="divide-y divide-line">
+          {users.map((u) => (
+            <div key={u.id} className={cx("flex items-center gap-3 py-2.5", u.status !== "active" && "opacity-60")}>
+              <Avatar name={u.name} size={34} />
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-ink">{u.name}{u.status !== "active" && <span className="ml-2 text-xs text-muted">(đã khoá)</span>}</p><p className="truncate text-xs text-muted">{u.email}{u.last_active_at ? ` · hoạt động ${timeAgo(u.last_active_at)}` : ""}</p></div>
+              <Badge tone={ROLE[u.role]?.tone ?? "gray"}>{ROLE[u.role]?.label ?? u.role}</Badge>
+              <button onClick={() => setEdit({ id: u.id, name: u.name, email: u.email, role: u.role, status: u.status })} className="rounded-md p-1.5 text-muted hover:bg-soft hover:text-ink" aria-label={`Sửa ${u.name}`} title="Sửa"><Pencil className="h-4 w-4" /></button>
+              <button onClick={() => setDel(u)} className="rounded-md p-1.5 text-muted hover:bg-soft hover:text-rose-600" aria-label={`Xoá ${u.name}`} title="Xoá"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <Modal open={edit !== null} onClose={() => setEdit(null)} title={edit?.id ? "Sửa người dùng" : "Thêm người dùng"}
+        footer={<><Button onClick={() => setEdit(null)}>Huỷ</Button><Button variant="primary" loading={busy} onClick={save}>{edit?.id ? "Lưu" : "Thêm"}</Button></>}>
+        {edit && (
+          <div className="space-y-3">
+            <Field label="Họ tên"><input autoFocus className={inputCls} value={edit.name} maxLength={80} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+            <Field label="Email"><input type="email" className={inputCls} value={edit.email} maxLength={120} onChange={(e) => setEdit({ ...edit, email: e.target.value })} /></Field>
+            <Field label="Vai trò">
+              <select className={inputCls} value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>
+                {Object.entries(ROLE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </Field>
+            {edit.id && <label className="flex items-center justify-between text-sm"><span>Đang hoạt động</span><Toggle checked={edit.status === "active"} onChange={(v) => setEdit({ ...edit, status: v ? "active" : "disabled" })} /></label>}
+          </div>
+        )}
+      </Modal>
+      <Modal open={del !== null} onClose={() => setDel(null)} title="Xoá người dùng?"
+        footer={<><Button onClick={() => setDel(null)}>Huỷ</Button><Button variant="danger" loading={busy} onClick={remove}>Xoá</Button></>}>
+        <p className="text-sm text-muted">Xoá <b className="text-ink">{del?.name}</b> khỏi danh sách người dùng của doanh nghiệp này. Nhật ký cũ vẫn giữ nguyên.</p>
+      </Modal>
+    </Card>
   );
 }

@@ -6,7 +6,8 @@ import {
 } from "lucide-react";
 import { api, useApi, useEvents } from "../lib/api";
 import { timeAgo } from "../lib/format";
-import { Avatar, Button, Modal, cx, useToast } from "./ui";
+import { Button, Modal, cx, useToast } from "./ui";
+import { AccountMenu, PROFILE_EVENT } from "./Account";
 
 type NavItem = { to: string; label: string; icon: any; badge?: "unread" | "approvals"; special?: boolean; children?: { to: string; label: string; icon: any }[] };
 const NAV: { title: string; items: NavItem[] }[] = [
@@ -49,6 +50,11 @@ const NAV: { title: string; items: NavItem[] }[] = [
 
 export function Layout({ children }: { children: ReactNode }) {
   const { data: sys, reload } = useApi<any>("system", ["approval.", "conversation.", "lead.", "alert."]);
+  useEffect(() => {
+    const r = () => void reload();
+    window.addEventListener(PROFILE_EVENT, r);
+    return () => window.removeEventListener(PROFILE_EVENT, r);
+  }, [reload]);
   const [open, setOpen] = useState(false);
   const [dark, setDark] = useState(() => {
     try { return localStorage.getItem("theme") === "dark"; } catch { return false; }
@@ -168,7 +174,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2"><Avatar name={sys?.operator ?? "CEO"} size={34} /><div className="hidden text-sm leading-tight md:block"><p className="font-semibold">{sys?.operator ?? "CEO"}</p><p className="text-xs text-muted">CEO: {sys?.ceo ?? "—"}</p></div></div>
+          <AccountMenu profile={sys?.profile} canLogout={false} onLogout={() => {}} />
         </header>
         <main className="flex-1 overflow-y-auto p-4 md:p-6 scroll-thin">
           <div className="mx-auto max-w-[1440px]">{children}</div>

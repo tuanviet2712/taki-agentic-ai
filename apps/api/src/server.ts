@@ -20,6 +20,7 @@ import { connectRoutes } from "./routes/connect.ts";
 import { zaloRoutes } from "./routes/zalo.ts";
 import { orchestraRoutes } from "./routes/orchestra.ts";
 import { assistantRoutes } from "./routes/assistant.ts";
+import { accountRoutes } from "./routes/account.ts";
 import { brainRoutes } from "./routes/brain.ts";
 import { seed } from "./seed.ts";
 
@@ -49,6 +50,7 @@ async function main() {
   orchestraRoutes(app);
   assistantRoutes(app);
   brainRoutes(app);
+  accountRoutes(app);
 
   const dist = resolve(process.cwd(), "apps/web/dist");
   if (existsSync(dist)) {

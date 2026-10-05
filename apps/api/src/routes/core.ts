@@ -2,12 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { CATALOG, STAGES } from "@dotaka/agents";
 import { AgentConfigUpdate } from "@dotaka/contracts";
-import { activeDna, audit, bizSettings, bus, byId, emit, insert, q, update, type Row } from "@dotaka/db";
+import { activeDna, audit, bizSettings, bus, byId, emit, insert, ownerProfile, q, update, type Row } from "@dotaka/db";
 import { JEV_MODEL, jevEnabled } from "@dotaka/jev";
 import { DEFAULT_LLM, MODEL_CATALOG, cliInfo, effectiveProvider, llmSettings, modelFor, testModel, tokensUsedToday, type Tier } from "@dotaka/llm-gateway";
 import { latestDaily, sumMetrics, today } from "@dotaka/orchestrator";
 import { AppError, sha256 } from "@dotaka/shared";
 import { routes } from "../http.ts";
+import { publicProfile } from "./account.ts";
 
 const since = (days: number) => new Date(Date.now() - days * 86400_000).toISOString();
 const dayStr = (days: number) => today(new Date(Date.now() - days * 86400_000));
@@ -24,7 +25,8 @@ export function coreRoutes(app: FastifyInstance) {
   r.get("/v1/system", ({ bizId }) => ({
     biz: q.get("SELECT id, name, timezone, currency FROM biz WHERE id = ?", bizId),
     ceo: activeDna(bizId)?.data?.company?.ceo ?? "CEO",
-    operator: "Phòng Marketing TAKI",
+    operator: ownerProfile().name,
+    profile: publicProfile(),
     brand: activeDna(bizId)?.data?.company?.brand ?? null,
     pendingConfirmations: activeDna(bizId)?.data?.pendingConfirmations?.length ?? 0,
     jev: { enabled: jevEnabled(), model: JEV_MODEL },

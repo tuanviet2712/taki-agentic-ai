@@ -124,6 +124,29 @@ export function update(table: string, id: string, patch: Row) {
   db().prepare(`UPDATE ${table} SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...cols.map((c) => encode(row[c])), id);
 }
 
+/** Settings shared by every business (table app_setting, JSON values). */
+export function getAppSetting<T>(key: string): T | undefined {
+  const v = q.get<{ value: unknown }>("SELECT value FROM app_setting WHERE key = ?", key)?.value;
+  if (v == null) return undefined;
+  if (typeof v !== "string") return v as T;
+  try { return JSON.parse(v) as T; } catch { return undefined; }
+}
+export function setAppSetting(key: string, value: unknown) {
+  db().prepare("INSERT INTO app_setting (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+    .run(key, JSON.stringify(value), nowIso());
+}
+
+/** Account of the person operating the system (top-right menu; Ngân Nguyệt addresses them by "addressAs"). */
+export interface OwnerProfile { name: string; title: string; email: string; phone: string; addressAs: string; avatar: string | null }
+export const DEFAULT_PROFILE: OwnerProfile = { name: "", title: "Chủ doanh nghiệp", email: "", phone: "", addressAs: "Sếp", avatar: null };
+export function ownerProfile(): OwnerProfile {
+  const saved = getAppSetting<Partial<OwnerProfile>>("profile") ?? {};
+  const p: OwnerProfile = { ...DEFAULT_PROFILE, ...saved };
+  if (!p.addressAs.trim()) p.addressAs = "Sếp";
+  if (!p.name.trim()) p.name = p.addressAs;
+  return p;
+}
+
 export function byId<T = Row>(table: string, id: string): T | undefined {
   return q.get<T>(`SELECT * FROM ${table} WHERE id = ?`, id);
 }

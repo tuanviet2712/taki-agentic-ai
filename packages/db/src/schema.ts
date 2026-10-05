@@ -321,4 +321,6 @@ CREATE TABLE IF NOT EXISTS mcp_call (
   id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, key_id TEXT NOT NULL, tool TEXT NOT NULL, params TEXT NOT NULL, result TEXT,
   at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+-- Settings shared by every business (owner profile, …): JSON values.
+CREATE TABLE IF NOT EXISTS app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
 `;

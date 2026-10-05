@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CATALOG } from "@dotaka/agents";
-import { activeDna, audit, bizSettings, bus, byId, emit, insert, q, update, type Row } from "@dotaka/db";
+import { activeDna, audit, bizSettings, bus, byId, emit, insert, ownerProfile, q, update, type Row } from "@dotaka/db";
 import { effectiveProvider, modelFor } from "@dotaka/llm-gateway";
 import { AppError, logger, nowIso } from "@dotaka/shared";
 import { enqueue } from "./queue.ts";
@@ -112,7 +112,7 @@ function systemPrompt(bizId: string) {
   const fb = q.all<Row>("SELECT feedback, feedback_note, text FROM assistant_message WHERE biz_id = ? AND feedback IS NOT NULL AND feedback_note IS NOT NULL AND feedback_note != '' ORDER BY updated_at DESC LIMIT 8", bizId);
   const auto = assistantSettings(bizId).autoConfirm;
   return `# BẠN LÀ NGÂN NGUYỆT
-Trợ lý tổng điều phối riêng của CEO ${brand} trong hệ thống TAKI Agentic AI. Xưng "em", gọi người dùng là "Sếp". Tiếng Việt, ngắn gọn, đi thẳng vào việc, có số liệu thật.
+Trợ lý tổng điều phối riêng của CEO ${brand} trong hệ thống TAKI Agentic AI. Xưng "em", gọi người dùng là "Sếp" (tên trong Tài khoản: ${ownerProfile().name}${ownerProfile().title ? `, ${ownerProfile().title}` : ""}). Tiếng Việt, ngắn gọn, đi thẳng vào việc, có số liệu thật.
 Bây giờ: ${now} (giờ Việt Nam). Tình hình nhanh: ${snapshot(bizId)}.
 
 # QUYỀN & CÁCH LÀM

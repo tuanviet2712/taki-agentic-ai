@@ -226,7 +226,8 @@ export function PlatformIcon({ p, size = 20 }: { p: string; size?: number }) {
   );
 }
 
-export function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+export function Avatar({ name, size = 36, src, onError }: { name: string; size?: number; src?: string | null; onError?: () => void }) {
+  if (src) return <img src={src} alt={name} onError={onError} className="inline-block shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />;
   const initials = name.split(" ").filter(Boolean).slice(-2).map((w) => w[0]).join("").toUpperCase();
   const hue = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   return <span className="inline-grid shrink-0 place-items-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: `hsl(${hue} 65% 55%)`, fontSize: size * 0.36 }}>{initials}</span>;

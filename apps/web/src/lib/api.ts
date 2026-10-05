@@ -6,8 +6,11 @@ export class ApiError extends Error {
   }
 }
 
+/** Full API path (for <img src>, downloads…) — same base as request() below. */
+export const apiUrl = (p: string) => (p.startsWith("/") ? p : `/v1/${p}`);
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path.startsWith("/") ? path : `/v1/${path}`, {
+  const res = await fetch(apiUrl(path), {
     method,
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
