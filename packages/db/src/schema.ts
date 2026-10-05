@@ -134,6 +134,21 @@ CREATE TABLE IF NOT EXISTS post_comment (
   id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, post_id TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL,
   label TEXT, label_source TEXT, label_confidence REAL, hidden INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+-- Chăm khách từ bình luận (comment → trả lời công khai → inbox Private Reply → xin SĐT → kết bạn Zalo → follow-up).
+-- 1 dòng = 1 người bình luận dưới 1 bài. SĐT lưu MÃ HOÁ (phone_cipher) + bản che (phone_masked) để hiển thị/nhật ký.
+CREATE TABLE IF NOT EXISTS nurture_lead (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, post_id TEXT NOT NULL, comment_id TEXT NOT NULL UNIQUE, channel_id TEXT NOT NULL,
+  author_name TEXT NOT NULL, author_external_id TEXT, comment_text TEXT, label TEXT, stage TEXT NOT NULL,
+  conversation_id TEXT, psid TEXT, zalo_conversation_id TEXT, phone_cipher TEXT, phone_masked TEXT,
+  zalo_account_id TEXT, zalo_uid TEXT,
+  public_replied_at TEXT, dm_sent_at TEXT, customer_replied_at TEXT, reminder_sent_at TEXT, phone_at TEXT,
+  friend_requested_at TEXT, friend_accepted_at TEXT, followup_at TEXT, ordered_at TEXT,
+  reply_claimed_at TEXT, dm_claimed_at TEXT, friend_attempts INTEGER NOT NULL DEFAULT 0,
+  next_check_at TEXT, last_error TEXT, log TEXT NOT NULL DEFAULT '[]', meta TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS nurture_lead_stage ON nurture_lead (biz_id, stage, next_check_at);
+CREATE INDEX IF NOT EXISTS nurture_lead_conv ON nurture_lead (conversation_id);
 CREATE TABLE IF NOT EXISTS post_score (
   id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, post_id TEXT NOT NULL, formula_version INTEGER NOT NULL, score REAL NOT NULL,
   low_data INTEGER NOT NULL DEFAULT 0, components TEXT NOT NULL, reasons TEXT NOT NULL, computed_at TEXT NOT NULL,

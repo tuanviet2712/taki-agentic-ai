@@ -14,6 +14,7 @@ import { enqueue, startScheduler, startWorkers, type Handler } from "./queue.ts"
 import { runTask } from "./runtime.ts";
 import { connectionHealthAll, liveMessengerConnector, registerTelegramFromDb } from "./connections.ts";
 import { MESSENGER_HANDLERS } from "./messenger-sync.ts";
+import { NURTURE_HANDLERS } from "./nurture.ts";
 import { automationsTick, ensureAutomations } from "./automations.ts";
 import { registerZaloProxy, runZaloFollowUps, syncZalo } from "./zalo-followup.ts";
 
@@ -30,6 +31,7 @@ export * from "./connections.ts";
 export * from "./automations.ts";
 export * from "./zalo-followup.ts";
 export * from "./messenger-sync.ts";
+export * from "./nurture.ts";
 export * from "./chrome-profiles.ts";
 export * from "./flow-browser.ts";
 export * from "./assistant.ts";
@@ -67,6 +69,7 @@ export const HANDLERS: Record<string, Handler> = {
   "chat.followup": async (p) => { await runFollowUps(p.bizId); await runZaloFollowUps(p.bizId); },
   "zalo.sync": async (p) => void (await syncZalo(p.bizId)),
   ...MESSENGER_HANDLERS,
+  ...NURTURE_HANDLERS,
   "learn.daily": async (p) => void learnDaily(p.bizId),
   "ads.weekly_report": async (p) => { if (q.scalar<number>("SELECT COUNT(*) FROM ad WHERE biz_id = ?", p.bizId)) startAdsReport(p.bizId); },
   "report.daily": async (p) => dailyReport(p.bizId),
@@ -108,6 +111,11 @@ export function startOrchestrator() {
       insert("schedule", { biz_id: b.id, name: "automations.tick", queue: "ads", every_minutes: 5, enabled: 1, label: "Chạy cấu hình tự động (5 phút)", last_run_at: nowIso() });
     if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'zalo.sync'", b.id))
       insert("schedule", { biz_id: b.id, name: "zalo.sync", queue: "chat", every_minutes: 2, enabled: 1, label: "Đồng bộ hội thoại Zalo từ ZL-CRM (2 phút)", last_run_at: nowIso() });
+    // Chăm khách từ bình luận: chỉ làm việc khi Sếp bật (nurture.enabled) — tắt thì 2 lịch này không gọi Facebook.
+    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'nurture.poll'", b.id))
+      insert("schedule", { biz_id: b.id, name: "nurture.poll", queue: "chat", every_minutes: 5, enabled: 1, label: "Chăm khách: quét bình luận mới trên Fanpage (5 phút)", last_run_at: nowIso() });
+    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'nurture.tick'", b.id))
+      insert("schedule", { biz_id: b.id, name: "nurture.tick", queue: "chat", every_minutes: 5, enabled: 1, label: "Chăm khách: trả lời, nhắc SĐT, kết bạn Zalo (5 phút)", last_run_at: nowIso() });
     if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'messenger.sync'", b.id))
       insert("schedule", { biz_id: b.id, name: "messenger.sync", queue: "chat", every_minutes: 3, enabled: 1, label: "Đồng bộ hội thoại Messenger của Fanpage thật (3 phút)", last_run_at: nowIso() });
     q.run("UPDATE schedule SET every_minutes = 5, label = 'Chạy rule/cấu hình quảng cáo (5 phút)' WHERE biz_id = ? AND name = 'rules.evaluate' AND every_minutes > 5", b.id);

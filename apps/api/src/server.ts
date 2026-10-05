@@ -23,6 +23,7 @@ import { assistantRoutes } from "./routes/assistant.ts";
 import { accountRoutes } from "./routes/account.ts";
 import { channelRoutes } from "./routes/channels.ts";
 import { messengerRoutes } from "./routes/messenger.ts";
+import { nurtureRoutes } from "./routes/nurture.ts";
 import { brainRoutes } from "./routes/brain.ts";
 import { seed } from "./seed.ts";
 
@@ -55,6 +56,7 @@ async function main() {
   accountRoutes(app);
   channelRoutes(app);
   messengerRoutes(app);
+  nurtureRoutes(app);
 
   const dist = resolve(process.cwd(), "apps/web/dist");
   if (existsSync(dist)) {

@@ -55,6 +55,15 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ["post", "simulated", "INTEGER NOT NULL DEFAULT 0"],
   // Last customer message time (Messenger 24h reply window, set by Messenger sync)
   ["conversation", "last_customer_at", "TEXT"],
+  // Chăm khách từ bình luận: bình luận thật trên Facebook (id, người viết, giờ viết) + giữ chỗ gửi (chống nhắn trùng)
+  ["post_comment", "external_id", "TEXT"],
+  ["post_comment", "author_external_id", "TEXT"],
+  ["post_comment", "parent_external_id", "TEXT"],
+  ["post_comment", "source", "TEXT"],
+  ["post_comment", "replied_at", "TEXT"],
+  ["post_comment", "dm_sent_at", "TEXT"],
+  ["post_comment", "external_created_at", "TEXT"],
+  ["post", "meta", "TEXT NOT NULL DEFAULT '{}'"],
 ];
 function migrate(d: DatabaseSync) {
   for (const [table, column, ddl] of MIGRATIONS) {
@@ -66,6 +75,7 @@ function migrate(d: DatabaseSync) {
       if (column === "simulated" && table === "post") d.exec("UPDATE post SET simulated = 1 WHERE permalink LIKE 'https://sandbox.taki.vn/%' OR permalink IS NULL");
     }
   }
+  d.exec("CREATE UNIQUE INDEX IF NOT EXISTS post_comment_external ON post_comment (post_id, external_id) WHERE external_id IS NOT NULL");
 }
 
 export function db(): DatabaseSync {

@@ -20,6 +20,8 @@ export class ZaloOpError extends Error {
     message: string,
     public readonly code: 'NOT_CONNECTED' | 'RATE_LIMITED' | 'SESSION_EXPIRED' | 'API_ERROR' | 'INVALID_PARAMS',
     public readonly statusCode: number = 400,
+    /** Mã lỗi gốc của Zalo (ZaloApiError.code, vd 215/216/225) khi có — để bên gọi phân loại lỗi chắc chắn vs tạm thời. */
+    public readonly zaloCode: number | null = null,
   ) {
     super(message);
     this.name = 'ZaloOpError';
@@ -222,6 +224,7 @@ async function exec<T>(opts: ExecOptions, fn: (api: any) => Promise<T>): Promise
     `${operation} failed: ${msg}${zaloCode != null ? ` [zalo:${zaloCode}]` : ''}`,
     'API_ERROR',
     500,
+    typeof zaloCode === 'number' ? zaloCode : zaloCode != null && /^-?\d+$/.test(String(zaloCode)) ? Number(zaloCode) : null,
   );
 }
 

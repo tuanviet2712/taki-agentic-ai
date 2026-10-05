@@ -8,6 +8,7 @@ import { webhookSettingsRoutes } from './webhook-settings-routes.js';
 import { groupPostLogRoutes } from './group-post-log-routes.js';
 import { chaoHangPublicRoutes } from './chao-hang-public-routes.js';
 import { chaoHangRoutes } from './chao-hang-routes.js';
+import { publicFriendRoutes } from './public-friend-routes.js';
 
 export const apiPlugin: ZaloCrmPlugin = {
   name: 'api',
@@ -19,5 +20,6 @@ export const apiPlugin: ZaloCrmPlugin = {
     await app.register(groupPostLogRoutes);
     await app.register(chaoHangPublicRoutes);
     await app.register(chaoHangRoutes);
+    await app.register(publicFriendRoutes); // kết bạn Zalo theo SĐT cho hệ thống ngoài (Agentic AI — Chăm khách từ bình luận)
   },
 };

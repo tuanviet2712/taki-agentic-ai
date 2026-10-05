@@ -16,16 +16,29 @@ import { CONVERSION_ACTIONS, RESULT_SETTING, countConversions, mapObjective } fr
  */
 const TIMEOUT = 25_000;
 
-async function http(url: string, init: RequestInit & { label: string }): Promise<any> {
+/** Lỗi mạng xảy ra TRƯỚC khi gửi được byte nào (chưa mở được kết nối) — mã lỗi của Node/undici. */
+const NOT_SENT_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+function failedBeforeSend(e: unknown): boolean {
+  const code = (e as { cause?: { code?: string }; code?: string })?.cause?.code ?? (e as { code?: string })?.code;
+  return Boolean(code && NOT_SENT_CODES.has(code));
+}
+
+async function http(url: string, init: RequestInit & { label: string; classify?: (text: string, status: number) => ConnectorError | undefined }): Promise<any> {
   let res: Response;
   try {
     res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT) });
   } catch (e) {
-    throw new ConnectorError("Transient", `${init.label}: không kết nối được (${e instanceof Error ? e.message : e})`);
+    // requestNotSent = chắc chắn yêu cầu CHƯA tới máy chủ (từ chối kết nối / không phân giải tên miền) → gửi lại an toàn.
+    // Hết thời gian chờ / mất kết nối giữa chừng: có thể máy chủ đã nhận → bên gọi phải coi là "không rõ kết quả".
+    throw Object.assign(new ConnectorError("Transient", `${init.label}: không kết nối được (${e instanceof Error ? e.message : e})`), { requestNotSent: failedBeforeSend(e) });
   }
   const text = await res.text();
   let body: any = text;
   try { body = JSON.parse(text); } catch { /* non-JSON */ }
+  if (!res.ok && init.classify) {
+    const known = init.classify(text, res.status);
+    if (known) throw known;
+  }
   if (res.status === 429) throw new ConnectorError("RateLimited", `${init.label}: bị giới hạn tần suất, thử lại sau`);
   if (res.status >= 500) throw new ConnectorError("Transient", `${init.label}: lỗi máy chủ ${res.status}`);
   if (!res.ok) {
@@ -361,10 +374,34 @@ export async function nhanhOrders(c: NhanhCreds, limit = 30) {
 // ZL-CRM (github.com/nguyentatkiem/ZL-CRM) — Public API, header X-Api-Key
 // =====================================================================================
 export type ZlCreds = { base_url: string; api_key: string };
-async function zl(c: ZlCreds, path: string, init: RequestInit = {}) {
+async function zl(c: ZlCreds, path: string, init: RequestInit & { classify?: (text: string, status: number) => ConnectorError | undefined } = {}) {
   const base = (c.base_url ?? "").trim().replace(/\/+$/, "").replace(/\/api$/, "");
   if (!/^https?:\/\//.test(base)) throw new ConnectorError("InvalidRequest", "ZL-CRM: địa chỉ phải bắt đầu bằng http:// hoặc https://");
   return http(`${base}${path}`, { ...init, label: "ZL-CRM", headers: { "x-api-key": c.api_key, ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
+}
+/**
+ * Lỗi kết bạn/tra SĐT từ ZL-CRM, GIỮ NGUYÊN mã server trả (`code`) để bộ chăm khách quyết định:
+ *  - 503 SESSION_EXPIRED / ZALO_UNAVAILABLE → kind "Transient" (retryable) — KHÔNG được coi là "không có Zalo";
+ *  - 503 RATE_LIMITED / 429 → kind "RateLimited" (retryable);
+ *  - 4xx FRIEND_REQUEST_BLOCKED / ZALO_USER_NOT_FOUND / INVALID_ZALO_USER… → vĩnh viễn (retryable=false).
+ */
+export type ZlcrmError = ConnectorError & { code: string; status: number; retryable: boolean };
+/** (Không dùng subclass: live.ts nạp trước khi index.ts định nghĩa xong ConnectorError — vòng import.) */
+function zlErr(kind: ConnectorError["kind"], message: string, code: string, status: number): ZlcrmError {
+  return Object.assign(new ConnectorError(kind, message), { code, status, retryable: kind === "Transient" || kind === "RateLimited" });
+}
+export const isZlcrmError = (e: unknown): e is ZlcrmError => e instanceof ConnectorError && typeof (e as Partial<ZlcrmError>).code === "string";
+function zlFriendError(text: string, status: number): ConnectorError | undefined {
+  let body: any;
+  try { body = JSON.parse(text); } catch { body = undefined; }
+  const code = String(body?.code ?? (typeof body?.error === "string" && /^[A-Z_]+$/.test(body.error) ? body.error : "") ?? "") || (status >= 500 ? "ZALO_UNAVAILABLE" : `HTTP_${status}`);
+  const msg = `ZL-CRM: ${typeof body?.message === "string" ? body.message : `lỗi ${status}`}`;
+  if (status === 429 || code === "RATE_LIMITED") return zlErr("RateLimited", msg, code, status);
+  if (status >= 500) return zlErr("Transient", msg, code, status);
+  if (status === 401) return zlErr("AuthError", msg, code, status); // sai API key ZL-CRM → cần cắm lại khóa
+  if (status === 404) return zlErr("NotFound", msg, code, status);
+  if (status === 403) return zlErr("PolicyRejected", msg, code, status); // Zalo từ chối (vd khách chặn) — không phải lỗi khóa
+  return zlErr("InvalidRequest", msg, code, status);
 }
 export type ZlAccount = { id: string; displayName: string; status: string };
 export type ZlConversation = {
@@ -388,3 +425,25 @@ export async function zlcrmMessages(c: ZlCreds, conversationId: string, limit = 
 export async function zlcrmSend(c: ZlCreds, spec: { zaloAccountId: string; threadId: string; threadType?: "user" | "group"; content: string }) {
   await zl(c, "/api/public/messages/send", { method: "POST", body: JSON.stringify({ zaloAccountId: spec.zaloAccountId, threadId: spec.threadId, threadType: spec.threadType ?? "user", content: spec.content }) });
 }
+
+/** Tìm người dùng Zalo theo SĐT, nhìn từ 1 nick (UID khác nhau theo từng nick). Endpoint public thêm cho TAKI.
+ *  found=false CHỈ khi Zalo nói rõ SĐT không có tài khoản; phiên hết hạn/mất mạng → ném ZlcrmError retryable. */
+export async function zlcrmFindUserByPhone(c: ZlCreds, spec: { zaloAccountId: string; phone: string }): Promise<{ found: boolean; uid: string | null; zaloName: string | null; reason?: string }> {
+  const r = await zl(c, "/api/public/friends/lookup-by-phone", { method: "POST", body: JSON.stringify({ zaloAccountId: spec.zaloAccountId, phone: spec.phone }), classify: zlFriendError });
+  return { found: Boolean(r?.found && r?.uid), uid: r?.uid ? String(r.uid) : null, zaloName: r?.zaloName ?? null, reason: r?.reason };
+}
+/** Gửi lời mời kết bạn kèm lời chào từ 1 nick (theo userId hoặc SĐT — server tự tìm UID).
+ *  sentMessage = đúng lời chào ZL-CRM đã gửi (server cắt ~150 ký tự); null nếu không gửi/không rõ. */
+export async function zlcrmSendFriendRequest(c: ZlCreds, spec: { zaloAccountId: string; userId?: string; phone?: string; message: string }): Promise<{ sent: boolean; uid: string | null; alreadyFriend?: boolean; reason?: string; sentMessage: string | null }> {
+  const r = await zl(c, "/api/public/friends/request", { method: "POST", body: JSON.stringify(spec), classify: zlFriendError });
+  const sent = Boolean(r?.sent);
+  const sentMessage = typeof r?.sentMessage === "string" ? r.sentMessage : r?.sentMessage === null || !sent ? null : spec.message.trim().slice(0, 150); // server cũ chưa trả sentMessage → tự cắt như server
+  return { sent, uid: r?.uid ? String(r.uid) : null, alreadyFriend: Boolean(r?.alreadyFriend), reason: r?.reason, sentMessage };
+}
+/** Trạng thái kết bạn giữa nick và khách: accepted | pending_sent | none | rejected… */
+export async function zlcrmFriendStatus(c: ZlCreds, spec: { zaloAccountId: string; userId: string }): Promise<{ isFriend: boolean; status: string }> {
+  const qs = new URLSearchParams({ zaloAccountId: spec.zaloAccountId, userId: spec.userId });
+  const r = await zl(c, `/api/public/friends/status?${qs}`, { classify: zlFriendError });
+  return { isFriend: Boolean(r?.isFriend), status: String(r?.status ?? "none") };
+}
+

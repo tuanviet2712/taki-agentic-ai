@@ -30,6 +30,7 @@ import { ZaloFollowUp } from "./pages/ZaloFollowUp";
 import { Orchestra } from "./pages/Orchestra";
 import { Logs } from "./pages/Logs";
 import { Channels } from "./pages/Channels";
+import { Nurture } from "./pages/Nurture";
 
 /** Redirect keeping the query string (e.g. ?type=…, ?p=…). */
 function Keep({ to }: { to: string }) {
@@ -59,6 +60,7 @@ export function App() {
           <Route path="/content" element={<Content />} />
           <Route path="/publish" element={<Publish />} />
           <Route path="/channels" element={<Channels />} />
+          <Route path="/nurture" element={<Nurture />} />
           {/* AI Agent Ads workspace (own layout, see AdsLayout) */}
           <Route path="/ads" element={<Navigate to="/ads/flows?type=metrics_pull" replace />} />
           <Route path="/ads/setup" element={<AdsSetup />} />

@@ -53,6 +53,8 @@ export interface Connector {
   listConversations?(spec: { pageId: string; since?: string; limit: number }): Promise<MessengerThread[]>;
   /** Messages of one thread, newest first. */
   listConversationMessages?(threadId: string, spec: { pageId: string; since?: string; limit: number }): Promise<MessengerSyncMessage[]>;
+  /** Recent posts on the Page (also ones posted outside this system) — to scan their comments. */
+  listPagePosts?(spec: { pageId: string; since?: string; limit: number }): Promise<{ id: string; message: string | null; permalink: string | null; createdTime: string | null }[]>;
   verifyPost?(externalId: string): Promise<boolean>;
   fetchPostMetrics?(post: PostRef, mark: "1h" | "6h" | "24h" | "72h"): Promise<{ reach: number; reactions: number; comments: number; shares: number; saves: number }>;
   sendMessage?(spec: { conversationExternalId: string; text: string }, key: string): Promise<{ externalId: string }>;

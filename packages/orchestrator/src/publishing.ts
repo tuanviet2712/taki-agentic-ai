@@ -2,7 +2,7 @@ import { audit, bizSettings, byId, emit, insert, isKilled, q, update, type Row }
 import { connector, platformForChannel } from "@dotaka/connectors";
 import { COMMENT_LABELS, commentHeuristic, commentQuestions, judge, norm, postFitHeuristic, postFitQuestions, recordDecision } from "@dotaka/jev";
 import { FORMULA_VERSION, scorePost } from "@dotaka/scoring";
-import { nowIso, seeded } from "@dotaka/shared";
+import { maskPhonesInText, nowIso, seeded } from "@dotaka/shared";
 import { PermanentError, enqueue } from "./queue.ts";
 import { browserPublish, chromeLock, publishRoute, routeReason } from "./browser-publish.ts";
 import { connectorForChannel } from "./connections.ts";
@@ -143,7 +143,7 @@ export async function classifyComments(post: Row) {
   if (!pending.length) return;
   const j = await judge({
     bizId: post.biz_id, purpose: "comments.classify", subject: { type: "post", id: post.id },
-    state: { post: { title: post.title }, comments: pending.map((c) => ({ text: c.text })) },
+    state: { post: { title: post.title }, comments: pending.map((c) => ({ text: maskPhonesInText(c.text) })) },
     questions: commentQuestions(pending.length), heuristic: commentHeuristic,
   });
   const labels: Record<string, string> = {};

@@ -36,6 +36,26 @@ function senderFor(conv: Row, now = Date.now()): Connector {
   return c;
 }
 
+/**
+ * Chăm khách từ bình luận (orchestrator nurture.ts tiêm vào, tránh vòng phụ thuộc): mỗi tin khách vào được hỏi trước.
+ * Trả `reply` = câu bot gửi thay cho lượt trả lời thường (vd xác nhận đã nhận SĐT); null = xử lý như mọi tin.
+ */
+export type NurtureHook = (bizId: string, conv: Row, text: string) => Promise<{ reply?: string; meta?: Row } | null>;
+let nurtureHook: NurtureHook = async () => null;
+export function configureNurtureHook(fn: NurtureHook) { nurtureHook = fn; }
+
+/** Bot gửi 1 tin trên hội thoại (đúng kênh; Messenger qua Fanpage thật, trong 24 giờ) và ghi lại. */
+export async function sendBotMessage(bizId: string, conversationId: string, text: string, meta: Row, key: string) {
+  const conv = byId<Row>("conversation", conversationId);
+  if (!conv || conv.biz_id !== bizId) throw new Error("Không tìm thấy hội thoại");
+  const body = applyBannedChars(text, activeDna(bizId));
+  const r = await senderFor(conv).sendMessage!({ conversationExternalId: conv.external_id, text: body }, key);
+  insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "out", sender: "bot", body: { text: body }, external_id: r.externalId, meta, sent_at: nowIso() });
+  update("conversation", conv.id, { last_message_at: nowIso(), last_preview: body.slice(0, 140) });
+  emit(bizId, "conversation.message_out", { conversationId: conv.id });
+  return { externalId: r.externalId, text: body };
+}
+
 // ---------------- Conversation state machine (spec §11) ----------------
 const ALLOWED: Record<ConversationState, ConversationState[]> = {
   new: ["bot_active", "human_active", "handoff_pending", "opted_out"],
@@ -134,6 +154,21 @@ export async function handleIncoming(bizId: string, msg: IncomingMessage): Promi
     insert("attribution_link", { biz_id: bizId, conversation_id: conv.id, source: msg.referral.utm.split("_")[0], method: "utm", confidence: 0.8 });
   }
   emit(bizId, "conversation.message_in", { conversationId: conv.id });
+
+  // 2b) chăm khách từ bình luận: đang xin SĐT/Zalo → bắt SĐT, xác nhận (thay lượt trả lời thường).
+  // Messenger: chạy cả khi bot trả lời chung đang tắt (noReply) — Chăm khách là công tắc riêng Sếp đã bật.
+  if (!msg.noReply || conv.channel === "messenger") {
+    const nr = await nurtureHook(bizId, conv, msg.text).catch(() => null);
+    // Đang chờ người (handoff_pending): vẫn xác nhận đã nhận SĐT nhưng giữ nguyên trạng thái chờ nhân viên.
+    const botMayTalk = !["human_active", "opted_out"].includes(conv.state) && !isKilled(bizId, "chat");
+    if (nr?.reply && botMayTalk) {
+      const waitingHuman = conv.state === "handoff_pending";
+      if (!waitingHuman && conv.state !== "bot_active") transition(conv, "bot_active", "chat_engine");
+      await sendBotMessage(bizId, conv.id, nr.reply, { kind: "nurture_confirm", ...(nr.meta ?? {}) }, `nurture:${conv.id}:${msg.messageId ?? Date.now()}`);
+      if (!waitingHuman) transition(conv, "awaiting_customer", "chat_engine");
+      return { conversationId: conv.id, replied: true, state: conv.state };
+    }
+  }
 
   // 3) channel/state gates: bot must not talk over a human, or after opt-out
   if (conv.state === "opted_out" && msg.noReply) return { conversationId: conv.id, replied: false, state: conv.state };

@@ -101,6 +101,14 @@ export function metaPageConnector(pageToken: string, pageId: string): Connector 
         message: String(c.message ?? ""), createdTime: c.created_time ? new Date(c.created_time).toISOString() : null,
       }));
     },
+    async listPagePosts(spec) {
+      const sinceUnix = spec.since ? Math.floor(new Date(spec.since).getTime() / 1000) : undefined;
+      const r = await graphGet(pageToken, `${spec.pageId}/posts`, { fields: "id,message,permalink_url,created_time", limit: Math.min(100, spec.limit), ...(sinceUnix ? { since: String(sinceUnix) } : {}) });
+      return ((r.data ?? []) as any[]).map((p) => ({
+        id: String(p.id), message: p.message ? String(p.message) : null, permalink: p.permalink_url ? String(p.permalink_url) : null,
+        createdTime: p.created_time ? new Date(p.created_time).toISOString() : null,
+      }));
+    },
     async listConversations(spec) {
       const out: MessengerThread[] = [];
       let r = await graphGet(pageToken, `${spec.pageId}/conversations`, { platform: "messenger", fields: `id,updated_time,participants,messages.limit(25){${MSG_FIELDS}}`, limit: Math.min(25, spec.limit) });
