@@ -86,17 +86,16 @@ export function Publish() {
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
         <MonthCalendar cal={cal} jobs={jobs ?? []} />
         <div className="space-y-6">
-          <Card title={<span className="flex items-center gap-2"><Clock className="h-4 w-4 text-blue-600" />Khung giờ đăng hiệu quả</span>}>
+          <Card title={<span className="flex items-center gap-2"><Clock className="h-4 w-4 text-blue-600" />Khung giờ đăng gợi ý</span>}>
             <div className="space-y-3">
               {WINDOWS.map((w) => (
                 <div key={w.t} className="space-y-1">
-                  <div className="flex justify-between text-sm"><span className="font-semibold text-ink">{w.t}</span><span className="text-xs text-muted">mức tương tác {w.w}%</span></div>
-                  <div className="h-2 overflow-hidden rounded-full bg-soft"><div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-600" style={{ width: `${w.w}%` }} /></div>
+                  <div className="flex justify-between text-sm"><span className="font-semibold text-ink">{w.t}</span></div>
                   <p className="text-xs text-muted">{w.note}</p>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-muted">Gợi ý học từ dữ liệu tương tác các bài đã đăng của thương hiệu — sẽ tự cập nhật khi có thêm dữ liệu.</p>
+            <p className="mt-3 text-xs text-muted">Gợi ý chung theo thói quen đọc của chủ doanh nghiệp — CHƯA phải số đo từ kênh của Sếp (chưa có kênh thật nào được nối).</p>
           </Card>
 
           <Card title="Bài chờ / sắp đăng" action={<Badge tone="blue">{queue.length}</Badge>}>
@@ -124,7 +123,7 @@ export function Publish() {
         </div>
       )}
       <Card title={<span className="flex flex-wrap items-center gap-2">Bài đã đăng & điểm hiệu quả <JevBadge source={jevSource} /></span>}>
-        <p className="-mt-1 mb-3 text-xs text-muted">Bình luận được Jev phân loại (ý định mua, câu hỏi, khen, tiêu cực, spam). Sandbox nén thời gian: 1 giờ trên nền tảng ≈ 1 phút thực.</p>
+        <p className="-mt-1 mb-3 text-xs text-muted">Bình luận được Jev phân loại (ý định mua, câu hỏi, khen, tiêu cực, spam).</p>
         {loading ? <Loading /> : !posts?.length ? <Empty>Chưa có bài nào được đăng.</Empty> : (
           <div className="overflow-x-auto scroll-thin">
             <table className="w-full min-w-[760px] text-sm">
@@ -303,7 +302,6 @@ function PostDetail({ id, onClose }: { id: string | null; onClose: () => void })
                 );
               })}
             </div>
-            <p className="mt-2 text-[11px] text-muted">Sandbox nén thời gian: 1 giờ trên nền tảng ≈ 1 phút thực.</p>
           </div>
           <div>
             <p className="mb-2 text-sm font-semibold text-ink">Bình luận ({p.comments?.length ?? 0}) — phân loại bởi Jev</p>

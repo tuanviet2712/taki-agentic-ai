@@ -706,6 +706,15 @@ export async function runDraftUpload(publishJobId: string) {
   if (!asset || !existsSync(asset.path)) throw new PermanentError("Không thấy file video để đăng nháp");
   const c = connector(platformForChannel(channel.platform));
   if (!c.uploadDraft) throw new PermanentError(`Kênh ${channel.platform} chưa hỗ trợ đăng nháp`);
+  // Real or nothing (see publishing.ts): no live draft uploader yet → refuse instead of a simulated draft.
+  if (c.mode !== "live") {
+    const error = `Chưa có bộ đăng nháp thật cho ${channel.name} (${channel.platform}) — video CHƯA lên kênh, hệ thống không chạy mô phỏng`;
+    update("publish_job", pj.id, { status: "failed", error });
+    q.run("UPDATE creative_job SET step = ? WHERE content_item_id = ?", `Đã duyệt — chưa lên nháp: ${error}`, ci.id);
+    emit(pj.biz_id, "alert.raised", { level: "warning", text: `Video "${ci.title}": ${error}` });
+    emit(pj.biz_id, "creative.updated", { status: "approved" });
+    return;
+  }
   update("publish_job", pj.id, { status: "posting" });
   const caption = String(ci.body).split("\n---\n")[0];
   const r = await c.uploadDraft({ channelExternalId: channel.external_id, videoPath: asset.path, caption }, pj.idempotency_key);

@@ -44,9 +44,17 @@ export async function runPublishJob(publishJobId: string) {
   const ci = byId<Row>("content_item", job.content_item_id)!;
   const channel = byId<Row>("channel", job.channel_id)!;
   const c = connector(platformForChannel(channel.platform));
+  // Real or nothing: there is no live publisher yet, and the CEO tests the system for real — never simulate a publish.
+  if (c.mode !== "live") {
+    const error = `Chưa có bộ đăng thật cho ${channel.name} (${channel.platform}) — bài CHƯA được đăng, hệ thống không chạy mô phỏng`;
+    update("publish_job", job.id, { status: "failed", error });
+    update("content_item", ci.id, { status: "manual_publish" });
+    emit(job.biz_id, "alert.raised", { level: "warning", text: `"${ci.title}": ${error}` });
+    audit(job.biz_id, "publishing", "post.publish_refused", { type: "content_item", id: ci.id }, { channel: channel.name, reason: "no_live_publisher" });
+    return;
+  }
   update("publish_job", job.id, { status: "posting" });
-  // Sandbox publisher = nothing reaches the real page: recorded and announced as "mô phỏng", never as "đã đăng".
-  const simulated = c.mode !== "live" ? 1 : 0;
+  const simulated = 0;
   const res = await c.publishPost!({ channelExternalId: channel.external_id, text: ci.body, kind: ci.kind }, job.idempotency_key);
   update("publish_job", job.id, { status: "verifying" });
   const ok = await c.verifyPost!(res.externalId);
