@@ -23,6 +23,9 @@ export function Chat() {
   const [filter, setFilter] = useState("");
   const [q, setQ] = useState("");
   const counts = useApi<any>("conversations/counts", ["conversation.", "lead."]);
+  const dnaInfo = useApi<any>("dna");
+  const brand = dnaInfo.data?.data?.company?.brand || dnaInfo.data?.data?.company?.name || "bên em";
+  const me = dnaInfo.data?.data?.voice?.selfPronoun || "em", you = dnaInfo.data?.data?.voice?.customerPronoun || "anh/chị";
   const list = useApi<any[]>(`conversations${filter ? `?filter=${filter}` : ""}`, ["conversation.", "lead."]);
   const convs = (list.data ?? []).filter((c) => !q || c.customer_name.toLowerCase().includes(q.toLowerCase()) || (c.last_preview ?? "").toLowerCase().includes(q.toLowerCase()));
   const selectedId = params.get("id") ?? convs[0]?.id ?? null;
@@ -95,7 +98,7 @@ export function Chat() {
                 <div className="min-w-0 flex-1"><p className="font-semibold">{d.customer_name}</p><p className="flex items-center gap-1 text-xs text-muted"><PlatformIcon p={CH(d.channel)} size={14} />{d.channel} · <Badge tone={CONV_STATE[d.state]?.tone}>{CONV_STATE[d.state]?.label}</Badge></p></div>
                 {d.state === "human_active" || d.state === "handoff_pending"
                   ? <Button size="sm" icon={Bot} onClick={() => act("handback", "Đã trả hội thoại cho bot")}>Trả lại cho bot</Button>
-                  : <Button size="sm" icon={Hand} onClick={() => setText("Dạ em là tư vấn viên của TAKI Academy, em hỗ trợ anh/chị ngay ạ.")}>Tiếp quản</Button>}
+                  : <Button size="sm" icon={Hand} onClick={() => setText(`Dạ ${me} là tư vấn viên của ${brand}, ${me} hỗ trợ ${you} ngay ạ.`)}>Tiếp quản</Button>}
                 <Button size="sm" variant="success" onClick={() => act("resolve", "Đã đánh dấu xử lý xong")}>Đánh dấu xử lý</Button>
               </div>
               {a?.handoff && (

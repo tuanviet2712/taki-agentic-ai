@@ -51,7 +51,10 @@ const envPath = join(ROOT, ".env");
 if (!existsSync(envPath)) {
   let env = readFileSync(join(ROOT, ".env.example"), "utf8");
   env = env.replace(/^TOKEN_ENCRYPTION_KEY=.*$/m, `TOKEN_ENCRYPTION_KEY=${hex(32)}`).replace(/^WEBHOOK_SECRET=.*$/m, `WEBHOOK_SECRET=${hex(24)}`);
-  if (!/^SEED_MODE=/m.test(env)) env += "\n# Lần chạy đầu: blank = DNA + skill + cấu hình TAKI, không có dữ liệu mẫu\nSEED_MODE=blank\n";
+  // --new-business: cài cho doanh nghiệp khác (DNA trống / DNA_FILE), không mang DNA + cấu hình của TAKI.
+  if (!/^SEED_MODE=/m.test(env)) env += args.has("--new-business")
+    ? "\n# Lần chạy đầu: fresh = doanh nghiệp mới, DNA trống (Nạp DNA trong giao diện) — DNA_FILE=đường/dẫn/dna.json để nạp sẵn\nSEED_MODE=fresh\n"
+    : "\n# Lần chạy đầu: blank = DNA + skill + cấu hình TAKI, không có dữ liệu mẫu (cài cho doanh nghiệp khác: SEED_MODE=fresh)\nSEED_MODE=blank\n";
   writeFileSync(envPath, env, { mode: 0o600 });
   ok("Tạo .env (khóa mã hóa token sinh ngẫu nhiên cho máy này)");
   notes.push("Điền TYPESAFE_API_KEY vào .env nếu muốn Jev chạy thật (để trống = heuristic).");

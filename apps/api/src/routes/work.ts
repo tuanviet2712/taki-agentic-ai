@@ -4,11 +4,11 @@ import { CreateGoal, DecideApproval } from "@dotaka/contracts";
 import { retrieve } from "@dotaka/chat-engine";
 import { activeDna, audit, byId, insert, q, update, type Row } from "@dotaka/db";
 import { judge, norm, passageHeuristic, passageQuestions } from "@dotaka/jev";
-import { chromeLock, createGoal, decideApproval, enqueue, learnDaily, retryPublishJob, retryTask, schedulePublish } from "@dotaka/orchestrator";
+import { blankDna, chromeLock, createGoal, decideApproval, documentText, draftDnaFromText, enqueue, learnDaily, retryPublishJob, retryTask, saveDna, schedulePublish } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
 import { routes } from "../http.ts";
 
-const DNA_SECTIONS = ["company", "positioning", "audience", "products", "offers", "voice", "differentiators", "channels", "goals", "forbiddenClaims"];
+const DNA_SECTIONS = ["company", "positioning", "audience", "products", "offers", "voice", "spokesperson", "cta", "differentiators", "channels", "goals", "forbiddenClaims"];
 
 export function workRoutes(app: FastifyInstance) {
   const r = routes(app);
@@ -34,14 +34,19 @@ export function workRoutes(app: FastifyInstance) {
       versions: q.all("SELECT id, version, status, created_by, created_at FROM dna_profile WHERE biz_id = ? ORDER BY version DESC", bizId),
     };
   });
-  r.put("/v1/dna", ({ bizId, body, actor }) => {
-    const cur = activeDna(bizId);
-    const data = { ...(cur?.data ?? {}), ...z.record(z.string(), z.unknown()).parse(body.data ?? body) };
-    q.run("UPDATE dna_profile SET status = 'archived' WHERE biz_id = ? AND status = 'active'", bizId);
-    const row = insert("dna_profile", { biz_id: bizId, version: (cur?.version ?? 0) + 1, status: "active", data, created_by: actor });
-    audit(bizId, actor, "dna.updated", { type: "dna_profile", id: row.id }, { version: row.version, sections: Object.keys(body.data ?? body) });
-    return row;
+  r.put("/v1/dna", ({ bizId, body, actor }) => saveDna(bizId, z.record(z.string(), z.unknown()).parse(body.data ?? body), actor));
+  // Nạp DNA cho doanh nghiệp bất kỳ: tài liệu (dán / tải file) → DNA Agent soạn bản nháp → Sếp xem rồi mới lưu.
+  r.post("/v1/dna/draft", async ({ bizId, body }) => {
+    const p = z.object({ text: z.string().max(200_000).optional(), path: z.string().optional() }).parse(body);
+    const text = [p.path ? documentText(p.path) : "", p.text ?? ""].filter(Boolean).join("\n\n");
+    return draftDnaFromText(bizId, text);
   });
+  r.post("/v1/dna/import", ({ bizId, body, actor }) => {
+    const p = z.object({ data: z.record(z.string(), z.unknown()), replace: z.boolean().default(true), source: z.string().max(60).optional() }).parse(body);
+    return saveDna(bizId, (p.data.dna ?? p.data) as Row, actor, { replace: p.replace, source: p.source ?? "import" });
+  });
+  r.post("/v1/dna/blank", ({ bizId, actor }) => saveDna(bizId, blankDna(), actor, { replace: true, source: "blank" }));
+  r.get("/v1/dna/export", ({ bizId }) => ({ kind: "agentic-dna", version: 1, exportedAt: new Date().toISOString(), dna: activeDna(bizId)?.data ?? {} }));
 
   // ---------------- Goals, plans, calendar ----------------
   r.get("/v1/goals", ({ bizId }) => q.all<Row>("SELECT * FROM goal WHERE biz_id = ? ORDER BY created_at DESC", bizId).map((g) => ({

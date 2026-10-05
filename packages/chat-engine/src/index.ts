@@ -120,7 +120,7 @@ export function deterministicGuard(reply: string, facts: string[], dna: Row | un
 export interface HandleResult { conversationId: string; replied: boolean; state: string; decision?: ChatDecision; blockedReasons?: string[] }
 
 const brandOf = (dna: Row | undefined) => (dna?.data?.company?.brand ?? dna?.data?.company?.name ?? "chúng tôi") as string;
-/** DNA-driven cleanup for customer-facing text (TAKI bans the em-dash). */
+/** DNA-driven cleanup for customer-facing text (DNA.bannedChars, e.g. a brand that bans the em-dash). */
 export function applyBannedChars(text: string, dna: Row | undefined): string {
   let out = text;
   for (const c of (dna?.data?.bannedChars ?? []) as string[]) out = out.split(` ${c} `).join(", ").split(c).join(c === "—" ? "," : "");
@@ -387,9 +387,16 @@ export async function runFollowUps(bizId: string, now = new Date()) {
     const lastCustomer = q.get<Row>("SELECT sent_at FROM message WHERE conversation_id = ? AND sender = 'customer' ORDER BY sent_at DESC LIMIT 1", f.conversation_id);
     const within24h = lastCustomer && now.getTime() - new Date(lastCustomer.sent_at).getTime() < 24 * 3600_000;
     if (!within24h && f.channel === "messenger") { update("follow_up_plan", f.id, { status: "stopped", template: `${f.template}:outside_window` }); continue; }
+    // Lời mời lấy từ DNA (ưu đãi mồi / ưu đãi / CTA chính) + cách xưng hô của thương hiệu — không chữ cứng của 1 doanh nghiệp.
+    const d = activeDna(bizId)?.data ?? {};
+    // Ghi chú trong ngoặc của DNA ("(cửa vào phễu)") là nội bộ — không gửi cho khách.
+    const offer = String(d.leadMagnet || (d.offers ?? [])[0] || d.cta?.text || "").replace(/\s*\([^)]*\)/g, "").trim().replace(/[.!]+$/, "");
+    const me = String(d.voice?.selfPronoun || "em"), you = String(d.voice?.customerPronoun || "anh/chị");
     const text = f.step === 0
-      ? `Dạ anh/chị ${f.customer_name} ơi, em gửi anh/chị khóa AI Plus miễn phí 5 buổi để bắt đầu ứng dụng AI trước, anh/chị có muốn em giữ 1 chỗ không ạ?`
-      : "Dạ em chỉ hỏi thăm lại ạ, nếu anh/chị cần tư vấn thêm về chương trình em luôn sẵn sàng ạ.";
+      ? offer
+        ? `Dạ ${you} ${f.customer_name} ơi, ${me} gửi ${you} thông tin: ${offer}. ${you[0].toUpperCase()}${you.slice(1)} có muốn ${me} tư vấn kỹ hơn không ạ?`
+        : `Dạ ${you} ${f.customer_name} ơi, ${me} hỏi thăm ${you} còn cần ${me} tư vấn thêm gì không ạ?`
+      : `Dạ ${me} chỉ hỏi thăm lại ạ, nếu ${you} cần tư vấn thêm ${me} luôn sẵn sàng ạ.`;
     if (hasAny(text, ["cam kết", "đảm bảo"])) continue;
     const conv = byId<Row>("conversation", f.conversation_id)!;
     let sender: Connector;

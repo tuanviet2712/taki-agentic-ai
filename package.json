@@ -14,6 +14,7 @@
     "start": "pnpm build:web && tsx --env-file-if-exists=.env apps/api/src/server.ts",
     "seed": "tsx --env-file-if-exists=.env apps/api/src/seed.ts --reset",
     "seed:blank": "tsx --env-file-if-exists=.env apps/api/src/seed.ts --reset --blank",
+    "seed:fresh": "tsx --env-file-if-exists=.env apps/api/src/seed.ts --reset --fresh",
     "mcp": "tsx --env-file-if-exists=.env apps/mcp-server/src/index.ts",
     "eval": "tsx --env-file-if-exists=.env evals/run.ts",
     "test": "vitest run",

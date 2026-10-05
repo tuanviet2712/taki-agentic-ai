@@ -5,7 +5,7 @@ import { handleIncoming } from "@dotaka/chat-engine";
 import { connector } from "@dotaka/connectors";
 import { DEFAULT_SETTINGS, insert, openDb, q, update, type Row } from "@dotaka/db";
 import {
-  classifyComments, createGoal, decideApproval, runRule, runTask, scorePostNow, syncAdMetrics, today,
+  blankDna, classifyComments, createGoal, decideApproval, runRule, runTask, saveDna, scorePostNow, syncAdMetrics, today,
 } from "@dotaka/orchestrator";
 import { encryptSecret, nowIso, seeded, sha256 } from "@dotaka/shared";
 import { DEFAULT_LLM } from "@dotaka/llm-gateway";
@@ -119,16 +119,21 @@ const POSTS = [
 ];
 
 /** blank = keep configuration (DNA, knowledge, skills, agents, rules, channels) but no sample activity. */
-export async function seed(opts: { reset?: boolean; blank?: boolean } = {}) {
+/**
+ * fresh = cài cho DOANH NGHIỆP KHÁC: không DNA / tri thức / người dùng / workspace của TAKI. DNA trống (hoặc file DNA đã
+ * xuất ở máy khác: DNA_FILE=...json), chủ doanh nghiệp vào "Mục tiêu & DNA → Nạp DNA" để AI đọc tài liệu và điền.
+ */
+export async function seed(opts: { reset?: boolean; blank?: boolean; fresh?: boolean } = {}) {
+  if (opts.fresh) opts.blank = true;
   if (opts.reset) {
     for (const f of ["", "-wal", "-shm"]) rmSync(resolve(process.cwd(), (process.env.DB_PATH ?? "data/dotaka.db") + f), { force: true });
   }
   openDb();
   if (q.get("SELECT id FROM biz LIMIT 1")) return q.get<Row>("SELECT id FROM biz LIMIT 1")!.id as string;
 
-  const biz = insert("biz", { name: "TAKI Group", timezone: "Asia/Ho_Chi_Minh", currency: "VND", settings: { ...DEFAULT_SETTINGS, llm: { ...DEFAULT_LLM, provider: "sandbox" } } });
+  const biz = insert("biz", { name: opts.fresh ? process.env.BUSINESS_NAME || "Doanh nghiệp của tôi" : "TAKI Group", timezone: "Asia/Ho_Chi_Minh", currency: "VND", settings: { ...DEFAULT_SETTINGS, llm: { ...DEFAULT_LLM, provider: "sandbox" } } });
   const B = biz.id;
-  const users = [
+  const users = opts.fresh ? [{ name: "Chủ doanh nghiệp", email: process.env.OWNER_EMAIL || "owner@example.com", role: "owner" }] : [
     { name: "Nguyễn Tất Kiểm (Steve)", email: "ceo@takigroup.vn", role: "owner" },
     { name: "Phòng Marketing TAKI", email: "mkt@takigroup.vn", role: "buyer" },
     { name: "Đội Sales tư vấn", email: "sales@takigroup.vn", role: "sales" },
@@ -136,11 +141,15 @@ export async function seed(opts: { reset?: boolean; blank?: boolean } = {}) {
   ];
   for (const u of users) insert("user_account", { biz_id: B, ...u, status: "active", last_active_at: nowIso() });
 
-  insert("dna_profile", { biz_id: B, version: 1, status: "active", data: TAKI_DNA, created_by: "skill taki-dna" });
+  if (opts.fresh) {
+    const file = process.env.DNA_FILE;
+    const imported = file && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+    insert("dna_profile", { biz_id: B, version: 1, status: "active", data: imported ? { ...blankDna(), ...(imported.dna ?? imported) } : blankDna(), created_by: imported ? `file ${file}` : "cài mới (DNA trống)" });
+  } else insert("dna_profile", { biz_id: B, version: 1, status: "active", data: TAKI_DNA, created_by: "skill taki-dna" });
   // Marketing department skills + staff personas from ~/.claude (versioned, bound to agents)
   const sync = syncSkills(B, "seed");
   console.log(`📚 Skill: +${sync.added.length} (thiếu: ${sync.missing.join(", ") || "không"}) · ${sync.bindings} liên kết agent-skill`);
-  for (const d of knowledgeDocs()) {
+  for (const d of opts.fresh ? [] : knowledgeDocs()) {
     const doc = insert("knowledge_doc", { biz_id: B, ...d, status: "processed" });
     d.body.split(/\n+/).map((t) => t.trim()).filter((t) => t && !/^[|\-: ]+$/.test(t)).forEach((text, idx) => {
       insert("knowledge_chunk", { biz_id: B, doc_id: doc.id, idx, text, source_ref: `${d.title.toLowerCase().replace(/[^a-z0-9]+/gi, "-").slice(0, 30)}#${idx}` });
@@ -276,7 +285,8 @@ export async function seed(opts: { reset?: boolean; blank?: boolean } = {}) {
   // Sample data was drafted offline; from now on agents use the configured provider (default: Claude CLI).
   update("biz", B, { settings: { ...DEFAULT_SETTINGS, llm: DEFAULT_LLM } });
   // Same configuration as the original machine: DNA, settings, agents, templates, flows (config/taki-workspace.json)
-  const snap = await applyWorkspace(B);
+  // Doanh nghiệp khác: chỉ nạp workspace khi chỉ định rõ WORKSPACE_FILE (không tự nạp cấu hình của TAKI).
+  const snap = opts.fresh && !process.env.WORKSPACE_FILE ? null : await applyWorkspace(B);
   if (snap) console.log(`🧩 Nạp cấu hình workspace (xuất lúc ${snap.exportedAt})`);
   return B;
 }
@@ -296,8 +306,11 @@ async function drainAgentTasks(bizId: string) {
 // CLI: `pnpm seed`
 if (process.argv[1]?.endsWith("seed.ts")) {
   void (async () => {
-    const id = await seed({ reset: process.argv.includes("--reset"), blank: process.argv.includes("--blank") || process.env.SEED_MODE === "blank" });
-    console.log(`✅ Seed xong TAKI (biz ${id}). Chạy: pnpm dev`);
+    const fresh = process.argv.includes("--fresh") || process.env.SEED_MODE === "fresh";
+    const id = await seed({ reset: process.argv.includes("--reset"), blank: process.argv.includes("--blank") || process.env.SEED_MODE === "blank", fresh });
+    console.log(fresh
+      ? `✅ Đã cài cho doanh nghiệp mới (biz ${id}). Chạy: pnpm dev → Mục tiêu & DNA → "Nạp DNA" để AI đọc tài liệu công ty.`
+      : `✅ Seed xong TAKI (biz ${id}). Chạy: pnpm dev`);
     process.exit(0);
   })();
 }

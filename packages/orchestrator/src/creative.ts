@@ -4,6 +4,7 @@ import { listChromeProfiles } from "./chrome-profiles.ts";
 import { browserPublish, chromeLock, publishRoute, routeReason } from "./browser-publish.ts";
 import { publishText } from "./publishing.ts";
 import { parseVideoScript } from "./script-video.ts";
+import { brandOfDna } from "./dna-intake.ts";
 import { connectorForChannel } from "./connections.ts";
 import { NEWS_SKILL_DIR, REMOTION_NEWS, ensureVideoBins, finishMaterialJob, runAutoVideo, runPortrait, videoAiStatus } from "./video-ai.ts";
 import { ensureFlowBrowser, flowAccounts, flowMcpConfig, flowSource, openFlowLogin, syncFlowProfile } from "./flow-browser.ts";
@@ -213,7 +214,7 @@ export const CreativeInput = z.object({
   cta: z.string().max(160).optional(),
   images: z.array(z.object({ path: z.string(), role: z.string() })).max(8).default([]),
   channels: z.array(z.string()).min(1).default(["tiktok"]),
-  brand: z.enum(["taki", "other"]).default("other"), // "other" = affiliate/client channel: TAKI DNA is NOT applied
+  brand: z.enum(["taki", "other"]).default("other"), // "taki" = the installing business's own brand (its DNA applies); "other" = affiliate/client channel, DNA NOT applied
   sourceContentId: z.string().optional(),
   /** Veo model, used only if the Tool offers a model choice (the Tool otherwise decides). */
   veoModel: z.enum(["Veo 3.1 - Lite", "Veo 3.1 - Fast", "Veo 3.1 - Quality"]).default("Veo 3.1 - Fast"),
@@ -266,7 +267,7 @@ export const toolUrlFor = (fs: ReturnType<typeof flowSettings>, key: string) => 
 /** How this machine runs the skill: Playwright tools on Chrome Flow, local folders, no human in the loop. */
 function environmentInstructions(o: { toolLabel: string; toolUrl: string | null; uiMap: string[]; email: string | null; workdir: string; rawDir: string }) {
   return [
-    "# MÔI TRƯỜNG CHẠY (máy Mac của TAKI, chạy tự động, KHÔNG có người theo dõi) — áp cho skill ở trên",
+    "# MÔI TRƯỜNG CHẠY (máy Mac của doanh nghiệp, chạy tự động, KHÔNG có người theo dõi) — áp cho skill ở trên",
     `- Trình duyệt = các tool mcp__flow__browser_* (Playwright) đã gắn sẵn vào "Chrome Flow"${o.email ? `, đăng nhập Google ${o.email}` : ""}. Đây là thay thế cho Claude in Chrome trong skill: bỏ qua bước đọc skill chrome-browser / ToolSearch / tabs_context_mcp.`,
     "- Playwright nhìn thấy và thao tác được BÊN TRONG iframe của Tool. Cách làm chuẩn: browser_snapshot → lấy ref của nút/ô theo chữ → browser_click / browser_type / browser_select_option / browser_file_upload theo ref → snapshot lại để xác nhận. Chờ bằng browser_wait_for (text hoặc time ≤ 60s), không chờ mù.",
     "- Snapshot dài: chỉ đọc phần cần. Dùng browser_take_screenshot khi cần NHÌN ảnh/khung hình (chấm khung chủ, storyboard).",
@@ -408,7 +409,7 @@ async function runNewsVideo({ job, log, signal }: { job: Row; log: (text: string
     `# SKILL ĐANG CHẠY: ${tool.skill} (v${skill.version})`,
     skill.body,
     "",
-    "# MÔI TRƯỜNG CHẠY (máy Mac của TAKI, chạy tự động, KHÔNG có người theo dõi) — áp cho skill ở trên, ưu tiên hơn phần 'YÊU CẦU MÔI TRƯỜNG' của skill",
+    "# MÔI TRƯỜNG CHẠY (máy Mac của doanh nghiệp, chạy tự động, KHÔNG có người theo dõi) — áp cho skill ở trên, ưu tiên hơn phần 'YÊU CẦU MÔI TRƯỜNG' của skill",
     "- Mọi công cụ đã cài sẵn: KHÔNG pip install, KHÔNG npm install, KHÔNG npx create-video.",
     "- Lệnh Bash được phép chỉ là các lệnh nêu dưới đây (+ cd, ls, mkdir, cp, mv, file, grep, head, wc, cat). Gõ thẳng đường dẫn tuyệt đối trong ngoặc kép; KHÔNG gán biến shell (JOB=…), KHÔNG python3/node/heredoc — sẽ bị chặn. Tạo/sửa file bằng Write/Edit.",
     `- Thư mục làm việc của job: ${workdir} (bài viết, script, voice, words.json, ảnh kiểm tra, kết quả). Thư mục skill (script, template): ${NEWS_SKILL_DIR}.`,
@@ -510,7 +511,7 @@ export async function runVideoJob(jobId: string) {
     ...environmentInstructions({ toolLabel: tool.toolTitle ?? tool.label, toolUrl: toolUrlFor(fs, input.tool), uiMap: tool.uiMap, email, workdir, rawDir }),
     `- KẾT THÚC: dùng Write ghi kết quả JSON vào ${join(workdir, "result.json")} đúng schema sau rồi in "XONG — có thể đóng cửa sổ". Schema: ${JSON.stringify(Object.fromEntries(Object.entries(z.toJSONSchema(FlowResult, { target: "draft-7" }) as Row).filter(([k]) => k !== "$schema")))}`,
     `- Bị chặn/lỗi giữa chừng cũng PHẢI ghi result.json với status "blocked"/"failed" và lý do trong notes. finalPath = ${join(workdir, "final.mp4")} khi thành công. caption = caption đăng kênh (tiếng Việt, ≤ 300 ký tự, 3-5 hashtag). script = lời thoại từng cảnh.`,
-    ...(dna ? ["", "# THƯƠNG HIỆU: TAKI (áp dụng DNA dưới đây cho lời thoại, caption, claim)", dna] : ["", "# THƯƠNG HIỆU: kênh khác/khách hàng. KHÔNG dùng giọng hay tên TAKI; theo thông tin trong brief."]),
+    ...(dna ? ["", `# THƯƠNG HIỆU: ${brandOfDna(bizId)} (áp dụng DNA dưới đây cho lời thoại, caption, claim)`, dna] : ["", `# THƯƠNG HIỆU: kênh khác/khách hàng. KHÔNG dùng giọng hay tên ${brandOfDna(bizId)}; theo thông tin trong brief.`]),
   ].join("\n");
   const prompt = [
     `Công cụ Flow: ${tool.label}`,

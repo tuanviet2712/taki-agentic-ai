@@ -32,6 +32,8 @@ export function VideoFlow() {
     video: { source: "flow", flowJobId: "", scriptReady: false, terms: "", voiceName: "vi-VN-HoaiMyNeural-Female", voiceRate: 1, bgm: "random", aspect: "9:16", clipDuration: 4, driving: "d12.mp4", drivingPath: "", drivingName: "", voiceText: "", seconds: 6, materials: [] as { path: string; name: string }[] },
   });
   const vai = useApi<any>("video-ai/status");
+  const dnaInfo = useApi<any>("dna");
+  const ownBrand = dnaInfo.data?.data?.company?.brand || dnaInfo.data?.data?.company?.name || "Thương hiệu của Sếp";
   const setV = (p: any) => setForm((f: any) => ({ ...f, video: { ...f.video, ...p } }));
   const [confirm, setConfirm] = useState(false);
   const [allJobs, setAllJobs] = useState(false); // list shows the 3 latest runs unless expanded
@@ -150,8 +152,8 @@ export function VideoFlow() {
             )}
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Tên video"><input className={inputCls} value={form.title} onChange={(e) => set({ title: e.target.value })} placeholder="Review bánh tráng trộn Tây Ninh" /></Field>
-              <Field label="Thương hiệu / kênh" hint={form.brand === "taki" ? "Áp DNA TAKI (giọng, claim cấm)" : "Kênh affiliate/khách: không dùng giọng TAKI"}>
-                <select className={inputCls} value={form.brand} onChange={(e) => set({ brand: e.target.value })}><option value="other">Kênh khác / khách hàng</option><option value="taki">TAKI Academy (áp DNA)</option></select>
+              <Field label="Thương hiệu / kênh" hint={form.brand === "taki" ? `Áp DNA ${ownBrand} (giọng, claim cấm)` : `Kênh affiliate/khách: không dùng giọng ${ownBrand}`}>
+                <select className={inputCls} value={form.brand} onChange={(e) => set({ brand: e.target.value })}><option value="other">Kênh khác / khách hàng</option><option value="taki">{ownBrand} (áp DNA)</option></select>
               </Field>
               <Field label="Sản phẩm"><input className={inputCls} value={form.product} onChange={(e) => set({ product: e.target.value })} /></Field>
               {engine !== "liveportrait" && <Field label="Thời lượng (giây)" hint={engine === "flow" ? `${Math.max(1, Math.ceil((Number(form.durationSec) || 8) / 8))} cảnh × 8 giây` : `~${Math.round((Number(form.durationSec) || 30) * 3)} từ lời đọc`}><input type="number" className={inputCls} value={form.durationSec} onChange={(e) => set({ durationSec: e.target.value })} /></Field>}

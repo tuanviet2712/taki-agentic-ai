@@ -116,11 +116,11 @@ export function creativeRoutes(app: FastifyInstance) {
   app.post("/v1/uploads", { bodyLimit: 90 * 1024 * 1024 }, async (req) => {
     const p = z.object({ name: z.string().min(1).max(200), data: z.string().min(10) }).parse(req.body);
     const safe = basename(p.name).replace(/[^\w.\-]+/g, "_").slice(-80);
-    if (!/\.(png|jpe?g|webp|heic|mp4|mov|m4v|webm|mp3|wav|m4a)$/i.test(safe)) throw new AppError("BAD_TYPE", "Chỉ nhận ảnh (png/jpg/webp/heic), video (mp4/mov/webm) hoặc âm thanh (mp3/wav/m4a)");
+    if (!/\.(png|jpe?g|webp|heic|mp4|mov|m4v|webm|mp3|wav|m4a|docx?|txt|md|json|rtf|html?|odt|pdf|csv)$/i.test(safe)) throw new AppError("BAD_TYPE", "Chỉ nhận ảnh (png/jpg/webp/heic), video (mp4/mov/webm), âm thanh (mp3/wav/m4a) hoặc tài liệu (docx/txt/md/json/rtf/html/pdf)");
     mkdirSync(UPLOAD_DIR, { recursive: true });
     const path = join(UPLOAD_DIR, `${uuidv7().slice(-12)}_${safe}`);
     writeFileSync(path, Buffer.from(p.data.replace(/^data:[^;]+;base64,/, ""), "base64"));
-    audit(defaultBizId(), "Phòng Marketing TAKI", "upload.image", undefined, { path });
+    audit(defaultBizId(), "CEO", "upload.file", undefined, { path });
     return { path, size: statSync(path).size };
   });
 

@@ -151,11 +151,11 @@ export function syncSkills(bizId: string, actor = "system"): SyncReport {
 
 // ---------------- Prompt assembly ----------------
 const WRAPPER = [
-  "Các khối dưới đây là DNA, vai trò và SKILL của Phòng Marketing AI TAKI (xuất từ Claude Code).",
+  "Các khối dưới đây là DNA, vai trò và SKILL của phòng Marketing AI của doanh nghiệp (xuất từ Claude Code).",
   "Áp dụng đúng phương pháp, công thức, tiêu chí chấm và luật giọng/claim trong đó.",
   "BỎ QUA các bước dành cho phiên làm việc tương tác: hỏi lại người dùng, đọc/ghi file, tạo thư mục, gọi Skill/Agent/tool, xuất file HTML/DOCX/Excel, báo cáo trong chat.",
   "Mọi đường dẫn file được nhắc tới đã được nạp sẵn nội dung ở đây. Đầu ra LUÔN là JSON đúng schema của hệ thống.",
-  "Nếu skill mâu thuẫn DNA TAKI thì theo DNA.",
+  "Ví dụ, tên thương hiệu, sản phẩm, số liệu trong skill chỉ là MẪU: luôn thay bằng thông tin trong DNA của doanh nghiệp đang dùng. Nếu skill mâu thuẫn DNA thì theo DNA.",
 ].join("\n");
 
 export interface PlaybookPart { key: string; role: string; version: number; chars: number; truncated: boolean }

@@ -35,17 +35,17 @@ export const NURTURE_DEFAULTS = {
   labels: ["purchase_intent", "question"] as string[],
   replyTemplates: [
     "Dạ em đã inbox {ten} rồi ạ, {ten} kiểm tra tin nhắn giúp em nhé!",
-    "Em vừa nhắn riêng cho {ten} thông tin chương trình rồi ạ, {ten} xem tin nhắn chờ giúp em nha.",
+    "Em vừa nhắn riêng cho {ten} thông tin {san_pham} rồi ạ, {ten} xem tin nhắn chờ giúp em nha.",
     "Dạ {ten} ơi, em gửi thông tin chi tiết qua tin nhắn rồi ạ.",
     "Cảm ơn {ten} đã quan tâm ạ! Em đã inbox, {ten} kiểm tra tin nhắn giúp em nhé.",
     "Em gửi tin nhắn cho {ten} rồi ạ, có gì {ten} cứ nhắn em nhé!",
   ] as string[],
   dmTemplates: [
-    "Chào {ten}, em gửi {ten} thông tin chương trình {san_pham} ạ. Chi tiết tại: {link}\n{ten} để lại SĐT hoặc Zalo để bên em tư vấn kỹ lộ trình phù hợp với doanh nghiệp mình nhé!",
-    "Dạ em chào {ten} ạ! Cảm ơn {ten} đã quan tâm {san_pham}. Thông tin chương trình: {link}\n{ten} cho em xin SĐT/Zalo để chuyên viên tư vấn kỹ hơn cho mình nha.",
-    "Chào {ten} ạ, em nhận được bình luận của {ten} về {san_pham} rồi. Chi tiết: {link}\n{ten} để lại số điện thoại/Zalo giúp em, bên em gọi tư vấn và gửi lịch khai giảng gần nhất nhé!",
+    "Chào {ten}, em gửi {ten} thông tin {san_pham} ạ. Chi tiết tại: {link}\n{ten} để lại SĐT hoặc Zalo để bên em tư vấn kỹ hơn cho mình nhé!",
+    "Dạ em chào {ten} ạ! Cảm ơn {ten} đã quan tâm {san_pham}. Thông tin chi tiết: {link}\n{ten} cho em xin SĐT/Zalo để bên em tư vấn kỹ hơn cho mình nha.",
+    "Chào {ten} ạ, em nhận được bình luận của {ten} về {san_pham} rồi. Chi tiết: {link}\n{ten} để lại số điện thoại/Zalo giúp em, bên em gọi tư vấn và gửi ưu đãi phù hợp nhé!",
   ] as string[],
-  confirmTemplate: "Dạ em đã nhận SĐT của {ten} rồi ạ. Bên em sẽ kết bạn Zalo với {ten} để gửi thông tin chương trình nhé!",
+  confirmTemplate: "Dạ em đã nhận SĐT của {ten} rồi ạ. Bên em sẽ kết bạn Zalo với {ten} để gửi thông tin {san_pham} nhé!",
   reminderTemplate: "Dạ {ten} ơi, {ten} để lại giúp em SĐT hoặc Zalo để bên em tư vấn kỹ về {san_pham} nhé ạ!",
   friendGreetingTemplates: [
     "Chào {ten}, em bên {shop} ạ. Em kết bạn để gửi {ten} thông tin {san_pham} như đã hẹn qua Messenger nhé!",
@@ -132,17 +132,17 @@ export function fillTemplate(tpl: string, v: { ten: string; san_pham: string; li
 const pick = (list: string[], seed: number) => list[Math.abs(seed) % list.length];
 const hashOf = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
 
-/** Biến cho mẫu câu của 1 lead: tên khách, chương trình (khớp tên/alias trong bài + bình luận, theo DNA), link chương trình. */
+/** Biến cho mẫu câu của 1 lead: tên khách, sản phẩm (khớp tên/alias trong bài + bình luận, theo DNA), link sản phẩm / CTA chính. */
 function varsFor(lead: Row, post?: Row, channel?: Row) {
   const p = post ?? byId<Row>("post", lead.post_id);
   const products = ((activeDna(lead.biz_id)?.data?.products ?? []) as Row[]).filter((x) => x?.name);
   const hay = vn(`${p?.title ?? ""} ${p?.body ?? ""} ${lead.comment_text ?? ""}`);
   const prod = products.find((x) => [x.name, ...((x.aliases ?? []) as string[])].some((a) => a && hay.includes(vn(String(a)))))
     ?? products.find((x) => x.verified) ?? products[0];
-  const raw = prod?.link ? String(prod.link).trim() : "";
+  const raw = String(prod?.link || activeDna(lead.biz_id)?.data?.cta?.link || "").trim();
   const link = raw ? (/^https?:\/\//.test(raw) ? raw : `https://${raw}`) : null;
   const ch = channel ?? (p ? byId<Row>("channel", p.channel_id) : undefined);
-  return { ten: givenName(lead.author_name), san_pham: String(prod?.name ?? "chương trình"), link, shop: String(ch?.name ?? "") };
+  return { ten: givenName(lead.author_name), san_pham: String(prod?.name ?? "sản phẩm"), link, shop: String(ch?.name ?? "") };
 }
 const vn = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 

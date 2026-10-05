@@ -3,6 +3,7 @@ import { AppError } from "@dotaka/shared";
 import { existsSync } from "node:fs";
 import { FLOW_TOOLS, startVideoJob, type CreativeInput } from "./creative.ts";
 import { videoAiStatus } from "./video-ai.ts";
+import { spokespersonOf } from "./dna-intake.ts";
 
 /**
  * Kịch bản video đã duyệt (Video Agent) → đúng skill tạo video, đầu vào sạch:
@@ -70,9 +71,11 @@ export function planVideoFromScript(bizId: string, contentId: string): VideoPlan
   const s = parseVideoScript(ci.body);
   if (!s) throw new AppError("BAD_SCRIPT", "Kịch bản chưa đúng định dạng (cần các cảnh [a-bs] có lời đọc 🎙)");
   const all = s.scenes.map((x) => x.visual).join(" ");
-  const owner = String(activeDna(bizId)?.data?.company?.founder ?? activeDna(bizId)?.data?.founder?.name ?? "Nguyễn Tất Kiểm");
-  const ownerFirst = owner.split(/\s+/).at(-1) ?? owner;
-  const onCamera = ON_CAMERA.test(all) || new RegExp(`\\b${ownerFirst}\\b`, "i").test(all);
+  // Người đại diện + giọng đọc từ DNA (Mục tiêu & DNA → Người đại diện), không gắn cứng 1 người.
+  const sp = spokespersonOf(bizId);
+  const owner = sp.name || "người đại diện thương hiệu";
+  const ownerFirst = sp.name.split(/\s+/).at(-1) ?? "";
+  const onCamera = ON_CAMERA.test(all) || (ownerFirst.length > 1 && new RegExp(`(^|[^\\p{L}])${ownerFirst}([^\\p{L}]|$)`, "iu").test(all));
   const voiceAll = s.scenes.map((x) => x.voice).filter(Boolean).join("\n");
   const realSec = s.scenes.at(-1)!.to;
   const durationSec = Math.min(120, Math.max(15, realSec));
@@ -92,7 +95,7 @@ export function planVideoFromScript(bizId: string, contentId: string): VideoPlan
     if (!portrait) missing.push("Ảnh chân dung rõ mặt của người đứng tên nhân hiệu");
     input = {
       ...base, tool: "nhan-hieu", product: "",
-      voice: "Giọng nam miền Bắc Việt Nam, khoảng 35-40 tuổi, điềm tĩnh, chắc, không cường điệu",
+      voice: sp.voice,
       brief: [
         "KỊCH BẢN LỜI THOẠI ĐÃ DUYỆT — dán NGUYÊN VĂN vào ô kịch bản của Tool (bước 5), không viết lại:",
         voiceAll, "", "HÌNH ẢNH GỢI Ý THEO CẢNH (bối cảnh / camera, không phải lời đọc):", visuals,
