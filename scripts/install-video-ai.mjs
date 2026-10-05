@@ -3,8 +3,10 @@
 //   • MoneyPrinterTurbo (MIT)  — video tự động: kịch bản → cảnh (Pexels/Pixabay/clip của Sếp) + giọng đọc Edge TTS + phụ đề
 //   • LivePortrait (MIT)       — ảnh chân dung cử động; TAKI thay dò mặt InsightFace (phi thương mại) bằng MediaPipe (Apache-2.0)
 //   • faster-whisper (MIT)     — nhận dạng lời thoại / phụ đề (tools/video, cùng Pillow cho hậu kỳ)
+//   • Remotion                 — video tin tức từ link bài báo (skill news-to-video): phụ đề karaoke, đồ hoạ động.
+//                                LƯU Ý GIẤY PHÉP: miễn phí cho cá nhân / công ty ≤ 3 người; công ty lớn hơn cần Remotion Company License.
 //   • fish-speech: KHÔNG cài — bản S2-Pro (4B) cần GPU/RAM lớn và giấy phép Fish Audio cấm dùng thương mại; dùng Edge TTS.
-// Cờ: --skip-moneyprinter  --skip-liveportrait  --skip-whisper
+// Cờ: --skip-moneyprinter  --skip-liveportrait  --skip-whisper  --skip-remotion
 // Mã nguồn tải về services/video-ai/ (không đưa lên Git); phiên bản khóa theo commit bên dưới để mọi máy giống nhau.
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, statfsSync } from "node:fs";
@@ -79,6 +81,17 @@ if (!args.has("--skip-whisper")) {
   if (!existsSync(v)) run("uv", ["venv", "-q", "--python", "3.12", v]);
   run("uv", ["pip", "install", "-q", "-r", join(ROOT, "tools/video/requirements.txt"), "-r", join(ROOT, "tools/video/requirements-stt.txt")], { env: { ...process.env, VIRTUAL_ENV: v } });
   ok("faster-whisper 1.2.1 (giải mã âm thanh bằng ffmpeg) + Pillow");
+}
+
+if (!args.has("--skip-remotion")) {
+  step("Remotion (video tin tức từ link bài báo — skill news-to-video)");
+  const d = join(DIR, "remotion-news");
+  if (!existsSync(join(d, "package.json"))) run("npx", ["--yes", "create-video@latest", "--yes", "--blank", "remotion-news"], { cwd: DIR });
+  run("npm", ["i", "--no-audit", "--no-fund"], { cwd: d });
+  if (!existsSync(join(d, "node_modules", "@remotion", "media"))) run("npx", ["--yes", "remotion", "add", "@remotion/media"], { cwd: d });
+  if (!existsSync(join(d, "node_modules", "@remotion", "google-fonts"))) run("npx", ["--yes", "remotion", "add", "@remotion/google-fonts"], { cwd: d });
+  run("npx", ["remotion", "browser", "ensure"], { cwd: d });
+  ok("Project remotion-news + Chrome Headless Shell (cần Remotion Company License nếu công ty > 3 người)");
 }
 
 console.log("\n✅ Xong. Mở Agentic AI → Sản xuất video → chọn \"Video tự động\" hoặc \"Ảnh chân dung cử động\".");

@@ -39,7 +39,7 @@ export const TEAM: { employee: string | null; label: string; agents: string[]; e
   { employee: "mkt-kiem-duyet", label: "Kiểm duyệt", agents: ["review"], extraSkills: ["remove-ai-marks"] },
   { employee: null, label: "Tư vấn bán hàng (ABS)", agents: ["chat"], extraSkills: ["abs-sales-agent", "objection-handler-ai-sales", "lead-qualifier-taki"] },
   { employee: null, label: "Chăm sóc lead", agents: ["follow_up"], extraSkills: ["follow-up-sequence-abs"] },
-  { employee: null, label: "Sản xuất video Flow", agents: ["creative"], extraSkills: ["flow-review-do-an-vat", "flow-review-thoi-trang", "flow-nguoi-que-so-sanh", "flow-video-nhan-hieu", "flow-koc-thoi-trang-nu", "flow-review-gia-dung", "flow-review-nha-hang-shop", "flow-cooking-director-video", "flow-cinematic-short-film"] },
+  { employee: null, label: "Sản xuất video Flow", agents: ["creative"], extraSkills: ["flow-review-do-an-vat", "flow-review-thoi-trang", "flow-nguoi-que-so-sanh", "flow-video-nhan-hieu", "flow-koc-thoi-trang-nu", "flow-review-gia-dung", "flow-review-nha-hang-shop", "news-to-video", "flow-cooking-director-video", "flow-cinematic-short-film"] },
 ];
 /** Agents that read the DNA layer when they call Claude. */
 export const LLM_AGENTS = ["brief", "market_research", "strategy", "content", "video_script", "seo_web", "chat", "follow_up", "review", "ads", "analytics"];

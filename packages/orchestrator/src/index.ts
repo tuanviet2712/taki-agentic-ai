@@ -80,9 +80,9 @@ export function startOrchestrator() {
     update("task", t.id, { status: "ready", step: "Khôi phục sau khởi động lại" });
     audit(t.biz_id, "orchestrator", "task.recovered", { type: "task", id: t.id }, { from: t.status });
   }
-  // Flow agents run detached and survive a server restart: re-attach (live log + result.json).
+  // Flow and news agents run detached (headless Claude CLI) and survive a server restart: re-attach (live log + result.json).
   for (const j of q.all<Row>("SELECT id, biz_id, tool FROM creative_job WHERE status = 'running'")) {
-    if (engineOf(j.tool) === "flow") { void reattachVideoJob(j.id).catch((e) => logger.warn("creative.reattach_failed", { jobId: j.id, error: String(e) })); continue; }
+    if (engineOf(j.tool) === "flow" || engineOf(j.tool) === "news") { void reattachVideoJob(j.id).catch((e) => logger.warn("creative.reattach_failed", { jobId: j.id, error: String(e) })); continue; }
     // Local engines run inside this process — after a restart, start the job again from the queue.
     update("creative_job", j.id, { status: "queued", step: "Máy chủ vừa khởi động lại — chạy lại" });
     enqueue("agent", "creative.local", { jobId: j.id }, { bizId: j.biz_id, idempotencyKey: `flow:${j.id}:r${Date.now()}`, lockKey: "video-ai", maxAttempts: 1 });

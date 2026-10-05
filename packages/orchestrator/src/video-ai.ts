@@ -19,6 +19,9 @@ import { AppError, nowIso } from "@dotaka/shared";
 export const VIDEO_AI_ROOT = resolve(process.env.VIDEO_AI_ROOT ?? "services/video-ai");
 const MPT = join(VIDEO_AI_ROOT, "MoneyPrinterTurbo");
 const LP = join(VIDEO_AI_ROOT, "LivePortrait");
+/** Remotion project for the news-to-video skill (blank template + @remotion/media + @remotion/google-fonts). */
+export const REMOTION_NEWS = join(VIDEO_AI_ROOT, "remotion-news");
+export const NEWS_SKILL_DIR = resolve("assets/claude/skills/news-to-video");
 const TOOLS = resolve("tools/video");
 const OUT = resolve("data/creative/video-ai");
 export const VI_VOICES = [
@@ -48,6 +51,7 @@ export function videoAiStatus() {
       presets: existsSync(drivingDir) ? readdirSync(drivingDir).filter((f) => f.endsWith(".mp4")).sort((a, b) => a.localeCompare(b, "en", { numeric: true })) : [],
     },
     whisper: { installed: whisper },
+    remotion: { installed: existsSync(join(REMOTION_NEWS, "node_modules", "@remotion", "cli")) && existsSync(join(REMOTION_NEWS, "node_modules", ".remotion", "chrome-headless-shell")) },
     tts: { installed: existsSync(join(MPT, ".venv", "bin", "edge-tts")), voices: VI_VOICES },
     fishSpeech: { installed: false, note: "Thay bằng Edge TTS: bản S2-Pro cần GPU/RAM lớn và giấy phép Fish Audio cấm dùng thương mại." },
     freeDiskGB: free ? Math.round(free / 1e9) : null,
@@ -75,7 +79,15 @@ export function ensureVideoBins() {
   w("taki-video-finish", `"${py(TOOLS)}" "${join(TOOLS, "finish.py")}"`);
   w("taki-video-stt", `"${py(TOOLS)}" "${join(TOOLS, "stt.py")}"`);
   w("taki-flow-save", `"${process.execPath}" "${resolve("packages/orchestrator/bin/flow-save.mjs")}"`);
-  if (existsSync(join(MPT, ".venv", "bin", "edge-tts"))) w("taki-tts", `"${join(MPT, ".venv", "bin", "edge-tts")}"`);
+  const sh = (name: string, body: string) => { const p = join(dir, name); writeFileSync(p, `#!/bin/sh\n# TAKI Agentic AI (${resolve(".")})\n${body}\n`); chmodSync(p, 0o755); };
+  // Edge TTS sometimes answers "No audio was received" and succeeds on the next call: retry up to 3 times.
+  if (existsSync(join(MPT, ".venv", "bin", "edge-tts"))) sh("taki-tts", `for i in 1 2 3; do "${join(MPT, ".venv", "bin", "edge-tts")}" "$@" && exit 0; echo "taki-tts: thử lại ($i)" >&2; sleep 2; done\nexit 1`);
+  // news-to-video skill helpers (scripts ship inside the skill folder; taki-news-fetch = step 1 without ad-hoc parsing).
+  w("taki-news-fetch", `"${process.execPath}" "${resolve("packages/orchestrator/bin/news-fetch.mjs")}"`);
+  w("taki-news-transcribe", `"${py(TOOLS)}" "${join(NEWS_SKILL_DIR, "scripts", "transcribe.py")}"`);
+  sh("taki-news-chunks", `# taki-news-chunks <sents.json> <exportName> <out.ts>\n[ $# -eq 3 ] || { echo "Dùng: taki-news-chunks <sents.json> <tênExport> <file.ts>" >&2; exit 2; }\n"${py(TOOLS)}" "${join(NEWS_SKILL_DIR, "scripts", "chunkgen.py")}" "$1" "$2" > "$3"`);
+  // Vbee (paid voices) only when the CEO put credentials in ~/.vbee.env — the token never reaches the agent.
+  sh("taki-vbee-tts", `if [ "$1" = "--check" ]; then [ -f "$HOME/.vbee.env" ] && echo "co cau hinh Vbee" && exit 0; echo "khong co ~/.vbee.env — dung taki-tts"; exit 1; fi\n[ -f "$HOME/.vbee.env" ] || { echo "Khong co ~/.vbee.env — dung taki-tts" >&2; exit 1; }\nset -a; . "$HOME/.vbee.env"; set +a\nexec "${py(TOOLS)}" "${join(NEWS_SKILL_DIR, "scripts", "vbee_tts.py")}" "$@"`);
   return dir;
 }
 

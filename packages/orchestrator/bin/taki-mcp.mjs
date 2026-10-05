@@ -140,13 +140,24 @@ tool("huy_tac_vu", "Hủy 1 tác vụ đang chờ/chạy. Tạo thẻ xác nhậ
 tool("thao_tac_quang_cao", "Đề xuất tạm dừng / chạy lại / đổi ngân sách ngày 1 quảng cáo (VND). Tạo thẻ xác nhận.", {
   ad_id: z.string(), hanh_dong: z.enum(["pause_ad", "resume_ad", "update_budget"]), ngan_sach: z.number().int().positive().optional(), ten_quang_cao: z.string().optional(), ly_do: z.string().optional(),
 }, async (a) => confirm(`${{ pause_ad: "Tạm dừng", resume_ad: "Chạy lại", update_budget: `Đổi ngân sách ${a.ngan_sach?.toLocaleString("vi-VN")}đ` }[a.hanh_dong]} quảng cáo ${a.ten_quang_cao ?? a.ad_id}`, a.ly_do ?? "", "POST", `/v1/ads/${encodeURIComponent(a.ad_id)}/action`, { type: a.hanh_dong, amount: a.ngan_sach }));
-tool("tao_video_flow", "Sản xuất video trên Google Flow (tốn tín dụng Flow, ~40 phút, chạy ngầm). Công cụ: review-do-an-vat (đồ ăn vặt) | review-thoi-trang (thời trang — KOC FASHION, 8 giây/cảnh) | nguoi-que-so-sanh (người que so sánh sản phẩm A vs B — ghi rõ 2 sản phẩm + tiêu chí trong noi_dung) | (Video KOC thời trang nữ, Review đồ gia dụng, Review nhà hàng/quán/shop cần ảnh thật nên KHÔNG tạo qua chat — mời Sếp mở trang Sản xuất video, chọn đúng thẻ và tải ảnh) | (Video nhân hiệu BrandUp cần ảnh chân dung thật của Sếp nên KHÔNG tạo qua chat — mời Sếp mở trang Sản xuất video, chọn "Video nhân hiệu · BrandUp" và tải ảnh) | cooking-director | cinematic. Tạo thẻ xác nhận.", {
+tool("tao_video_flow", "Sản xuất video trên Google Flow (tốn tín dụng Flow, ~40 phút, chạy ngầm). Công cụ: review-do-an-vat (đồ ăn vặt) | review-thoi-trang (thời trang — KOC FASHION, 8 giây/cảnh) | nguoi-que-so-sanh (người que so sánh sản phẩm A vs B — ghi rõ 2 sản phẩm + tiêu chí trong noi_dung) | (Video KOC thời trang nữ, Review đồ gia dụng, Review nhà hàng/quán/shop cần ảnh thật nên KHÔNG tạo qua chat — mời Sếp mở trang Sản xuất video, chọn đúng thẻ và tải ảnh) | (Video nhân hiệu BrandUp cần ảnh chân dung thật của Sếp nên KHÔNG tạo qua chat — mời Sếp mở trang Sản xuất video, chọn thẻ «Video nhân hiệu · BrandUp» và tải ảnh) | cooking-director | cinematic. Tạo thẻ xác nhận.", {
   cong_cu: z.enum(["review-do-an-vat", "review-thoi-trang", "nguoi-que-so-sanh", "cooking-director", "cinematic"]), tieu_de: z.string().min(2), noi_dung: z.string().min(5), san_pham: z.string().optional(),
   thoi_luong: z.number().int().min(15).max(120).optional(), giong: z.string().optional(), hook: z.string().optional(), cta: z.string().optional(),
   kenh: z.array(z.enum(["tiktok", "facebook", "instagram"])).optional(), thuong_hieu: z.enum(["taki", "other"]).optional(),
 }, async (a) => confirm(`Tạo video Flow: ${a.tieu_de}`, `${a.cong_cu} · ${a.thoi_luong ?? "mặc định"}s · tốn tín dụng Flow`, "POST", "/v1/creative/jobs", {
   tool: a.cong_cu, title: a.tieu_de, brief: a.noi_dung, product: a.san_pham, durationSec: a.thoi_luong, voice: a.giong, hookTitle: a.hook, cta: a.cta, channels: a.kenh ?? ["tiktok"], brand: a.thuong_hieu ?? "other", images: [],
 }));
+tool("tao_video_tin_tuc", "Làm NGAY video tin tức dọc 9:16 từ 1 link bài báo, chạy trên máy (không tốn tín dụng Flow, ~15 phút): Claude CLI đọc bài, viết lời đọc (không bịa số liệu, ghi nguồn), giọng Việt, phụ đề karaoke, đồ hoạ Remotion → Review → hộp Duyệt.", {
+  link: z.string().url(), tieu_de: z.string().min(2).optional(), ghi_chu: z.string().optional().describe("vd: giọng nữ, nhấn mạnh số liệu, câu kết"),
+  thoi_luong: z.number().int().min(30).max(120).optional(), kenh: z.array(z.enum(["tiktok", "facebook", "instagram"])).optional(), thuong_hieu: z.enum(["taki", "other"]).optional(),
+}, async (a) => {
+  const j = await call("POST", "/v1/creative/jobs", {
+    tool: "news-video", title: a.tieu_de ?? `Tin: ${a.link.replace(/^https?:\/\//, "").slice(0, 80)}`, brief: [a.link, a.ghi_chu].filter(Boolean).join("\n"),
+    durationSec: a.thoi_luong ?? 60, channels: a.kenh ?? ["tiktok"], brand: a.thuong_hieu ?? "other", images: [],
+  });
+  await dispatched("news-video", "creative_job", j.id, a.tieu_de ?? a.link);
+  return { jobId: j.id, status: j.status, ghiChu: "Đang dựng trên máy (~10-20 phút), xong vào hộp Duyệt. Theo dõi ở [Sản xuất video](/video-flow)." };
+});
 tool("tao_video_tu_dong", "Làm NGAY video ngắn tự động trên máy (không tốn tín dụng Flow): Claude CLI viết lời đọc tiếng Việt, MoneyPrinterTurbo ghép cảnh + giọng Edge TTS + phụ đề → Review → hộp Duyệt. Nguồn cảnh: flow (clip của 1 video Flow đã làm, cần flow_job_id), pexels/pixabay (kho miễn phí, cần khóa đã nhập), local (không dùng qua chat).", {
   tieu_de: z.string().min(2), noi_dung: z.string().min(5).describe("Chủ đề/thông tin sản phẩm, hoặc lời đọc có sẵn nếu loi_doc_co_san=true"), san_pham: z.string().optional(),
   thoi_luong: z.number().int().min(15).max(90).optional(), cta: z.string().optional(), nguon_canh: z.enum(["flow", "pexels", "pixabay"]).optional(), flow_job_id: z.string().optional(),

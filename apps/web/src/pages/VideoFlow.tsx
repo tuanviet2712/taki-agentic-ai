@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Clapperboard, CookingPot, UserRound, Wand2, ExternalLink, Film, Globe, ImagePlus, Loader2, Mic, PersonStanding, Play, Shirt, Sparkles, Square, Store, Trash2, UtensilsCrossed } from "lucide-react";
+import { Clapperboard, CookingPot, Newspaper, UserRound, Wand2, ExternalLink, Film, Globe, ImagePlus, Loader2, Mic, PersonStanding, Play, Shirt, Sparkles, Square, Store, Trash2, UtensilsCrossed } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, cx, inputCls, useToast } from "../components/ui";
 
-const TOOL_ICON: Record<string, any> = { "review-do-an-vat": UtensilsCrossed, "review-thoi-trang": Shirt, "nguoi-que-so-sanh": PersonStanding, "nhan-hieu": Mic, "koc-thoi-trang-nu": Sparkles, "review-gia-dung": CookingPot, "review-nha-hang": Store, "cooking-director": Clapperboard, cinematic: Film, "auto-video": Wand2, portrait: UserRound };
+const TOOL_ICON: Record<string, any> = { "review-do-an-vat": UtensilsCrossed, "review-thoi-trang": Shirt, "nguoi-que-so-sanh": PersonStanding, "nhan-hieu": Mic, "koc-thoi-trang-nu": Sparkles, "review-gia-dung": CookingPot, "review-nha-hang": Store, "cooking-director": Clapperboard, cinematic: Film, "auto-video": Wand2, "news-video": Newspaper, portrait: UserRound };
 const STATUS: Record<string, [string, any]> = {
   queued: ["Chờ trình duyệt", "gray"], running: ["Đang sản xuất", "blue"], done: ["Xong, chờ duyệt", "green"],
   approved: ["Đã duyệt", "blue"], drafted: ["Đã lên nháp kênh", "green"],
@@ -89,14 +89,14 @@ export function VideoFlow() {
   };
 
   const tool = tools.data?.find((t) => t.key === form.tool);
-  const engine: "flow" | "moneyprinter" | "liveportrait" = tool?.engine ?? "flow";
-  const flowDone = (jobs.data ?? []).filter((j: any) => !["auto-video", "portrait"].includes(j.tool) && ["done", "approved", "drafted"].includes(j.status));
+  const engine: "flow" | "moneyprinter" | "liveportrait" | "news" = tool?.engine ?? "flow";
+  const flowDone = (jobs.data ?? []).filter((j: any) => !["auto-video", "portrait", "news-video"].includes(j.tool) && ["done", "approved", "drafted"].includes(j.status));
   const hasBrowser = !!settings.data?.chromeProfileDir;
   const fbAccount = fb.data?.accounts?.includes(settings.data?.chromeProfileEmail) ? settings.data.chromeProfileEmail : fb.data?.accounts?.[0];
   const showFlow = async (state: "normal" | "parked") => { try { await api.post("creative/flow-browser/window", { state }); } catch (e: any) { toast(e.message, "err"); } };
   const login = async () => { try { await api.post("creative/flow-browser/login"); toast("Đã mở Chrome Flow ở trang đăng nhập Google — Sếp đăng nhập 1 lần", "info"); fb.reload(); } catch (e: any) { toast(e.message, "err"); } };
   const cliOk = sys?.llm?.provider === "claude_cli";
-  const ready = engine === "flow" ? hasBrowser && cliOk : engine === "moneyprinter" ? cliOk && !!vai.data?.moneyprinter?.installed : !!vai.data?.liveportrait?.installed;
+  const ready = engine === "flow" ? hasBrowser && cliOk : engine === "moneyprinter" ? cliOk && !!vai.data?.moneyprinter?.installed : engine === "news" ? cliOk && !!vai.data?.remotion?.installed : !!vai.data?.liveportrait?.installed;
   const current = selected ?? jobs.data?.[0]?.id ?? null;
 
   return (
@@ -120,7 +120,7 @@ export function VideoFlow() {
               {(tools.data ?? []).map((t) => {
                 const Icon = TOOL_ICON[t.key] ?? Film;
                 return (
-                  <button key={t.key} onClick={() => set({ tool: t.key, durationSec: t.key === "cinematic" ? 60 : t.key === "cooking-director" ? 80 : t.key === "auto-video" ? 30 : t.key === "review-thoi-trang" ? 40 : t.key === "nhan-hieu" ? 50 : t.key === "review-gia-dung" ? 40 : t.key === "review-nha-hang" ? 32 : 48 })} className={cx("rounded-xl border p-3 text-left transition", form.tool === t.key ? "border-blue-500 bg-blue-500/5 ring-2 ring-blue-500/15" : "border-line hover:bg-soft")}>
+                  <button key={t.key} onClick={() => set({ tool: t.key, durationSec: t.key === "cinematic" ? 60 : t.key === "cooking-director" ? 80 : t.key === "auto-video" ? 30 : t.key === "review-thoi-trang" ? 40 : t.key === "nhan-hieu" ? 50 : t.key === "review-gia-dung" ? 40 : t.key === "review-nha-hang" ? 32 : t.key === "news-video" ? 60 : 48 })} className={cx("rounded-xl border p-3 text-left transition", form.tool === t.key ? "border-blue-500 bg-blue-500/5 ring-2 ring-blue-500/15" : "border-line hover:bg-soft")}>
                     <Icon className="h-5 w-5 text-blue-600" />
                     <p className="mt-2 text-sm font-semibold">{t.label}</p>
                     <p className="text-[11px] text-muted">~{t.minutes} phút · {t.engine && t.engine !== "flow" ? "chạy trên máy, không tốn credit" : `Google Flow · skill v${t.skillVersion ?? "?"}`}</p>
@@ -133,7 +133,7 @@ export function VideoFlow() {
                 <p>Cần: {tool.hint}</p>
                 {engine === "flow"
                   ? <p>Tool Flow: {tool.toolUrl ? <a href={tool.toolUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600">{tool.label}<ExternalLink className="h-3 w-3" /></a> : <span>agent tự tìm "{tool.label}" trong mục Tools của Flow</span>}</p>
-                  : <p>{engine === "moneyprinter" ? "MoneyPrinterTurbo (MIT) + Claude CLI viết lời + Edge TTS giọng Việt" : "LivePortrait (MIT, dò mặt MediaPipe — dùng thương mại được)"} · chạy trên máy Sếp{vai.data && !(engine === "moneyprinter" ? vai.data.moneyprinter.installed : vai.data.liveportrait.installed) ? " · CHƯA CÀI — chạy pnpm video-ai:install" : ""}</p>}
+                  : <p>{engine === "moneyprinter" ? "MoneyPrinterTurbo (MIT) + Claude CLI viết lời + Edge TTS giọng Việt" : engine === "news" ? "Skill news-to-video: Claude CLI + Edge TTS + whisper + Remotion (phụ đề karaoke, đồ hoạ động)" : "LivePortrait (MIT, dò mặt MediaPipe — dùng thương mại được)"} · chạy trên máy Sếp{vai.data && !(engine === "moneyprinter" ? vai.data.moneyprinter.installed : engine === "news" ? vai.data.remotion?.installed : vai.data.liveportrait.installed) ? " · CHƯA CÀI — chạy pnpm video-ai:install" : ""}</p>}
               </div>
             )}
             <div className="grid gap-3 sm:grid-cols-2">
@@ -203,7 +203,7 @@ export function VideoFlow() {
                 {form.video.voiceText && <select className={inputCls} value={form.video.voiceName} onChange={(e) => setV({ voiceName: e.target.value })}>{(vai.data?.tts?.voices ?? []).map((v: any) => <option key={v.id} value={v.id}>{v.label}</option>)}</select>}
               </div>
             )}
-            <Field label="Thông tin sản phẩm / chủ đề / kịch bản"><textarea rows={6} className={inputCls} value={form.brief} onChange={(e) => set({ brief: e.target.value })} placeholder="Giá, vị, điểm nổi bật, ưu đãi, link affiliate… hoặc chủ đề phim + thông điệp" /></Field>
+            <Field label={engine === "news" ? "Link bài báo + ghi chú" : "Thông tin sản phẩm / chủ đề / kịch bản"} hint={engine === "news" && form.brief && !/https?:\/\//.test(form.brief) ? "Cần có link bài báo (http…)" : undefined}><textarea rows={6} className={inputCls} value={form.brief} onChange={(e) => set({ brief: e.target.value })} placeholder={engine === "news" ? "https://vnexpress.net/... \nGhi chú (tuỳ chọn): giọng nữ, nhấn mạnh số liệu..." : "Giá, vị, điểm nổi bật, ưu đãi, link affiliate… hoặc chủ đề phim + thông điệp"} /></Field>
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="Giọng"><input className={inputCls} value={form.voice} onChange={(e) => set({ voice: e.target.value })} placeholder="Nữ, miền Bắc, xưng chị" /></Field>
               <Field label="Tiêu đề hook"><input className={inputCls} value={form.hookTitle} onChange={(e) => set({ hookTitle: e.target.value })} /></Field>
@@ -219,7 +219,7 @@ export function VideoFlow() {
                 <button key={c} onClick={() => set({ channels: form.channels.includes(c) ? form.channels.filter((x: string) => x !== c) : [...form.channels, c] })} className={cx("flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs", form.channels.includes(c) ? "border-blue-500 bg-blue-500/10" : "border-line")}><PlatformIcon p={c} size={14} />{c}</button>
               ))}</div>
             </div>
-            <div className="flex justify-end"><Button variant="primary" icon={Play} disabled={!ready || !form.title || (engine !== "liveportrait" && form.brief.length < 5) || !form.channels.length || (tool?.slots ?? []).some((sl: any) => sl.required && !form.images.some((i: any) => i.role === sl.role)) || (engine === "moneyprinter" && form.video.source === "flow" && !form.video.flowJobId) || (engine === "moneyprinter" && form.video.source === "local" && !form.video.materials.length)} onClick={() => setConfirm(true)}>Bắt đầu sản xuất</Button></div>
+            <div className="flex justify-end"><Button variant="primary" icon={Play} disabled={!ready || !form.title || (engine !== "liveportrait" && form.brief.length < 5) || (engine === "news" && !/https?:\/\/\S+/.test(form.brief)) || !form.channels.length || (tool?.slots ?? []).some((sl: any) => sl.required && !form.images.some((i: any) => i.role === sl.role)) || (engine === "moneyprinter" && form.video.source === "flow" && !form.video.flowJobId) || (engine === "moneyprinter" && form.video.source === "local" && !form.video.materials.length)} onClick={() => setConfirm(true)}>Bắt đầu sản xuất</Button></div>
           </div>
         </Card>
 
@@ -253,7 +253,8 @@ export function VideoFlow() {
           {engine !== "flow" ? (
             <ul className="list-disc space-y-1 pl-5 text-muted">
               <li>Chạy trên máy Sếp, <b>không tốn tín dụng Flow</b>, không cần bấm gì (khoảng {tool?.minutes} phút{engine === "liveportrait" ? `; ${form.video.seconds} giây clip` : ""}). Có thông báo khi xong.</li>
-              {engine === "moneyprinter" ? <li>Claude CLI viết lời đọc{form.video.scriptReady ? " (giữ nguyên lời Sếp)" : ""}, MoneyPrinterTurbo ghép cảnh + giọng Việt + phụ đề → Review → hộp Duyệt → đăng bản nháp lên {form.channels.join(", ")} sau khi duyệt.</li>
+              {engine === "news" ? <li>Claude CLI đọc bài, viết lời đọc (không bịa số liệu, ghi nguồn báo + ảnh), tạo giọng Việt, phụ đề karaoke, đồ hoạ Remotion, chuẩn âm thanh -14 LUFS → Review → hộp Duyệt → đăng bản nháp lên {form.channels.join(", ")} sau khi duyệt.</li>
+                : engine === "moneyprinter" ? <li>Claude CLI viết lời đọc{form.video.scriptReady ? " (giữ nguyên lời Sếp)" : ""}, MoneyPrinterTurbo ghép cảnh + giọng Việt + phụ đề → Review → hộp Duyệt → đăng bản nháp lên {form.channels.join(", ")} sau khi duyệt.</li>
                 : <li>Clip cử động vào thư viện video (dùng làm đoạn mở đầu / chèn vào video khác), không tự đăng.</li>}
             </ul>
           ) : (
@@ -397,6 +398,7 @@ function VideoAiTools({ status, onChanged, upload }: { status: any; onChanged: (
           <Row ok={status.moneyprinter.installed} name="MoneyPrinterTurbo" desc={`Video tự động từ cảnh có sẵn · kho Pexels: ${status.moneyprinter.pexels.length ? status.moneyprinter.pexels.join(", ") : "chưa có khóa"}`} />
           <Row ok={status.liveportrait.installed && status.liveportrait.mediapipe} name="LivePortrait + MediaPipe" desc={`Ảnh chân dung cử động · ${status.liveportrait.presets.length} video biểu cảm mẫu · dò mặt MediaPipe (dùng thương mại được)`} />
           <Row ok={status.whisper.installed} name="faster-whisper" desc="Nhận dạng lời thoại tiếng Việt, xuất phụ đề .srt" />
+          <Row ok={!!status.remotion?.installed} name="Remotion" desc="Dựng video tin tức từ link bài báo (skill news-to-video) · phụ đề karaoke, đồ hoạ động" />
           <Row ok={status.tts.installed} name="Edge TTS (thay fish-speech)" desc="Giọng Việt Hoài My / Nam Minh, dùng thương mại được" />
           <p className="text-[11px] text-muted">fish-speech không cài: {status.fishSpeech.note}{status.freeDiskGB != null ? ` · Đĩa còn ${status.freeDiskGB} GB.` : ""}</p>
         </div>

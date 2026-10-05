@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { listChromeProfiles } from "./chrome-profiles.ts";
-import { ensureVideoBins, finishMaterialJob, runAutoVideo, runPortrait } from "./video-ai.ts";
+import { NEWS_SKILL_DIR, REMOTION_NEWS, ensureVideoBins, finishMaterialJob, runAutoVideo, runPortrait, videoAiStatus } from "./video-ai.ts";
 import { ensureFlowBrowser, flowAccounts, flowMcpConfig, flowSource, openFlowLogin, syncFlowProfile } from "./flow-browser.ts";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
@@ -184,12 +184,18 @@ export const FLOW_TOOLS = {
   },
   // Local video AI (services/video-ai) — no Flow credits, no browser
   "auto-video": { engine: "moneyprinter", skill: "", label: "Video tự động · cảnh + giọng đọc", minutes: 4, hint: "Chủ đề hoặc kịch bản có sẵn → Claude CLI viết lời đọc, MoneyPrinterTurbo ghép cảnh (Pexels/Pixabay hoặc clip của Sếp / clip Flow), giọng Việt Edge TTS, phụ đề tự động", toolUrl: null, uiMap: [] },
+  // Claude CLI + Remotion on this Mac (skill news-to-video): article link → voice, word timing, karaoke subtitles, motion graphics.
+  "news-video": {
+    engine: "news", skill: "news-to-video", label: "Video tin tức từ link bài báo", minutes: 15,
+    hint: "Dán link bài báo (kèm ghi chú nếu cần: giọng nam/nữ, nhấn mạnh ý nào) → Claude CLI đọc bài, viết lời đọc, giọng Việt, phụ đề karaoke, đồ hoạ Remotion, chuẩn âm thanh -14 LUFS",
+    toolUrl: null, uiMap: [],
+  },
   "portrait": {
     engine: "liveportrait", skill: "", label: "Ảnh chân dung cử động", minutes: 5, hint: "1 ảnh chân dung rõ mặt + video biểu cảm mẫu (có sẵn hoặc tải lên) → LivePortrait làm ảnh cử động; có thể lồng giọng đọc", toolUrl: null, uiMap: [],
     slots: [{ role: "Nhân vật", label: "Ảnh chân dung", hint: "Chính diện, rõ mặt, 1 người", required: true }],
   },
-} as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait"; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
-export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "review-nha-hang" | "cooking-director" | "cinematic" | "auto-video" | "portrait";
+} as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait" | "news"; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
+export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "review-nha-hang" | "cooking-director" | "cinematic" | "auto-video" | "news-video" | "portrait";
 export const engineOf = (tool: string) => FLOW_TOOLS[tool]?.engine ?? "flow";
 
 export const CreativeInput = z.object({
@@ -289,6 +295,7 @@ export function startVideoJob(bizId: string, raw: unknown, actor: string) {
   const engine = engineOf(input.tool);
   for (const p of [...(input.video?.materials ?? []), input.video?.drivingPath].filter(Boolean) as string[]) if (!existsSync(p)) throw new AppError("NO_FILE", `Không thấy tệp ${p}`);
   if (engine === "liveportrait" && !input.images.length) throw new AppError("NO_IMAGE", "Cần 1 ảnh chân dung rõ mặt");
+  if (engine === "news" && !/https?:\/\/\S+/.test(input.brief)) throw new AppError("NO_URL", "Cần dán link bài báo (http…) vào ô nội dung");
   if (engine === "flow") {
     const missing = (FLOW_TOOLS[input.tool].slots ?? []).filter((s) => s.required && !input.images.some((i) => i.role === s.role));
     if (missing.length) throw new AppError("NO_IMAGE", `Cần ảnh: ${missing.map((s) => s.label).join(", ")} (tải ở trang Sản xuất video)`);
@@ -347,7 +354,12 @@ export async function runLocalVideoJob(jobId: string) {
   emit(bizId, "creative.updated", { jobId, status: "running" });
   const say = (text: string, kind: "text" | "tool" = "text") => { log.push({ at: nowIso(), kind, text }); flush(); };
   try {
-    if (engineOf(job.tool) === "liveportrait") {
+    if (engineOf(job.tool) === "news") {
+      const res = await runNewsVideo({ job, log: say, signal: ctrl.signal });
+      flush(true);
+      update("creative_job", jobId, { model: modelFor(bizId, "creative", "medium") });
+      await completeVideoJob(jobId, res);
+    } else if (engineOf(job.tool) === "liveportrait") {
       const res = await runPortrait({ job, log: say, signal: ctrl.signal });
       flush(true);
       finishMaterialJob(jobId, res);
@@ -362,12 +374,80 @@ export async function runLocalVideoJob(jobId: string) {
     flush(true);
     if (byId<Row>("creative_job", jobId)?.status === "cancelled") return;
     const error = e instanceof Error ? e.message : String(e);
-    update("creative_job", jobId, { status: /NO_STOCK_KEY|NOT_INSTALLED|NO_IMAGE|NO_MATERIALS|NO_CLIPS/.test((e as any)?.code ?? "") ? "blocked" : "failed", error, step: null, ended_at: nowIso() });
+    update("creative_job", jobId, { status: /NO_STOCK_KEY|NOT_INSTALLED|NO_IMAGE|NO_MATERIALS|NO_CLIPS|NO_SKILL|NEED_CLI|NO_URL/.test((e as any)?.code ?? "") ? "blocked" : "failed", error, step: null, ended_at: nowIso() });
     emit(bizId, "creative.updated", { jobId, status: "failed" });
     notifyDesktop(`Video "${job.title}" chưa tạo được`, error);
   } finally {
     running.delete(jobId);
   }
+}
+
+/**
+ * News-to-video (skill news-to-video, Remotion): headless Claude CLI on this Mac — no browser, no Flow credits.
+ * The agent fetches the article, writes the voice-over, makes the voice (Edge TTS / Vbee), measures word timing with
+ * whisper, builds karaoke captions + motion graphics in the shared Remotion project, renders and masters to -14 LUFS.
+ */
+async function runNewsVideo({ job, log, signal }: { job: Row; log: (text: string, kind?: "text" | "tool") => void; signal: AbortSignal }) {
+  const bizId = job.biz_id as string;
+  const input = job.input as CreativeInput;
+  const tool = FLOW_TOOLS[input.tool];
+  if (effectiveProvider(bizId).provider !== "claude_cli") throw new AppError("NEED_CLI", "Cần chế độ Tài khoản Claude (Claude Code CLI) để dựng video tin tức");
+  if (!videoAiStatus().remotion.installed) throw new AppError("NOT_INSTALLED", "Remotion chưa cài (pnpm video-ai:install)");
+  const skill = q.get<Row>("SELECT body, version FROM skill WHERE biz_id = ? AND key = ? AND status = 'active'", bizId, tool.skill);
+  if (!skill) throw new AppError("NO_SKILL", `Chưa nạp skill ${tool.skill} (Skill & Nhân viên MKT → Đồng bộ lại)`);
+  const workdir = job.workdir as string;
+  const short = String(job.id).replace(/-/g, "").slice(-8);
+  const slug = `news${short}`, comp = `News${short}`;
+  const P = REMOTION_NEWS;
+  const resultFile = join(workdir, "result.json");
+  const system = [
+    `# SKILL ĐANG CHẠY: ${tool.skill} (v${skill.version})`,
+    skill.body,
+    "",
+    "# MÔI TRƯỜNG CHẠY (máy Mac của TAKI, chạy tự động, KHÔNG có người theo dõi) — áp cho skill ở trên, ưu tiên hơn phần 'YÊU CẦU MÔI TRƯỜNG' của skill",
+    "- Mọi công cụ đã cài sẵn: KHÔNG pip install, KHÔNG npm install, KHÔNG npx create-video.",
+    "- Lệnh Bash được phép chỉ là các lệnh nêu dưới đây (+ cd, ls, mkdir, cp, mv, file, grep, head, wc, cat). Gõ thẳng đường dẫn tuyệt đối trong ngoặc kép; KHÔNG gán biến shell (JOB=…), KHÔNG python3/node/heredoc — sẽ bị chặn. Tạo/sửa file bằng Write/Edit.",
+    `- Thư mục làm việc của job: ${workdir} (bài viết, script, voice, words.json, ảnh kiểm tra, kết quả). Thư mục skill (script, template): ${NEWS_SKILL_DIR}.`,
+    `- Bước 1 fetch: CHẠY taki-news-fetch "<URL>" ${workdir} --images-dir ${join(P, "public", slug)} → ${join(workdir, "article.json")} (title, site, paragraphs theo thứ tự, images[{file,caption,width,height}] đã tải + đổi webp→jpg, ogImage, colors = hex lặp nhiều trong CSS của site, textColor, logos, fonts). Read article.json rồi Read TỪNG ảnh trước khi gán vào cảnh (ảnh cuối "(ảnh bìa og:image)" là ảnh bìa). Thiếu đoạn văn / sai vùng bài → WebFetch URL ("liệt kê TOÀN BỘ đoạn văn theo thứ tự, không tóm tắt") hoặc Grep trong article.html. KHÔNG có python3/node để tự bóc HTML — dùng các lệnh này. Ảnh thêm (logo…) tải bằng curl -o.`,
+    `- Bước 4 giọng: taki-tts --voice vi-VN-NamMinhNeural|vi-VN-HoaiMyNeural --rate=<RATE> --file ${join(workdir, "script.txt")} --write-media ${join(workdir, "voice.mp3")} (lệnh này = python3 -m edge_tts, đã tự thử lại 3 lần). Vbee chỉ khi \`taki-vbee-tts --check\` báo có cấu hình: taki-vbee-tts <script.txt> <voice.mp3> --voice <code> --speed <x>. KHÔNG đọc/hiển thị token Vbee.`,
+    `- Bước 5: taki-news-transcribe ${join(workdir, "voice.mp3")} ${join(workdir, "words.json")}`,
+    `- Bước 6: ghi danh sách câu [[start, end, "TEXT ĐÃ SỬA"], …] vào ${join(workdir, "sents.json")} rồi chạy: taki-news-chunks ${join(workdir, "sents.json")} ${slug}Chunks ${join(P, "src", slug, `${slug}Chunks.ts`)}`,
+    `- Bước 7 Remotion: project DÙNG CHUNG đã có sẵn tại ${P} (React 19, @remotion/media, @remotion/google-fonts). Copy voice.mp3 vào ${join(P, "public", slug, "voice.mp3")} và dùng staticFile("${slug}/voice.mp3"), ảnh = staticFile("${slug}/<tên>"). Code của video này CHỈ nằm trong ${join(P, "src", slug)}/ (Chunks.ts, Graphics.tsx, Main.tsx, Captions.tsx chép từ template). Đăng ký thêm đúng 1 <Composition id="${comp}" …/> (1080x1920, 30fps) trong ${join(P, "src", "Root.tsx")} — GIỮ NGUYÊN các composition đã có. Không sửa file nào khác của project.`,
+    `- Kiểm tra: cd "${P}" && npx tsc --noEmit ; cd "${P}" && npx remotion still ${comp} --scale=0.3 --frame=<N> ${join(workdir, "check_<N>.png")} (4–5 khung, Read từng ảnh).`,
+    `- Bước 8: cd "${P}" && npx remotion render ${comp} ${join(workdir, "render.mp4")} --codec=h264 ; đo + master loudness bằng ffmpeg như skill → file cuối ${join(workdir, "final.mp4")}. Trích 3–5 khung từ final.mp4 bằng ffmpeg -ss <t> -frames:v 1 rồi Read để QC.`,
+    "- KHÔNG có người để hỏi: bỏ qua AskUserQuestion; thiếu thông tin thì tự quyết theo skill và ghi vào notes. Link không mở được / bài bị chặn / không đủ nội dung → ghi result.json status \"blocked\" kèm lý do.",
+    "- Nguồn bài và ảnh phải ghi đúng (chip ảnh + credit cuối video), không bịa số liệu — như quy tắc bất biến của skill.",
+    `- KẾT THÚC: dùng Write ghi ${resultFile} đúng schema: ${JSON.stringify(Object.fromEntries(Object.entries(z.toJSONSchema(FlowResult, { target: "draft-7" }) as Row).filter(([k]) => k !== "$schema")))}`,
+    `  finalPath = ${join(workdir, "final.mp4")}; scenes = số cảnh; script = lời đọc theo từng câu/cảnh [{canh, loi_thoai}]; caption = caption đăng kênh (≤ 300 ký tự, có "Nguồn: <tên báo>", 3–5 hashtag); notes = tên báo, hệ phong cách đã chọn, giọng, thời lượng, LUFS đo được. Lỗi giữa chừng cũng PHẢI ghi result.json với status "failed"/"blocked".`,
+  ].join("\n");
+  const prompt = [
+    `Video tin tức: ${input.title}`,
+    `Link + ghi chú:\n${input.brief}`,
+    input.durationSec ? `Thời lượng mong muốn: khoảng ${input.durationSec} giây (skill: 50–95 giây).` : "",
+    input.voice ? `Giọng: ${input.voice}` : "",
+    input.hookTitle ? `Gợi ý câu hook: ${input.hookTitle}` : "",
+    input.cta ? `Câu kết / CTA: ${input.cta}` : "",
+    `Kênh sẽ đăng: ${input.channels.join(", ")} (dọc 9:16).`,
+    `Chạy đủ 8 bước của skill news-to-video đến khi có ${join(workdir, "final.mp4")} đã master âm thanh, rồi ghi result.json.`,
+  ].filter(Boolean).join("\n\n");
+  log(`Claude CLI dựng video tin tức (Remotion, composition ${comp})`);
+  const structured = await runClaudeInTerminal({
+    title: `Video tin tức: ${job.title}`, prompt, system, model: modelFor(bizId, "creative", "medium"), cwd: RUN_DIR, signal, resultFile,
+    timeoutMs: 45 * 60_000,
+    mcpConfig: { mcpServers: {} }, // headless `claude -p`, no browser tools
+    env: { PATH: `${ensureVideoBins()}:${process.env.PATH ?? ""}` },
+    allowedTools: [
+      "Read", "Write", "Edit", "Glob", "Grep", "WebFetch",
+      "Bash(taki-news-fetch:*)", "Bash(curl:*)", "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(taki-tts:*)", "Bash(taki-vbee-tts:*)", "Bash(taki-news-transcribe:*)", "Bash(taki-news-chunks:*)",
+      "Bash(grep:*)", "Bash(head:*)", "Bash(wc:*)", "Bash(cat:*)",
+      "Bash(npx tsc:*)", "Bash(npx remotion:*)", "Bash(cd:*)", "Bash(ls:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(file:*)",
+    ],
+    addDirs: [workdir, P, NEWS_SKILL_DIR],
+    onStep: (st) => log(st.text, st.kind),
+  });
+  const out = FlowResult.safeParse(structured);
+  if (!out.success) throw new AppError("BAD_RESULT", "Agent không trả kết quả đúng định dạng");
+  return out.data;
 }
 
 export async function runVideoJob(jobId: string) {
