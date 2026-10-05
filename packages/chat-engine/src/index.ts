@@ -5,7 +5,7 @@ import {
   norm, passageHeuristic, passageQuestions, recordDecision, vn, type ChatDecision,
 } from "@dotaka/jev";
 import { generate, summarize } from "@dotaka/llm-gateway";
-import { connector, sendTelegram, type PlatformKey } from "@dotaka/connectors";
+import { connector, ConnectorError, sendTelegram, type Connector, type PlatformKey } from "@dotaka/connectors";
 import { nowIso, untrusted } from "@dotaka/shared";
 import { agentPlaybook } from "@dotaka/skills";
 
@@ -13,6 +13,27 @@ import { agentPlaybook } from "@dotaka/skills";
 function chatPlaybook(bizId: string): string {
   const p = agentPlaybook(bizId, "chat");
   return p.text ? `${p.text}\n\nKHI TRẢ LỜI CHAT: vẫn chỉ 2 đến 4 câu và chỉ dùng FACTS; kỹ thuật bán hàng ở trên dùng để chọn câu hỏi và cách dẫn dắt, không kéo dài tin nhắn.` : "";
+}
+
+// ---------------- Where a reply really goes ----------------
+/**
+ * Messenger replies go through the REAL Fanpage (page token) — resolved by the orchestrator, which owns connections.
+ * No live page → refuse: a Messenger reply is never "sent" through a sandbox (real-or-nothing).
+ */
+type ConversationConnector = (conv: Row) => Connector | null;
+let liveConnectorFor: ConversationConnector = () => null;
+export function setConversationConnector(fn: ConversationConnector) { liveConnectorFor = fn; }
+const DAY_MS = 24 * 3600_000;
+function senderFor(conv: Row, now = Date.now()): Connector {
+  if (conv.channel !== "messenger") return connector(CHANNEL_PLATFORM[conv.channel] ?? "pancake");
+  const c = liveConnectorFor(conv);
+  if (!c) throw new ConnectorError("PolicyRejected", "Chưa có Fanpage thật kết nối (page token) — tin Messenger không được gửi");
+  const lastCustomer = conv.last_customer_at
+    ?? q.get<Row>("SELECT sent_at FROM message WHERE conversation_id = ? AND sender = 'customer' ORDER BY sent_at DESC LIMIT 1", conv.id)?.sent_at;
+  if (lastCustomer && now - new Date(lastCustomer).getTime() > DAY_MS) {
+    throw new ConnectorError("PolicyRejected", "Quá 24 giờ từ tin cuối của khách — Facebook không cho Trang nhắn chủ động. Đợi khách nhắn lại hoặc trả lời trong Meta Business Suite");
+  }
+  return c;
 }
 
 // ---------------- Conversation state machine (spec §11) ----------------
@@ -102,7 +123,8 @@ export async function handleIncoming(bizId: string, msg: IncomingMessage): Promi
     return { conversationId: conv.id, replied: false, state: conv.state };
   }
   insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "in", sender: "customer", body: { text: msg.text }, external_id: msg.messageId ?? null, sent_at: nowIso() });
-  update("conversation", conv.id, { last_message_at: nowIso(), last_preview: msg.text.slice(0, 140), unread: (conv.unread ?? 0) + 1 });
+  update("conversation", conv.id, { last_message_at: nowIso(), last_preview: msg.text.slice(0, 140), unread: (conv.unread ?? 0) + 1, last_customer_at: nowIso() });
+  conv.last_customer_at = nowIso();
 
   // 2) attribution from referral / utm (highest-confidence methods first, spec §7)
   if (isNew && msg.referral?.adId) {
@@ -171,11 +193,10 @@ export async function handleIncoming(bizId: string, msg: IncomingMessage): Promi
     return { conversationId: conv.id, replied: false, state: conv.state, decision: d };
   }
 
-  const channelPlatform = CHANNEL_PLATFORM[conv.channel] ?? "pancake";
   const send = async (raw: string, meta: Row) => {
     const text = applyBannedChars(raw, dna);
     const key = `reply:${conv!.id}:${msg.messageId ?? Date.now()}`;
-    const r = await connector(channelPlatform).sendMessage!({ conversationExternalId: conv!.external_id, text }, key);
+    const r = await senderFor(conv!).sendMessage!({ conversationExternalId: conv!.external_id, text }, key);
     insert("message", { biz_id: bizId, conversation_id: conv!.id, direction: "out", sender: "bot", body: { text }, external_id: r.externalId, meta, sent_at: nowIso() });
     update("conversation", conv!.id, { last_message_at: nowIso(), last_preview: text.slice(0, 140) });
   };
@@ -306,8 +327,7 @@ export async function replyAsHuman(bizId: string, conversationId: string, text: 
   const conv = byId<Row>("conversation", conversationId);
   if (!conv || conv.biz_id !== bizId) throw new Error("Không tìm thấy hội thoại");
   if (conv.state !== "human_active") transition(conv, "human_active", staff);
-  const platform = CHANNEL_PLATFORM[conv.channel] ?? "pancake";
-  const r = await connector(platform).sendMessage!({ conversationExternalId: conv.external_id, text }, `human:${conv.id}:${Date.now()}`);
+  const r = await senderFor(conv).sendMessage!({ conversationExternalId: conv.external_id, text }, `human:${conv.id}:${Date.now()}`);
   insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "out", sender: "human", body: { text }, external_id: r.externalId, meta: { staff }, sent_at: nowIso() });
   update("conversation", conv.id, { last_message_at: nowIso(), last_preview: text.slice(0, 140), unread: 0, assigned_to: staff });
   emit(bizId, "conversation.message_out", { conversationId });
@@ -337,7 +357,9 @@ export async function runFollowUps(bizId: string, now = new Date()) {
       : "Dạ em chỉ hỏi thăm lại ạ, nếu anh/chị cần tư vấn thêm về chương trình em luôn sẵn sàng ạ.";
     if (hasAny(text, ["cam kết", "đảm bảo"])) continue;
     const conv = byId<Row>("conversation", f.conversation_id)!;
-    const r = await connector(CHANNEL_PLATFORM[conv.channel] ?? "pancake").sendMessage!({ conversationExternalId: conv.external_id, text }, `followup:${f.id}:${f.step}`);
+    let sender: Connector;
+    try { sender = senderFor(conv, now.getTime()); } catch { update("follow_up_plan", f.id, { status: "stopped", template: `${f.template}:no_live_channel` }); continue; }
+    const r = await sender.sendMessage!({ conversationExternalId: conv.external_id, text }, `followup:${f.id}:${f.step}`);
     insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "out", sender: "bot", body: { text }, external_id: r.externalId, meta: { kind: "follow_up", step: f.step }, sent_at: nowIso() });
     update("follow_up_plan", f.id, f.step >= 1 ? { status: "done", step: f.step + 1 } : { step: f.step + 1, next_at: new Date(now.getTime() + 20 * 3600_000).toISOString() });
     sent++;

@@ -208,6 +208,18 @@ export function connectorForChannel(channel: Row): Connector {
   return connector(platformForChannel(channel.platform));
 }
 
+/** Live page connector a Messenger conversation replies through (its own Page, else the only live Page), or null. */
+export function liveMessengerConnector(conv: Row): Connector | null {
+  if (conv.channel !== "messenger") return null;
+  const live = q.all<Row>(`SELECT ch.* FROM channel ch JOIN connection c ON c.id = ch.connection_id
+    WHERE ch.biz_id = ? AND ch.platform = 'facebook' AND ch.enabled = 1 AND ch.secret_ciphertext IS NOT NULL AND c.mode = 'live' AND c.status != 'revoked'`, conv.biz_id);
+  const pageId = conv.ext?.pageId;
+  const ch = pageId ? live.find((c) => String(c.external_id) === String(pageId)) : live.length === 1 ? live[0] : undefined;
+  if (!ch) return null;
+  const c = connectorForChannel(ch);
+  return c.mode === "live" ? c : null;
+}
+
 export function connectorForAccount(accountId: string | null | undefined, platform: PlatformKey) {
   const acc = accountId ? byId<Row>("ad_account", accountId) : undefined;
   const conn = acc?.connection_id ? byId<Row>("connection", acc.connection_id) : undefined;

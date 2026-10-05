@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Bot, FlaskConical, Hand, Search, Send, ShieldAlert, Sparkles, UserRound } from "lucide-react";
+import { Bot, FlaskConical, Hand, History, RefreshCw, Search, Send, ShieldAlert, Sparkles, UserRound } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { CONV_STATE, INTENT, LEAD, hhmm, timeAgo, vnd } from "../lib/format";
-import { Avatar, Badge, Button, Card, Empty, JevBadge, Loading, Modal, PageHeader, PlatformIcon, ProbBar, Ring, Tabs, cx, inputCls, useToast } from "../components/ui";
+import { Avatar, Badge, Button, Card, Empty, JevBadge, Loading, Modal, PageHeader, PlatformIcon, ProbBar, Ring, Tabs, Toggle, cx, inputCls, useToast } from "../components/ui";
 
 const FILTERS = [
   { value: "", label: "Tất cả" }, { value: "unread", label: "Chưa đọc" }, { value: "handoff", label: "Cần người xử lý" }, { value: "hot", label: "Lead nóng" },
@@ -62,6 +62,7 @@ export function Chat() {
           <Button variant="primary" icon={FlaskConical} onClick={() => setSim(true)}>Mô phỏng khách nhắn</Button>
         </>} />
 
+      <MessengerSyncBar />
       <div className="grid gap-4 xl:grid-cols-[320px_1fr_340px]">
         {/* Conversation list */}
         <Card bodyClass="p-3">
@@ -211,5 +212,56 @@ function SimulateModal({ open, onClose, onSent }: { open: boolean; onClose: () =
         <p className="text-xs text-muted">Mã hội thoại: {convKey} — gửi nhiều tin cùng mã để thử hội thoại nhiều lượt.</p>
       </div>
     </Modal>
+  );
+}
+
+/** Đồng bộ Messenger của Fanpage thật: trạng thái, chạy tay, kéo tin cũ, bật/tắt bot trả lời khách thật. */
+function MessengerSyncBar() {
+  const st = useApi<any>("messenger/sync/status", ["messenger.", "alert.", "conversation."]);
+  const [busy, setBusy] = useState<"" | "incremental" | "backfill" | "bot">("");
+  const toast = useToast();
+  const s = st.data;
+  const run = async (mode: "incremental" | "backfill") => {
+    setBusy(mode);
+    try {
+      const r = await api.post<any>("messenger/sync", mode === "backfill" ? { mode, days: 30 } : { mode });
+      if (r.queued) toast(r.already ? "Đang kéo tin cũ rồi — Sếp đợi vài phút nhé" : "Đang kéo tin cũ 30 ngày — xong sẽ tự hiện trong danh sách", "info");
+      else if (r.errors?.length) toast(r.errors[0], "err");
+      else toast(r.newMessages || r.routed ? `Đã kéo về ${r.newMessages + r.routed} tin mới từ Fanpage` : "Không có tin mới");
+      st.reload();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(""); }
+  };
+  const setBot = async (enabled: boolean) => {
+    if (enabled && !confirm("Bật bot tự trả lời KHÁCH THẬT trên Messenger của Fanpage?\nTin bot gửi đi là tin thật, khách đọc được ngay.")) return;
+    setBusy("bot");
+    try { await api.put("messenger/bot", { enabled }); toast(enabled ? "Bot đã bật — sẽ trả lời tin Messenger mới (trong 15 phút)" : "Bot đã tắt — tin mới chỉ lưu + chấm lead, Sếp/nhân viên trả lời"); st.reload(); }
+    catch (e: any) { toast(e.message, "err"); } finally { setBusy(""); }
+  };
+  if (!s) return null;
+  const pages = s.livePages ?? 0;
+  const errors = (s.pages ?? []).filter((p: any) => p.live && p.status === "error");
+  const last = s.lastRunAt ? `Đồng bộ cuối: ${timeAgo(s.lastRunAt)}` : "Chưa đồng bộ lần nào";
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-card px-3 py-2.5 text-sm sm:px-4">
+      <PlatformIcon p="messenger" size={18} />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-ink">Messenger · {pages ? `${last} · ${pages} Fanpage thật` : "chưa có Fanpage thật kết nối"}{s.running || s.backfillQueued ? " · đang đồng bộ…" : ""}</p>
+        {!pages
+          ? <p className="text-xs text-muted">Kết nối Fanpage (page token có quyền pages_messaging) ở <a className="text-blue-600 hover:underline dark:text-blue-400" href="/ads/integrations?p=meta">Trung tâm tích hợp → Facebook</a> — không có dữ liệu mô phỏng.</p>
+          : errors.length > 0
+            ? <p className="text-xs text-rose-600 dark:text-rose-400">{errors[0].name}: {errors[0].error}</p>
+            : <p className="text-xs text-muted">Tin mới được kéo về mỗi 3 phút. Trả lời ở đây gửi thật qua Fanpage (trong 24 giờ từ tin cuối của khách).</p>}
+      </div>
+      {pages > 0 && (
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <label className="flex items-center gap-2 rounded-xl border border-line px-2.5 py-1 text-xs" title="Tắt: tin mới chỉ lưu + chấm lead, người trả lời. Bật: bot trả lời khách thật.">
+            <Bot className="h-4 w-4 text-muted" />Bot tự trả lời
+            <Toggle checked={Boolean(s.botReply)} disabled={busy === "bot"} onChange={setBot} />
+          </label>
+          <Button size="sm" variant="soft" icon={RefreshCw} className="flex-1 whitespace-nowrap sm:flex-none" loading={busy === "incremental"} disabled={Boolean(busy) || s.running} onClick={() => run("incremental")}>Đồng bộ ngay</Button>
+          <Button size="sm" icon={History} className="flex-1 whitespace-nowrap sm:flex-none" loading={busy === "backfill"} disabled={Boolean(busy) || s.backfillQueued} onClick={() => run("backfill")}>Kéo tin cũ 30 ngày</Button>
+        </div>
+      )}
+    </div>
   );
 }

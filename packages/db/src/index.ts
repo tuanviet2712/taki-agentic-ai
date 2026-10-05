@@ -53,6 +53,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   // 1 = went through a sandbox publisher: nothing reached the real page/channel (shown as "Mô phỏng" everywhere)
   ["publish_job", "simulated", "INTEGER NOT NULL DEFAULT 0"],
   ["post", "simulated", "INTEGER NOT NULL DEFAULT 0"],
+  // Last customer message time (Messenger 24h reply window, set by Messenger sync)
+  ["conversation", "last_customer_at", "TEXT"],
 ];
 function migrate(d: DatabaseSync) {
   for (const [table, column, ddl] of MIGRATIONS) {
