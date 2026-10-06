@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Clapperboard, CookingPot, Newspaper, Scissors, UserRound, Wand2, ExternalLink, Film, Globe, ImagePlus, Loader2, Mic, PersonStanding, Play, Shirt, Sparkles, Square, Store, Trash2, UtensilsCrossed } from "lucide-react";
+import { Clapperboard, CookingPot, Footprints, Newspaper, Scissors, UserRound, Wand2, ExternalLink, Film, Globe, ImagePlus, Loader2, Mic, PersonStanding, Play, Shirt, Sparkles, Square, Store, Trash2, UtensilsCrossed } from "lucide-react";
 import { api, apiUrl, useApi } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, cx, inputCls, useToast } from "../components/ui";
 
-const TOOL_ICON: Record<string, any> = { "review-do-an-vat": UtensilsCrossed, "review-thoi-trang": Shirt, "nguoi-que-so-sanh": PersonStanding, "nhan-hieu": Mic, "koc-thoi-trang-nu": Sparkles, "review-gia-dung": CookingPot, "review-nha-hang": Store, "cooking-director": Clapperboard, cinematic: Film, "auto-video": Wand2, "news-video": Newspaper, "edit-source": Scissors, portrait: UserRound };
+const TOOL_ICON: Record<string, any> = { "review-do-an-vat": UtensilsCrossed, "review-thoi-trang": Shirt, "nguoi-que-so-sanh": PersonStanding, "nhan-hieu": Mic, "koc-thoi-trang-nu": Sparkles, "review-gia-dung": CookingPot, "review-nha-hang": Store, "cooking-director": Clapperboard, cinematic: Film, "auto-video": Wand2, "news-video": Newspaper, "edit-source": Scissors, "nhan-hieu-dao-ly": Footprints, portrait: UserRound };
 const STATUS: Record<string, [string, any]> = {
   queued: ["Chờ trình duyệt", "gray"], running: ["Đang sản xuất", "blue"], done: ["Xong, chờ duyệt", "green"],
   approved: ["Đã duyệt", "blue"], drafted: ["Đã lên nháp kênh", "green"],
@@ -306,7 +306,9 @@ export function VideoFlow() {
             </ul>
           ) : (
           <ul className="list-disc space-y-1 pl-5 text-muted">
-            <li>Hệ thống <b>tự chạy ngầm, không cần Sếp bấm gì</b>: AI mở Tool <b>{tool?.label}</b> trong Chrome Flow (tài khoản {settings.data?.chromeProfileEmail ?? settings.data?.chromeProfileName ?? "đã chọn"}), chạy đủ các bước Cấu hình → Khung chủ → Kịch bản → Storyboard → Sản xuất, tải clip, ghép + chèn phụ đề (khoảng {tool?.minutes ?? 40} phút). Chỉ có thông báo khi video đã xong.</li>
+            {tool?.generator
+              ? <li>Hệ thống <b>tự chạy ngầm, không cần Sếp bấm gì</b>: AI mở Google Flow trong Chrome Flow (tài khoản {settings.data?.chromeProfileEmail ?? settings.data?.chromeProfileName ?? "đã chọn"}), dùng <b>trình tạo video thường</b> (Thành phần · 9:16 · Omni 1.1 Flash · 720p) với ảnh nhân vật của Sếp, tạo từng cảnh 8–10 giây, lưu theo đúng thứ tự rồi ghép + chèn phụ đề (khoảng {tool?.minutes ?? 35} phút). Chỉ có thông báo khi video đã xong.</li>
+              : <li>Hệ thống <b>tự chạy ngầm, không cần Sếp bấm gì</b>: AI mở Tool <b>{tool?.label}</b> trong Chrome Flow (tài khoản {settings.data?.chromeProfileEmail ?? settings.data?.chromeProfileName ?? "đã chọn"}), chạy đủ các bước Cấu hình → Khung chủ → Kịch bản → Storyboard → Sản xuất, tải clip, ghép + chèn phụ đề (khoảng {tool?.minutes ?? 40} phút). Chỉ có thông báo khi video đã xong.</li>}
             <li>Mỗi lần tạo cảnh tốn tín dụng Google Flow (tối đa 3 lần làm lại mỗi cảnh).</li>
             <li>Video thành phẩm vào hộp Duyệt; chỉ sau khi duyệt mới đăng <b>bản nháp</b> lên {form.channels.join(", ")}.</li>
           </ul>

@@ -4,26 +4,66 @@
 // by Chrome; the clips are already in the page as <video> elements (data:/blob:/https URLs). Saved in on-page
 // order (= scene order in the SẢN XUẤT step) as scene_01.mp4, scene_02.mp4…
 //   taki-flow-save --out <dir> [--prefix scene_] [--cdp http://127.0.0.1:9333]
+//   taki-flow-save --one <file.mp4>  → trình tạo video THƯỜNG của Flow (không Tool): lưu ĐÚNG 1 clip đang mở/lớn nhất trên
+//     trang dự án vào file chỉ định (mở thẻ cảnh k rồi chạy với scene_0k.mp4). Video nằm ở máy chủ Google (khác nguồn):
+//     tải bằng phiên đăng nhập của Chrome Flow (context.request), không bị CORS chặn.
 //   taki-flow-save --images <n> --out <dir> [--prefix image_]   → up to n large images (≥ 400px) currently shown on
 //     the Flow tab, top-to-bottom, as image_01.png … — e.g. a KOC / background image just generated on the project
 //     page, so it can be uploaded into a Tool's file input. The page also shows decorative images: Read the files
 //     and pick the right one.
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { chromium } from "playwright-core";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
+const one = arg("--one");
 const out = arg("--out");
 const images = Number(arg("--images", "0")) || 0;
 const prefix = arg("--prefix", images ? "image_" : "scene_");
 const cdp = arg("--cdp", `http://127.0.0.1:${process.env.FLOW_CDP_PORT ?? 9333}`);
-if (!out) { console.error("Dùng: taki-flow-save --out <thư mục> [--prefix scene_]"); process.exit(2); }
+if (!out && !one) { console.error("Dùng: taki-flow-save --out <thư mục> [--prefix scene_]  |  taki-flow-save --one <file.mp4>"); process.exit(2); }
 
 const b = await chromium.connectOverCDP(cdp, { timeout: 15_000 });
 try {
   const pages = b.contexts().flatMap((c) => c.pages());
-  const page = pages.find((p) => p.url().includes("/tool/")) ?? pages.find((p) => p.url().includes("flow.google"));
-  if (!page) throw new Error("Không thấy tab Flow Tool trong Chrome Flow");
+  const isFlow = (u) => u.includes("flow.google") || u.includes("labs.google/fx");
+  const page = one
+    ? pages.filter((p) => isFlow(p.url()) && !p.url().includes("/tool/")).at(-1) ?? pages.find((p) => isFlow(p.url()))
+    : pages.find((p) => p.url().includes("/tool/")) ?? pages.find((p) => isFlow(p.url()));
+  if (!page) throw new Error("Không thấy tab Flow trong Chrome Flow");
+  /** Tải 1 URL video: trong trang (data:/blob:/cùng nguồn) — không được thì qua phiên đăng nhập của trình duyệt. */
+  const fetchVideo = async (frame, src) => {
+    const inPage = await frame.evaluate(async (u) => {
+      try {
+        if (u.startsWith("data:")) return u.slice(u.indexOf(",") + 1);
+        const buf = new Uint8Array(await (await fetch(u)).arrayBuffer());
+        let s = ""; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+        return btoa(s);
+      } catch { return null; }
+    }, src).catch(() => null);
+    if (inPage) return Buffer.from(inPage, "base64");
+    if (!/^https?:/.test(src)) return null;
+    const r = await page.context().request.get(src, { timeout: 120_000 });
+    return r.ok() ? Buffer.from(await r.body()) : null;
+  };
+  if (one) {
+    // Clip lớn nhất đang hiển thị (thẻ cảnh vừa mở / trình phát) — đúng cảnh agent đang xem.
+    let best = null;
+    for (const f of page.frames()) {
+      const vids = await f.evaluate(() => [...document.querySelectorAll("video")].map((v) => {
+        const r = v.getBoundingClientRect();
+        return { src: v.currentSrc || v.src || v.querySelector("source")?.src || "", area: Math.max(0, r.width) * Math.max(0, r.height), dur: v.duration || 0 };
+      })).catch(() => []);
+      for (const v of vids) if (v.src && (!best || v.area > best.area)) best = { ...v, frame: f };
+    }
+    if (!best) throw new Error("Trang chưa có video nào đang hiển thị — mở thẻ cảnh cần lưu trước");
+    const buf = await fetchVideo(best.frame, best.src);
+    if (!buf?.length) throw new Error(`Không tải được video (${best.src.slice(0, 60)}…) — thử menu ⋮ → Tải xuống 720p`);
+    mkdirSync(dirname(one), { recursive: true });
+    writeFileSync(one, buf);
+    console.log(JSON.stringify({ file: one, bytes: buf.length, durationOnPage: best.dur }, null, 2));
+    process.exit(0);
+  }
   if (images) {
     const got = [];
     for (const f of page.frames()) {

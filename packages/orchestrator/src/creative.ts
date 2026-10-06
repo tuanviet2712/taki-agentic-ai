@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { listChromeProfiles } from "./chrome-profiles.ts";
+import { FLOW_URL, listChromeProfiles } from "./chrome-profiles.ts";
 import { browserPublish, chromeLock, publishRoute, routeReason } from "./browser-publish.ts";
 import { publishText } from "./publishing.ts";
 import { parseVideoScript } from "./script-video.ts";
@@ -115,6 +115,23 @@ export const FLOW_TOOLS = {
       "Bước 5: textarea \"Dán kịch bản của bạn vào đây...\" → \"SẢN XUẤT\" (Tool tự chia cảnh theo câu, ≤30 từ/cảnh, 3 từ/giây). Bước 6 \"Bàn dựng phân cảnh\": mỗi cảnh có lời thoại, textarea \"AI Visualization Prompt\", nhãn \"x từ • ys\", nút \"TẠO VIDEO\"/\"TẠO LẠI\"; trên cùng \"SỬA KỊCH BẢN\" và \"TẠO TẤT CẢ\" (tạo lần lượt). Đủ video mọi cảnh → taki-flow-save ngay tại bước 6 (Tool không có nút ghép).",
     ],
   },
+  // Skill video-nhan-hieu-google-flow: KHÔNG có Tool — dùng trình tạo video thường của Flow (Thành phần + ảnh nhân vật).
+  "nhan-hieu-dao-ly": {
+    skill: "video-nhan-hieu-google-flow", generator: true, label: "Video nhân hiệu · đi bộ nói đạo lý", minutes: 35,
+    modelNote: "Trình tạo video THƯỜNG của Flow (không có Tool): Video · Thành phần (Ingredients) · 9:16 · Omni 1.1 Flash · 720p · 8 giây (10 giây khi lời 36–45 âm tiết) · x1. KHÔNG dùng 4K. ~12 tín dụng / cảnh 8s.",
+    hint: "Ảnh chân dung nhân vật (bắt buộc) + chủ đề đạo lý (gia đình, hôn nhân, cha mẹ – con cái…) hoặc kịch bản có sẵn → nhân vật vừa đi bộ vừa nói, góc selfie, 4–5 cảnh ~30–40 giây, ghép + phụ đề",
+    toolUrl: null,
+    slots: [
+      { role: "Nhân vật nói", label: "Ảnh nhân vật (người nói)", hint: "Rõ mặt, nửa người — bắt buộc; giữ đúng gương mặt ở mọi cảnh", required: true },
+    ],
+    uiMap: [
+      "Trang dự án Flow: ô \"What do you want to create?\" / \"Bạn muốn tạo gì?\" ở cuối trang + chip cài đặt bên cạnh (loại nội dung, chế độ, tỉ lệ, model, độ phân giải, thời lượng, số lượng).",
+      "Cài đặt cho MỌI cảnh: Video · Thành phần (Ingredients / Components) · 9:16 · Omni 1.1 Flash · 720p · 8 giây (10 giây nếu lời 36–45 âm tiết) · x1.",
+      "Ảnh nhân vật: nút + / Tải nội dung lên (Upload media) → browser_file_upload đúng đường dẫn ảnh của Sếp; rồi chọn ảnh → \"Thêm vào câu lệnh\" (Add to prompt) cho từng cảnh.",
+      "Gửi lần lượt các cảnh (không cần chờ cảnh trước xong). Thẻ video hiện % khi đang tạo; xong thì bấm vào thẻ để mở trình phát.",
+      "Cảnh lỗi (sai lời / méo mặt): mở thẻ → \"Sử dụng lại câu lệnh\" (Reuse prompt) để tạo lại — tối đa 2 lần/cảnh.",
+    ],
+  },
   "koc-thoi-trang-nu": {
     skill: "flow-koc-thoi-trang-nu", label: "KOC thời trang nữ · Studio v3", toolTitle: "KOC Fashion Studio v3", minutes: 45,
     hint: "Ảnh sản phẩm thời trang nữ (bắt buộc, 1–3 món) + ảnh KOC và bối cảnh (thiếu thì AI tạo), tên – điểm nổi bật – giá/ưu đãi",
@@ -205,8 +222,8 @@ export const FLOW_TOOLS = {
     engine: "liveportrait", skill: "", label: "Ảnh chân dung cử động", minutes: 5, hint: "1 ảnh chân dung rõ mặt + video biểu cảm mẫu (có sẵn hoặc tải lên) → LivePortrait làm ảnh cử động; có thể lồng giọng đọc", toolUrl: null, uiMap: [],
     slots: [{ role: "Nhân vật", label: "Ảnh chân dung", hint: "Chính diện, rõ mặt, 1 người", required: true }],
   },
-} as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait" | "news" | "edit"; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
-export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "review-nha-hang" | "cooking-director" | "cinematic" | "auto-video" | "news-video" | "edit-source" | "portrait";
+} as { [k: string]: { engine?: "flow" | "moneyprinter" | "liveportrait" | "news" | "edit"; /** Flow không có Tool: dùng trình tạo video thường trên trang dự án. */ generator?: boolean; skill: string; label: string; /** Name the Tool itself shows, when the card label differs. */ toolTitle?: string; /** Replaces the "use Veo model X" line when the skill fixes the model ("" = no line). */ modelNote?: string; minutes: number; hint: string; toolUrl: string | null; uiMap: string[]; slots?: { role: string; label: string; hint: string; required?: boolean }[] } };
+export type FlowToolKey = "review-do-an-vat" | "review-thoi-trang" | "nguoi-que-so-sanh" | "nhan-hieu" | "koc-thoi-trang-nu" | "review-gia-dung" | "review-nha-hang" | "cooking-director" | "cinematic" | "auto-video" | "news-video" | "edit-source" | "portrait" | "nhan-hieu-dao-ly";
 export const engineOf = (tool: string) => FLOW_TOOLS[tool]?.engine ?? "flow";
 
 export const CreativeInput = z.object({
@@ -271,7 +288,7 @@ export function flowSettings(bizId: string) {
 export const toolUrlFor = (fs: ReturnType<typeof flowSettings>, key: string) => fs.toolUrls?.[key] || FLOW_TOOLS[key]?.toolUrl || null;
 
 /** How this machine runs the skill: Playwright tools on Chrome Flow, local folders, no human in the loop. */
-function environmentInstructions(o: { toolLabel: string; toolUrl: string | null; uiMap: string[]; email: string | null; workdir: string; rawDir: string }) {
+function environmentInstructions(o: { toolLabel: string; toolUrl: string | null; uiMap: string[]; email: string | null; workdir: string; rawDir: string; generator?: boolean }) {
   return [
     "# MÔI TRƯỜNG CHẠY (máy Mac của doanh nghiệp, chạy tự động, KHÔNG có người theo dõi) — áp cho skill ở trên",
     `- Trình duyệt = các tool mcp__flow__browser_* (Playwright) đã gắn sẵn vào "Chrome Flow"${o.email ? `, đăng nhập Google ${o.email}` : ""}. Đây là thay thế cho Claude in Chrome trong skill: bỏ qua bước đọc skill chrome-browser / ToolSearch / tabs_context_mcp.`,
@@ -279,21 +296,34 @@ function environmentInstructions(o: { toolLabel: string; toolUrl: string | null;
     "- Snapshot dài: chỉ đọc phần cần. Dùng browser_take_screenshot khi cần NHÌN ảnh/khung hình (chấm khung chủ, storyboard).",
     "- Dùng 1 tab duy nhất (browser_tabs: đóng tab thừa). Không tắt trình duyệt.",
     "- Giao diện Flow (ngoài Tool) có thể là tiếng Anh hoặc tiếng Việt tuỳ tài khoản: nhận nút theo nghĩa (vd \"Select media\" = hộp chọn nội dung nghe nhìn, \"Upload media\" = Tải lên, \"Open\" = Mở, \"Done\" = Xong, Images = Hình ảnh).",
+    ...(o.generator ? [
+      `- KHÔNG có Tool: làm trên trình tạo video thường của Flow. browser_navigate ${FLOW_URL} → tạo dự án mới (New project / Dự án mới) đặt tên theo tên video. KHÔNG mở mục Tools.`,
+      ...(o.uiMap.length ? ["- Bản đồ giao diện (ưu tiên hơn mô tả trong skill nếu khác):", ...o.uiMap.map((l) => `  • ${l}`)] : []),
+      "- Bước 1 kịch bản (KHÔNG có người chọn): brief đã có kịch bản → dùng NGUYÊN VĂN; chỉ có chủ đề → tự viết 3 kịch bản đúng công thức của skill, chọn bản mạnh nhất, ghi 2 bản còn lại vào notes.",
+      "- Bước 2–3: chia cảnh + câu lệnh đúng mẫu của skill (giữ nguyên mẫu, chỉ thay lời thoại).",
+      "- Chưa đăng nhập / hết tín dụng → dừng ngay, ghi result.json status \"blocked\" kèm lý do. KHÔNG đăng nhập hộ, KHÔNG nhập mật khẩu, KHÔNG đổi cài đặt tài khoản, KHÔNG xóa gì, KHÔNG mua thêm tín dụng.",
+      "- KHÔNG có người để hỏi: bỏ qua AskUserQuestion / SendUserMessage / SendUserFile và mọi bước \"gửi cho người dùng chọn / chờ duyệt\"; thiếu thông tin thì tự giả định hợp lý và ghi vào notes.",
+      "- Đây KHÔNG phải cloud: bỏ qua device_request_folder_access / device_stage_files / device_commit_files / /mnt/user-data.",
+      `- LẤY CLIP (thay bước \"Tải về\" của skill — KHÔNG bấm Tải xuống): xong cảnh k thì bấm vào thẻ cảnh k để mở trình phát rồi chạy: taki-flow-save --one ${join(o.workdir, "clips")}/scene_0k.mp4 (k = 1, 2, 3… đúng THỨ TỰ LỜI THOẠI, không theo thứ tự trên lưới). Đóng trình phát, làm tiếp cảnh sau. Đủ file cho mọi cảnh mới hậu kỳ.`,
+    ] : [
     o.toolUrl
-      ? `- Mở THẲNG Tool "${o.toolLabel}": browser_navigate ${o.toolUrl} — tiêu đề trên cùng phải là "${o.toolLabel}". Công cụ đang ở bước cũ → bấm bước 1 trên thanh tiến trình để làm sản phẩm mới.`
-      : `- Mở Tool "${o.toolLabel}" theo đúng skill (sidebar Tools / "Công cụ của tôi" / "Công cụ được chia sẻ với tôi").`,
-    `- BẮT BUỘC chạy hết các bước BÊN TRONG Tool "${o.toolLabel}" (không tự viết prompt Veo ngoài Tool, không dùng công cụ khác).`,
-    ...(o.uiMap.length ? ["- Bản đồ giao diện Tool (đọc trực tiếp từ Tool, ưu tiên hơn mô tả trong skill nếu khác):", ...o.uiMap.map((l) => `  • ${l}`)] : []),
-    "- Chưa đăng nhập / hết tín dụng / không mở được Tool → dừng ngay, ghi result.json status \"blocked\" kèm lý do. KHÔNG đăng nhập hộ, KHÔNG nhập mật khẩu, KHÔNG đổi cài đặt tài khoản, KHÔNG xóa gì, KHÔNG mua thêm tín dụng.",
-    "- KHÔNG có người để hỏi: bỏ qua AskUserQuestion / SendUserMessage / SendUserFile và mọi bước \"chờ người dùng duyệt\"; thiếu thông tin thì tự giả định hợp lý theo mặc định trong skill và ghi vào notes.",
-    "- Đây KHÔNG phải cloud: bỏ qua device_request_folder_access / device_stage_files / device_commit_files / /mnt/user-data.",
-    `- LẤY CLIP: nút TẢI VỀ / TẢI TẤT CẢ CLIP trong Tool bị Chrome chặn (iframe sandbox không cho tải) — ĐỪNG bấm. Khi bước SẢN XUẤT đã có video ở MỌI cảnh, chạy: taki-flow-save --out ${join(o.workdir, "clips")} → lưu thẳng từ trang thành scene_01.mp4, scene_02.mp4… đúng thứ tự cảnh, in JSON số clip. Số clip phải bằng số cảnh; thiếu thì chờ cảnh đó xong / LÀM LẠI CLIP rồi chạy lại.`,
+        ? `- Mở THẲNG Tool "${o.toolLabel}": browser_navigate ${o.toolUrl} — tiêu đề trên cùng phải là "${o.toolLabel}". Công cụ đang ở bước cũ → bấm bước 1 trên thanh tiến trình để làm sản phẩm mới.`
+        : `- Mở Tool "${o.toolLabel}" theo đúng skill (sidebar Tools / "Công cụ của tôi" / "Công cụ được chia sẻ với tôi").`,
+      `- BẮT BUỘC chạy hết các bước BÊN TRONG Tool "${o.toolLabel}" (không tự viết prompt Veo ngoài Tool, không dùng công cụ khác).`,
+      ...(o.uiMap.length ? ["- Bản đồ giao diện Tool (đọc trực tiếp từ Tool, ưu tiên hơn mô tả trong skill nếu khác):", ...o.uiMap.map((l) => `  • ${l}`)] : []),
+      "- Chưa đăng nhập / hết tín dụng / không mở được Tool → dừng ngay, ghi result.json status \"blocked\" kèm lý do. KHÔNG đăng nhập hộ, KHÔNG nhập mật khẩu, KHÔNG đổi cài đặt tài khoản, KHÔNG xóa gì, KHÔNG mua thêm tín dụng.",
+      "- KHÔNG có người để hỏi: bỏ qua AskUserQuestion / SendUserMessage / SendUserFile và mọi bước \"chờ người dùng duyệt\"; thiếu thông tin thì tự giả định hợp lý theo mặc định trong skill và ghi vào notes.",
+      "- Đây KHÔNG phải cloud: bỏ qua device_request_folder_access / device_stage_files / device_commit_files / /mnt/user-data.",
+      `- LẤY CLIP: nút TẢI VỀ / TẢI TẤT CẢ CLIP trong Tool bị Chrome chặn (iframe sandbox không cho tải) — ĐỪNG bấm. Khi bước SẢN XUẤT đã có video ở MỌI cảnh, chạy: taki-flow-save --out ${join(o.workdir, "clips")} → lưu thẳng từ trang thành scene_01.mp4, scene_02.mp4… đúng thứ tự cảnh, in JSON số clip. Số clip phải bằng số cảnh; thiếu thì chờ cảnh đó xong / LÀM LẠI CLIP rồi chạy lại.`,
+    ]),
     "- Kiểm tra clip bằng ffprobe; soát lời thoại bằng: taki-video-stt <file1> <file2>… (JSON ngôn ngữ + văn bản).",
     `- HẬU KỲ (thay mục 7.2–7.3 của skill): ffmpeg máy này KHÔNG có libass/drawtext nên KHÔNG dùng filter ass/subtitles/drawtext. Ghi lời thoại cuối vào ${join(o.workdir, "script.json")} dạng [{"canh":1,"loi_thoai":"..."}] rồi chạy:`,
     `  taki-video-finish --clips <scene_01.mp4 …> --script ${join(o.workdir, "script.json")} --title "<tiêu đề hook>" --cta "<CTA>" --out ${join(o.workdir, "final.mp4")}`,
     "  (ghép đúng thứ tự + phụ đề + hook + CTA, in JSON thời lượng/độ phân giải/âm thanh). Rồi trích 2–3 khung hình bằng ffmpeg -ss <t> -frames:v 1 và Read để xem chữ không che mặt/sản phẩm (mục 7.4).",
-    "- Cảnh lỗi: làm lại trong Tool tối đa 2 lần/cảnh (tốn tín dụng). CHỈ làm lại khi đã xác minh lỗi thật bằng taki-video-stt / xem khung hình trên đúng file clips/scene_NN.mp4 vừa lưu bằng taki-flow-save (không so với file nào khác). Không sửa kịch bản/vai trò/thời lượng chỉ để \"phá cache\".",
-    "- Không tự giải mã base64 / tự ghi file video từ trang: chỉ dùng taki-flow-save. Sau khi làm lại 1 cảnh thì chạy lại taki-flow-save (ghi đè cả bộ theo thứ tự).",
+    `- Cảnh lỗi: làm lại ${o.generator ? "bằng \"Sử dụng lại câu lệnh\"" : "trong Tool"} tối đa 2 lần/cảnh (tốn tín dụng). CHỈ làm lại khi đã xác minh lỗi thật bằng taki-video-stt / xem khung hình trên đúng file clips/scene_NN.mp4 vừa lưu bằng taki-flow-save (không so với file nào khác). Không sửa kịch bản/vai trò/thời lượng chỉ để \"phá cache\".`,
+    o.generator
+      ? "- Không tự giải mã base64 / tự ghi file video từ trang: chỉ dùng taki-flow-save --one. Làm lại cảnh k xong thì mở thẻ bản MỚI của cảnh k và chạy lại taki-flow-save --one cho đúng file scene_0k.mp4."
+      : "- Không tự giải mã base64 / tự ghi file video từ trang: chỉ dùng taki-flow-save. Sau khi làm lại 1 cảnh thì chạy lại taki-flow-save (ghi đè cả bộ theo thứ tự).",
   ];
 }
 
@@ -584,7 +614,7 @@ export async function runVideoJob(jobId: string) {
     `# SKILL ĐANG CHẠY: ${tool.skill} (v${skill.version})`,
     skill.body,
     "",
-    ...environmentInstructions({ toolLabel: tool.toolTitle ?? tool.label, toolUrl: toolUrlFor(fs, input.tool), uiMap: tool.uiMap, email, workdir, rawDir }),
+    ...environmentInstructions({ toolLabel: tool.toolTitle ?? tool.label, toolUrl: toolUrlFor(fs, input.tool), uiMap: tool.uiMap, email, workdir, rawDir, generator: tool.generator }),
     `- KẾT THÚC: dùng Write ghi kết quả JSON vào ${join(workdir, "result.json")} đúng schema sau rồi in "XONG — có thể đóng cửa sổ". Schema: ${JSON.stringify(Object.fromEntries(Object.entries(z.toJSONSchema(FlowResult, { target: "draft-7" }) as Row).filter(([k]) => k !== "$schema")))}`,
     `- Bị chặn/lỗi giữa chừng cũng PHẢI ghi result.json với status "blocked"/"failed" và lý do trong notes. finalPath = ${join(workdir, "final.mp4")} khi thành công. caption = caption đăng kênh (tiếng Việt, ≤ 300 ký tự, 3-5 hashtag). script = lời thoại từng cảnh.`,
     ...(dna ? ["", `# THƯƠNG HIỆU: ${brandOfDna(bizId)} (áp dụng DNA dưới đây cho lời thoại, caption, claim)`, dna] : ["", `# THƯƠNG HIỆU: kênh khác/khách hàng. KHÔNG dùng giọng hay tên ${brandOfDna(bizId)}; theo thông tin trong brief.`]),
@@ -599,11 +629,13 @@ export async function runVideoJob(jobId: string) {
     input.hookTitle ? `Tiêu đề hook trên video: ${input.hookTitle}` : "",
     input.cta ? `CTA trên video: ${input.cta}` : "",
     input.images.length
-      ? `ẢNH CỦA SẾP (ưu tiên dùng — KHÔNG tự tạo ảnh thay cho vai trò đã có; tải lên đúng ô của Tool bằng browser_file_upload):\n${input.images.map((i) => `- ${i.role}: ${i.path}`).join("\n")}${input.images.some((i) => /nhân vật|người/i.test(i.role)) ? "\nNgười trong ảnh nhân vật là NHÂN VẬT CHÍNH: giữ đúng khuôn mặt/trang phục này ở mọi cảnh." : ""}`
+      ? `ẢNH CỦA SẾP (ưu tiên dùng — KHÔNG tự tạo ảnh thay cho vai trò đã có; tải lên ${tool.generator ? "Flow (Tải nội dung lên) rồi \"Thêm vào câu lệnh\" cho mọi cảnh" : "đúng ô của Tool"} bằng browser_file_upload):\n${input.images.map((i) => `- ${i.role}: ${i.path}`).join("\n")}${input.images.some((i) => /nhân vật|người/i.test(i.role)) ? "\nNgười trong ảnh nhân vật là NHÂN VẬT CHÍNH: giữ đúng khuôn mặt/trang phục này ở mọi cảnh." : ""}`
       : "Không có ảnh đầu vào (ảnh bắt buộc của Tool thì tự tạo trên Flow như hướng dẫn).",
     tool.modelNote ?? `Nếu Tool có chọn model Veo: ${input.veoModel}.`,
     `Kênh sẽ đăng: ${input.channels.join(", ")} (dọc 9:16).`,
-    `Hãy chạy toàn bộ skill trong Tool "${tool.label}" đến khi có final.mp4 đã ghép + chèn chữ, rồi ghi result.json.`,
+    tool.generator
+      ? `Hãy chạy toàn bộ skill "${tool.label}" trên trình tạo video thường của Flow (không có Tool) đến khi có final.mp4 đã ghép + chèn chữ, rồi ghi result.json.`
+      : `Hãy chạy toàn bộ skill trong Tool "${tool.label}" đến khi có final.mp4 đã ghép + chèn chữ, rồi ghi result.json.`,
   ].filter(Boolean).join("\n\n");
 
   const ctrl = new AbortController();
