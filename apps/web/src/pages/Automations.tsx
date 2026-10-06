@@ -3,7 +3,21 @@ import { Link, useSearchParams } from "react-router-dom";
 import { CalendarDays, ChartNoAxesColumn, ChevronRight, CirclePause, Database, Download, FileText, FlaskConical, FolderOpen, History, Pencil, Play, Plus, Search, Trash2, X } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { ddmm, hhmm, timeAgo, vndFull } from "../lib/format";
-import { Badge, Button, Card, Empty, Field, Loading, Modal, Toggle, cx, inputCls, useToast } from "../components/ui";
+import { Badge, Button, Card, Empty, Field, Loading, Modal, PlatformIcon, Toggle, cx, inputCls, useToast } from "../components/ui";
+import { PlatformNotReady, PlatformTabs, pfLabel, useAdsPlatform, usePlatformStatus, type AdsPf } from "../components/AdsPlatform";
+
+/** Nền tảng của 1 luồng: cấu hình ghi rõ → theo quảng cáo được chọn → "Đăng bài → quảng cáo" là Facebook → mọi nền tảng. */
+function platformOf(a: any, opts: any): string {
+  const c = a.config ?? {};
+  if (a.type === "metrics_pull") return "any";
+  if (c.platform && c.platform !== "any") return c.platform;
+  if (a.type === "auto_run") {
+    if (c.mode !== "schedule") return "meta";
+    const ad = (opts?.ads ?? []).find((x: any) => (c.adIds ?? []).includes(x.id));
+    return ad?.platform ?? "any";
+  }
+  return "any";
+}
 
 type AType = "metrics_pull" | "auto_off" | "budget" | "auto_run";
 export const TYPES: Record<AType, { label: string; short: string; icon: any; color: string; bg: string; desc: string; title: string; subtitle: string; empty: string }> = {
@@ -41,6 +55,12 @@ export function Automations() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const type = (params.get("type") as AType | null) ?? null;
+  const [pf, setPf] = useAdsPlatform();
+  const pst = usePlatformStatus();
+  const scoped = !!type && type !== "metrics_pull"; // Tối ưu quảng cáo: chia theo nền tảng
+  const notReady = scoped && pst.loaded && (pf === "google_ads" || !pst.of(pf as AdsPf).total);
+  /** Đổi nhóm luồng mà giữ nền tảng đang chọn. */
+  const go = (t: AType | null) => setParams((cur) => { const n = new URLSearchParams(cur); if (t) n.set("type", t); else n.delete("type"); return n; });
   const { data, reload } = useApi<any>("automations", ["action.", "metrics.", "automation."]);
   const { data: opts, reload: reloadOpts } = useApi<any>("automation-options", ["metrics.", "alert."]);
   const [search, setSearch] = useState("");
@@ -57,7 +77,7 @@ export function Automations() {
     catch (e: any) { toast(e.message, "err"); return undefined; }
     finally { setBusy(null); }
   };
-  const items = useMemo(() => (data?.items ?? []).filter((a: any) => (!type || a.type === type) && (!search || a.name.toLowerCase().includes(search.toLowerCase()))), [data, type, search]);
+  const items = useMemo(() => (data?.items ?? []).filter((a: any) => (!type || a.type === type) && (!scoped || [pf, "any"].includes(platformOf(a, opts))) && (!search || a.name.toLowerCase().includes(search.toLowerCase()))), [data, type, search, scoped, pf, opts]);
   const head = type ? TYPES[type] : null;
   const counts = data?.counts ?? {};
 
@@ -70,14 +90,14 @@ export function Automations() {
           {(Object.keys(TYPES) as AType[]).map((t) => {
             const T = TYPES[t];
             return (
-              <button key={t} onClick={() => setParams({ type: t })} className={cx("flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition", type === t ? "border-blue-400 bg-blue-500/5 ring-2 ring-blue-500/15" : "border-line hover:border-blue-300")}>
+              <button key={t} onClick={() => go(t)} className={cx("flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition", type === t ? "border-blue-400 bg-blue-500/5 ring-2 ring-blue-500/15" : "border-line hover:border-blue-300")}>
                 <span className={cx("grid h-12 w-12 shrink-0 place-items-center rounded-xl", T.bg, T.color)}><T.icon className="h-6 w-6" /></span>
                 <span className="min-w-0 flex-1"><span className="block text-sm text-ink">{T.label}</span><span className={cx("text-3xl font-bold leading-tight", T.color)}>{counts[t] ?? 0}</span></span>
                 <ChevronRight className="h-4 w-4 text-muted" />
               </button>
             );
           })}
-          <button onClick={() => setParams({})} className={cx("flex w-full items-center gap-4 rounded-2xl p-4 text-left transition", !type ? "bg-blue-500/15" : "bg-blue-500/10 hover:bg-blue-500/15")}>
+          <button onClick={() => go(null)} className={cx("flex w-full items-center gap-4 rounded-2xl p-4 text-left transition", !type ? "bg-blue-500/15" : "bg-blue-500/10 hover:bg-blue-500/15")}>
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-500/15 text-blue-600"><FileText className="h-5 w-5" /></span>
             <span className="flex-1 font-medium text-blue-700 dark:text-blue-300">{total} cấu hình</span>
             <ChevronRight className="h-4 w-4 text-blue-600" />
@@ -88,11 +108,13 @@ export function Automations() {
       <div className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ink md:text-3xl">{head?.title ?? "Tất cả luồng vận hành"}</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-ink md:text-3xl">{head?.title ?? "Tất cả luồng vận hành"}{scoped && <span className="text-blue-600"> · {pfLabel(pf)}</span>}</h1>
           <p className="mt-1 text-sm text-muted md:text-base">{head?.subtitle ?? "Đồng bộ dữ liệu, dừng theo điều kiện, điều chỉnh chi tiêu, khởi chạy theo lịch — qua trần an toàn, whitelist và nhật ký."}</p>
         </div>
-        <Button variant="primary" icon={Plus} className="h-12 px-6 text-base" onClick={() => setEdit({ type, name: "", config: null })}>Tạo luồng mới</Button>
+        {!notReady && <Button variant="primary" icon={Plus} className="h-12 px-6 text-base" onClick={() => setEdit({ type, name: "", config: null, platform: scoped ? pf : null })}>Tạo luồng mới</Button>}
       </div>
+      {scoped && <PlatformTabs value={pf} onChange={setPf} />}
+      {notReady ? <PlatformNotReady pf={pf as AdsPf} what="tối ưu quảng cáo tự động" /> : (
 
       <Card bodyClass="p-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-line p-4">
@@ -100,10 +122,10 @@ export function Automations() {
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted" />
             <input className={cx(inputCls, "pl-9")} placeholder="Tìm luồng vận hành..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <button onClick={() => setParams({})} className={cx("rounded-xl border px-5 py-2.5 text-sm", !type ? "border-blue-200 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-line text-ink")}>Tất cả</button>
+          <button onClick={() => go(null)} className={cx("rounded-xl border px-5 py-2.5 text-sm", !type ? "border-blue-200 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-line text-ink")}>Tất cả</button>
           {(Object.keys(TYPES) as AType[]).map((t) => {
             const T = TYPES[t];
-            return <button key={t} onClick={() => setParams({ type: t })} className={cx("rounded-xl border px-5 py-2.5 text-sm", type === t ? "border-blue-200 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-line text-ink")}>{T.short}</button>;
+            return <button key={t} onClick={() => go(t)} className={cx("rounded-xl border px-5 py-2.5 text-sm", type === t ? "border-blue-200 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-line text-ink")}>{T.short}</button>;
           })}
         </div>
         {!data ? <div className="p-5"><Loading /></div> : items.length === 0 ? (
@@ -129,7 +151,8 @@ export function Automations() {
                   return (
                     <tr key={a.id} className="align-top">
                       <td className="px-4 py-3"><p className="font-medium text-ink">{a.name}</p><p className="text-xs text-muted">tạo {ddmm(a.created_at)}</p></td>
-                      <td className="px-4 py-3"><span className={cx("inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium", T.bg, T.color)}><T.icon className="h-3.5 w-3.5" />{T.short}</span></td>
+                      <td className="px-4 py-3"><span className={cx("inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium", T.bg, T.color)}><T.icon className="h-3.5 w-3.5" />{T.short}</span>
+                        {a.type !== "metrics_pull" && (() => { const p = platformOf(a, opts); return <p className="mt-1.5 flex items-center gap-1 text-xs text-muted">{p === "any" ? "Mọi nền tảng" : <><PlatformIcon p={p === "meta" ? "facebook" : p} size={14} />{pfLabel(p)}</>}</p>; })()}</td>
                       <td className="max-w-[420px] px-4 py-3">
                         <p className="text-ink">{detail(a, opts)}</p>
                         {a.lastRun && <p className={cx("mt-1 text-xs", a.last_result?.error ? "text-rose-500" : "text-muted")}>Lần chạy {timeAgo(a.lastRun.at)}: {a.lastRun.text}</p>}
@@ -161,6 +184,7 @@ export function Automations() {
         )}
       </Card>
 
+      )}
       {edit && <Editor initial={edit} opts={opts} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); reloadOpts(); }} />}
 
       <Modal open={!!result} onClose={() => setResult(null)} title={result ? `${result.a.name} — kết quả` : ""} footer={<Button onClick={() => setResult(null)}>Đóng</Button>}>
@@ -225,7 +249,11 @@ function Editor({ initial, opts, onClose, onSaved }: { initial: any; opts: any; 
   const [type, setType] = useState<AType | null>(initial.type ?? null);
   const [name, setName] = useState<string>(initial.name || (initial.type ? TYPES[initial.type as AType].label : ""));
   const [c, setC] = useState<any>(() => {
-    if (!initial.config) return initial.type ? structuredClone(DEFAULTS[initial.type as AType]) : null;
+    if (!initial.config) {
+      if (!initial.type) return null;
+      const d = structuredClone(DEFAULTS[initial.type as AType]);
+      return initial.platform && "platform" in d ? { ...d, platform: initial.platform } : d;
+    }
     const cfg = structuredClone(initial.config);
     // CTR is stored as a fraction; the form edits percent.
     cfg.conditions = cfg.conditions?.map((x: any) => (x.metric === "ctr" && x.value != null ? { ...x, value: Math.round(x.value * 10000) / 100 } : x));
@@ -256,7 +284,10 @@ function Editor({ initial, opts, onClose, onSaved }: { initial: any; opts: any; 
     } finally { setBusy(false); }
   };
 
-  const accounts = (opts?.adAccounts ?? []) as any[];
+  // Luồng của 1 nền tảng: chỉ hiện tài khoản / quảng cáo của nền tảng đó.
+  const pfSel = c?.platform && c.platform !== "any" ? c.platform : initial.platform ?? null;
+  const accounts = ((opts?.adAccounts ?? []) as any[]).filter((a) => !pfSel || a.platform === pfSel);
+  const adsList = ((opts?.ads ?? []) as any[]).filter((a) => !pfSel || a.platform === pfSel);
   const toggleIn = (arr: string[], id: string) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]);
 
   return (
@@ -359,7 +390,7 @@ function Editor({ initial, opts, onClose, onSaved }: { initial: any; opts: any; 
                 <>
                   <Field label={`Quảng cáo áp dụng (${c.adIds.length} đã chọn)`}>
                     <div className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-line p-2 scroll-thin">
-                      {(opts?.ads ?? []).length === 0 ? <p className="p-2 text-sm text-muted">Chưa có quảng cáo — kết nối và "Đồng bộ chiến dịch" trước.</p> : opts.ads.map((ad: any) => (
+                      {adsList.length === 0 ? <p className="p-2 text-sm text-muted">Chưa có quảng cáo{pfSel ? ` ${pfLabel(pfSel)}` : ""} — kết nối và "Đồng bộ chiến dịch" trước.</p> : adsList.map((ad: any) => (
                         <label key={ad.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-soft">
                           <input type="checkbox" checked={c.adIds.includes(ad.id)} onChange={() => set({ adIds: toggleIn(c.adIds, ad.id) })} />
                           <span className="min-w-0 flex-1 truncate text-ink">{ad.name}</span><span className="text-xs text-muted">{ad.campaign}</span>

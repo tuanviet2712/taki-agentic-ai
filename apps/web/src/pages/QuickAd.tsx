@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ExternalLink, Rocket } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { ddmm, hhmm, timeAgo, vndFull, type Tone } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, Toggle, cx, inputCls, useToast } from "../components/ui";
+import { PlatformNotReady, PlatformTabs, pfLabel, useAdsPlatform, type AdsPf } from "../components/AdsPlatform";
 
 const FIT_TONE: Record<string, Tone> = { good: "green", ok: "gray", warn: "amber", blocked: "red" };
 const OBJ_LABEL: Record<string, string> = { messages: "Tin nhắn", engagement: "Tương tác", sales: "Chuyển đổi", traffic: "Truy cập" };
@@ -11,7 +12,20 @@ const ST: Record<string, { label: string; tone: Tone }> = {
   approved: { label: "Đang xếp hàng", tone: "blue" }, publishing: { label: "Đang tạo", tone: "violet" }, published: { label: "Đã tạo", tone: "green" }, failed: { label: "Lỗi", tone: "red" },
 };
 
+/** Set quảng cáo theo nền tảng: Facebook tạo chiến dịch từ bài Fanpage; TikTok / Google nói rõ trạng thái. */
 export function QuickAd() {
+  const [pf, setPf] = useAdsPlatform();
+  if (pf !== "meta") return (
+    <div className="space-y-6">
+      <PageHeader title={`Tạo chiến dịch · ${pfLabel(pf)}`} subtitle={`Set quảng cáo ${pfLabel(pf)} từ hệ thống.`} />
+      <PlatformTabs value={pf} onChange={setPf} />
+      <PlatformNotReady pf={pf as AdsPf} what="tạo chiến dịch" />
+    </div>
+  );
+  return <QuickAdMeta tabs={<PlatformTabs value={pf} onChange={setPf} />} />;
+}
+
+function QuickAdMeta({ tabs }: { tabs: ReactNode }) {
   const toast = useToast();
   const { data: opts } = useApi<any>("automation-options", ["alert."]);
   const { data: recent, reload } = useApi<any[]>("ads/quick/recent", ["action.", "approval."]);
@@ -64,7 +78,8 @@ export function QuickAd() {
   if (opts && (!accounts.length || !pages.length)) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Tạo chiến dịch nhanh" subtitle="Chọn bài trên Fanpage → tạo quảng cáo tin nhắn trong 1 phút." />
+        <PageHeader title="Tạo chiến dịch · Facebook" subtitle="Chọn bài trên Fanpage → tạo quảng cáo tin nhắn trong 1 phút." />
+        {tabs}
         <Card>
           <div className="py-10 text-center">
             <Rocket className="mx-auto h-10 w-10 text-muted" />
@@ -79,7 +94,8 @@ export function QuickAd() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Tạo chiến dịch nhanh" subtitle="Chọn bài trên Fanpage → tạo chiến dịch + nhóm + quảng cáo từ bài viết theo mẫu. Có trần ngân sách và nhật ký." />
+      <PageHeader title="Tạo chiến dịch · Facebook" subtitle="Chọn bài trên Fanpage → tạo chiến dịch + nhóm + quảng cáo từ bài viết theo mẫu. Có trần ngân sách và nhật ký." />
+      {tabs}
       {!opts ? <Loading /> : (
         <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
           <Card title="1. Chọn bài viết">

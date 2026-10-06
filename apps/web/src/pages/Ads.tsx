@@ -5,7 +5,7 @@ import { Coins, FlaskConical, Megaphone, RefreshCw, RotateCcw, ShieldAlert, Targ
 import { api, useApi } from "../lib/api";
 import { ddmm, hhmm, num, pct, timeAgo, vnd, vndFull, type Tone } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, Stat, Toggle, cx, inputCls, platformName, useToast } from "../components/ui";
-import { AdsReportCard } from "../components/AdsReportCard";
+import { PlatformTabs, pfLabel, useAdsPlatform } from "../components/AdsPlatform";
 
 const REFRESH = ["action.", "metrics.", "approval."];
 const PLAT_COLOR: Record<string, string> = { meta: "#2563eb", tiktok: "#f43f5e", google_ads: "#f59e0b" };
@@ -25,9 +25,12 @@ type AdAct = { ad: any; type: "pause_ad" | "resume_ad" | "update_budget" };
 
 export function Ads() {
   const toast = useToast();
-  const { data: camps, reload: reloadAds } = useApi<any[]>("ads", REFRESH);
-  const { data: met } = useApi<any>("metrics/ads?days=14", REFRESH);
-  const { data: cands } = useApi<any[]>("candidates", REFRESH);
+  const { data: allCamps, reload: reloadAds } = useApi<any[]>("ads", REFRESH);
+  const [pf, setPf] = useAdsPlatform(true);
+  const camps = allCamps ? allCamps.filter((c) => pf === "all" || c.platform === pf) : allCamps;
+  const { data: met } = useApi<any>(`metrics/ads?days=14&platform=${pf}`, REFRESH);
+  const { data: allCands } = useApi<any[]>("candidates", REFRESH);
+  const cands = allCands ? allCands.filter((c) => pf === "all" || (c.platform ?? "meta") === pf) : allCands;
   const { data: rules, reload: reloadRules } = useApi<any[]>("rules", REFRESH);
   const { data: actions, reload: reloadActions } = useApi<any[]>("actions", REFRESH);
   const [act, setAct] = useState<AdAct | null>(null);
@@ -52,7 +55,7 @@ export function Ads() {
   const seriesRev7 = series.slice(-7).reduce((a: number, d: any) => a + (d.revenue ?? 0), 0);
   const revenue = attributed || seriesRev7;
   const roas = spend7 ? revenue / spend7 : null;
-  const byPlat = (met?.byPlatform ?? []).filter((p: any) => p.spend > 0);
+  const byPlat = (met?.byPlatform ?? []).filter((p: any) => p.spend > 0 && (pf === "all" || p.platform === pf));
   const platTotal = byPlat.reduce((a: number, p: any) => a + p.spend, 0);
 
   const openAct = (ad: any, type: AdAct["type"]) => { setAct({ ad, type }); setAmount(String(ad.daily_budget ?? "")); };
@@ -85,10 +88,10 @@ export function Ads() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Thống kê" subtitle="Theo dõi chi tiêu, hiệu quả và để Ads Agent tối ưu theo rule — mọi thay đổi ngân sách đều qua xác nhận."
-        actions={<div className="flex flex-wrap gap-2"><Link to="/ads/quick"><Button icon={Megaphone}>Tạo chiến dịch nhanh</Button></Link><Button icon={RefreshCw} loading={busy === "sync"} onClick={() => run("sync", () => api.post("metrics/sync"), "Đã đồng bộ chỉ số quảng cáo").then(() => reloadAds())}>Đồng bộ chỉ số</Button></div>} />
+      <PageHeader title={`Quảng cáo đang chạy${pf === "all" ? "" : ` · ${pfLabel(pf)}`}`} subtitle="Theo dõi chi tiêu, bật/tắt, đổi ngân sách và để Ads Agent tối ưu theo rule — mọi thay đổi ngân sách đều qua xác nhận. Báo cáo đầy đủ ở mục Báo cáo."
+        actions={<div className="flex flex-wrap gap-2"><Link to={`/ads/reports?pf=${pf}`}><Button icon={TrendingUp}>Xem báo cáo</Button></Link><Link to="/ads/quick"><Button icon={Megaphone}>Tạo chiến dịch</Button></Link><Button icon={RefreshCw} loading={busy === "sync"} onClick={() => run("sync", () => api.post("metrics/sync"), "Đã đồng bộ chỉ số quảng cáo").then(() => reloadAds())}>Đồng bộ chỉ số</Button></div>} />
 
-      <AdsReportCard />
+      <PlatformTabs value={pf} onChange={setPf} allowAll />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat icon={Wallet} tone="amber" label="Ngân sách đã chi (7 ngày)" value={vnd(spend7)} sub={`${ads.filter((a) => a.status === "active").length}/${ads.length} ad đang chạy`} />

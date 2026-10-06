@@ -48,7 +48,8 @@ export function growthRoutes(app: FastifyInstance) {
   });
   r.get("/v1/metrics/ads", ({ bizId, query }) => {
     const days = Math.min(Number(query.days ?? 7), 30);
-    const ads = q.all<Row>("SELECT id, platform FROM ad WHERE biz_id = ?", bizId);
+    const pf = ["meta", "tiktok", "google_ads"].includes(query.platform as string) ? (query.platform as string) : null;
+    const ads = q.all<Row>(`SELECT id, platform FROM ad WHERE biz_id = ? ${pf ? "AND platform = ?" : ""}`, ...(pf ? [bizId, pf] : [bizId]));
     const series = Array.from({ length: days }, (_, i) => {
       const d = dayStr(days - 1 - i);
       const rows = ads.flatMap((a) => latestDaily(bizId, a.id, d, d).map((x) => ({ ...x, platform: a.platform })));
@@ -58,6 +59,56 @@ export function growthRoutes(app: FastifyInstance) {
     });
     const byPlatform = ["meta", "tiktok", "google_ads"].map((p) => ({ platform: p, ...sumMetrics(ads.filter((a) => a.platform === p).flatMap((a) => latestDaily(bizId, a.id, dayStr(days - 1)))) }));
     return { series, byPlatform };
+  });
+  // Báo cáo hiệu quả quảng cáo theo nền tảng (Facebook / TikTok / Google) hoặc tổng tất cả — chỉ số liệu THẬT đã đồng bộ.
+  r.get("/v1/ads/performance", ({ bizId, query }) => {
+    const PLATS = ["meta", "tiktok", "google_ads"] as const;
+    const platform = PLATS.includes(query.platform as any) ? (query.platform as string) : "all";
+    const days = [7, 14, 30, 90].includes(Number(query.days)) ? Number(query.days) : 7;
+    const from = dayStr(days - 1), prevFrom = dayStr(2 * days - 1), prevTo = dayStr(days);
+    const ads = q.all<Row>(`SELECT a.id, a.name, a.status, a.platform, a.daily_budget, a.campaign_id, cp.name campaign, x.name account
+      FROM ad a LEFT JOIN campaign cp ON cp.id = a.campaign_id LEFT JOIN ad_account x ON x.id = a.ad_account_id WHERE a.biz_id = ? ${platform === "all" ? "" : "AND a.platform = ?"}`,
+    ...(platform === "all" ? [bizId] : [bizId, platform]));
+    const minConf = bizSettings(bizId).attributionMinConfidence;
+    const kpi = (rows: { metrics: any }[], revenue = 0) => {
+      const m = sumMetrics(rows);
+      return { ...m, revenue, ctr: m.impressions ? m.clicks / m.impressions : null, cpc: m.clicks ? m.spend / m.clicks : null,
+        cpm: m.impressions ? (m.spend / m.impressions) * 1000 : null, cpa: m.results ? m.spend / m.results : null, roas: m.spend && revenue ? revenue / m.spend : null };
+    };
+    const revenueOf = (ids: string[], a: string, b: string) => ids.length ? q.scalar<number>(
+      `SELECT COALESCE(SUM(o.total),0) FROM attribution_link al JOIN orders o ON o.conversation_id = al.conversation_id
+       WHERE al.ad_id IN (${ids.map(() => "?").join(",")}) AND al.confidence >= ? AND o.status != 'cancelled' AND substr(o.created_at,1,10) BETWEEN ? AND ?`, ...ids, minConf, a, b) : 0;
+    const per = ads.map((a) => ({ a, cur: latestDaily(bizId, a.id, from), prev: latestDaily(bizId, a.id, prevFrom, prevTo) }));
+    const ids = ads.map((a) => a.id);
+    const totals = kpi(per.flatMap((x) => x.cur), revenueOf(ids, from, dayStr(0)));
+    const prev = kpi(per.flatMap((x) => x.prev), revenueOf(ids, prevFrom, prevTo));
+    const series = Array.from({ length: days }, (_, i) => {
+      const d = dayStr(days - 1 - i);
+      const m = kpi(per.flatMap((x) => x.cur.filter((r) => r.day === d)));
+      return { day: d, spend: m.spend, results: m.results, clicks: m.clicks, impressions: m.impressions, cpa: m.cpa };
+    });
+    const accounts = q.all<Row>("SELECT x.platform, c.mode, c.status FROM ad_account x LEFT JOIN connection c ON c.id = x.connection_id WHERE x.biz_id = ? AND x.status = 'active'", bizId);
+    const byPlatform = PLATS.map((p) => {
+      const rows = per.filter((x) => x.a.platform === p);
+      const accs = accounts.filter((x) => x.platform === p);
+      return {
+        platform: p, ads: rows.length, activeAds: rows.filter((x) => x.a.status === "active").length, accounts: accs.length, liveAccounts: accs.filter((x) => x.mode === "live").length,
+        connectionError: accs.some((x) => x.mode === "live" && x.status === "error"),
+        ...kpi(rows.flatMap((x) => x.cur), revenueOf(rows.map((x) => x.a.id), from, dayStr(0))),
+      };
+    }).filter((p) => platform === "all" || p.platform === platform);
+    const camps = new Map<string, { name: string; platform: string; rows: any[]; ads: number }>();
+    for (const x of per) {
+      const k = x.a.campaign_id ?? `none:${x.a.platform}`;
+      const c = camps.get(k) ?? { name: x.a.campaign ?? "(không thuộc chiến dịch)", platform: x.a.platform, rows: [] as any[], ads: 0 };
+      c.rows.push(...x.cur); c.ads++; camps.set(k, c);
+    }
+    const campaigns = [...camps.values()].map((c) => ({ name: c.name, platform: c.platform, ads: c.ads, ...kpi(c.rows) })).filter((c) => c.spend > 0 || c.impressions > 0).sort((a, b) => b.spend - a.spend);
+    const topAds = per.map((x) => ({ id: x.a.id, name: x.a.name, platform: x.a.platform, status: x.a.status, campaign: x.a.campaign, ...kpi(x.cur) }))
+      .filter((x) => x.spend > 0 || x.impressions > 0).sort((a, b) => b.spend - a.spend).slice(0, 15);
+    const actions = ids.length ? q.all<Row>(`SELECT type, status, COUNT(*) n FROM action WHERE biz_id = ? AND target_type = 'ad' AND target_id IN (${ids.map(() => "?").join(",")}) AND substr(created_at,1,10) >= ? GROUP BY type, status`, bizId, ...ids, from) : [];
+    const lastSync = q.scalar<string>(`SELECT MAX(s.captured_at) FROM metric_snapshot s WHERE s.biz_id = ? AND s.entity_type = 'ad'`, bizId) ?? null;
+    return { platform, days, from, to: dayStr(0), totals, prev, series, byPlatform, campaigns, topAds, actions, lastSync };
   });
   r.post("/v1/metrics/sync", async ({ bizId }) => ({ ads: await syncAdMetrics(bizId) }));
   r.post("/v1/ads/report", ({ bizId, actor }) => startAdsReport(bizId, actor));

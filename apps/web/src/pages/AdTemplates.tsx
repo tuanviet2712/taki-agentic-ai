@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LayoutTemplate, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { PlatformNotReady, PlatformTabs, pfLabel, useAdsPlatform, usePlatformStatus, type AdsPf } from "../components/AdsPlatform";
 import { ddmm, vndFull } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, Toggle, inputCls, useToast } from "../components/ui";
 
@@ -9,7 +10,11 @@ const BLANK = { name: "", platform: "meta", definition: { objective: "messages",
 
 export function AdTemplates() {
   const toast = useToast();
-  const { data, reload } = useApi<any[]>("ad-templates");
+  const { data: all, reload } = useApi<any[]>("ad-templates");
+  const [pf, setPf] = useAdsPlatform();
+  const pst = usePlatformStatus();
+  const data = all ? all.filter((t) => t.platform === pf) : null;
+  const notReady = pf === "google_ads";
   const [edit, setEdit] = useState<any | null>(null);
   const [del, setDel] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,10 +43,13 @@ export function AdTemplates() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Thư viện nội dung" subtitle="Mẫu quảng cáo: mục tiêu, tệp đối tượng, ngân sách — dùng khi Tạo chiến dịch nhanh và khi Khởi chạy theo lịch từ bài điểm cao."
-        actions={<Button variant="primary" icon={Plus} onClick={() => setEdit(structuredClone(BLANK))}>Tạo mẫu</Button>} />
+      <PageHeader title={`Thư viện nội dung · ${pfLabel(pf)}`} subtitle={`Mẫu quảng cáo ${pfLabel(pf)}: mục tiêu, tệp đối tượng, ngân sách — dùng khi Tạo chiến dịch và khi Khởi chạy theo lịch từ bài điểm cao.`}
+        actions={!notReady && <Button variant="primary" icon={Plus} onClick={() => setEdit({ ...structuredClone(BLANK), platform: pf })}>Tạo mẫu {pfLabel(pf)}</Button>} />
+      <PlatformTabs value={pf} onChange={setPf} />
+      {notReady ? <PlatformNotReady pf={pf as AdsPf} what="lưu mẫu quảng cáo" /> : <>
+      {pf === "tiktok" && pst.loaded && !pst.of("tiktok").live && <p className="rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">Chưa kết nối TikTok Ads — mẫu lưu được trước, sẽ dùng khi có tài khoản TikTok kết nối.</p>}
       <Card>
-        {!data ? <Loading /> : data.length === 0 ? <Empty>Chưa có mẫu nào trong thư viện.</Empty> : (
+        {!data ? <Loading /> : data.length === 0 ? <Empty>Chưa có mẫu {pfLabel(pf)} nào trong thư viện.</Empty> : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {data.map((t) => {
               const d = t.definition ?? {};
@@ -74,6 +82,7 @@ export function AdTemplates() {
           </div>
         )}
       </Card>
+      </>}
 
       <Modal open={!!edit} onClose={() => setEdit(null)} wide title={edit?.id ? "Sửa mẫu quảng cáo" : "Tạo mẫu quảng cáo"}
         footer={<><Button onClick={() => setEdit(null)}>Hủy</Button><Button variant="primary" loading={busy} onClick={save}>Lưu mẫu</Button></>}>

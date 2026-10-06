@@ -30,6 +30,7 @@ import { ZaloFollowUp } from "./pages/ZaloFollowUp";
 import { Orchestra } from "./pages/Orchestra";
 import { Logs } from "./pages/Logs";
 import { Channels } from "./pages/Channels";
+import { AdsReports } from "./pages/AdsReports";
 import { Nurture } from "./pages/Nurture";
 
 /** Redirect keeping the query string (e.g. ?type=…, ?p=…). */
@@ -69,6 +70,7 @@ export function App() {
           <Route path="/ads/library" element={<AdTemplates />} />
           <Route path="/ads/integrations" element={<Connections />} />
           <Route path="/ads/stats" element={<Ads />} />
+          <Route path="/ads/reports" element={<AdsReports />} />
           <Route path="/ads/logs" element={<Logs />} />
           <Route path="/ads/ai-gateway" element={<Mcp />} />
           <Route path="/ads/ai-gateway/new" element={<McpNewKey />} />

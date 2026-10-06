@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import {
   ArrowLeft, ArrowDownToLine, ArrowUpFromLine, Bell, CalendarDays, ChartColumn, ChartNoAxesColumn, ChevronDown, CircleHelp, CirclePause, FileText, History,
-  Megaphone, MessageSquare, Moon, Puzzle, RefreshCw, Rocket, Settings, Sparkles, Sun, X,
+  Megaphone, MessageSquare, ThumbsUp, Moon, Music2, PieChart as PieChartIcon, Puzzle, RefreshCw, Rocket, Search, Settings, Sparkles, Sun, X,
 } from "lucide-react";
 import { useApi } from "../lib/api";
 import { num } from "../lib/format";
@@ -14,21 +14,31 @@ import { AccountMenu } from "./Account";
  * with a violet accent (.ads-theme). Pages inside reuse the same components as the rest of the system.
  */
 type Item = { to: string; label: string; icon: any; match?: (path: string, search: string) => boolean };
+const rep = (pf: string) => (p: string, s: string) => p === "/ads/reports" && (new URLSearchParams(s).get("pf") ?? "all") === pf;
 export const ADS_NAV: { title: string; items: Item[] }[] = [
   { title: "Vận hành", items: [
     { to: "/ads/setup", label: "Thiết lập", icon: Settings },
     { to: "/ads/flows?type=metrics_pull", label: "Đồng bộ dữ liệu", icon: RefreshCw, match: (p, s) => p === "/ads/flows" && (s.includes("metrics_pull") || !s.includes("type=")) },
+  ] },
+  // Set quảng cáo + Tối ưu: mỗi trang có thanh chọn Facebook / TikTok / Google (?pf=)
+  { title: "Set quảng cáo", items: [
+    { to: "/ads/quick", label: "Tạo chiến dịch", icon: Rocket },
+    { to: "/ads/library", label: "Thư viện nội dung", icon: FileText },
+  ] },
+  { title: "Tối ưu quảng cáo", items: [
+    { to: "/ads/stats", label: "Quảng cáo đang chạy", icon: ChartColumn },
     { to: "/ads/flows?type=auto_off", label: "Dừng theo điều kiện", icon: CirclePause, match: (p, s) => p === "/ads/flows" && s.includes("auto_off") },
     { to: "/ads/flows?type=budget", label: "Điều chỉnh chi tiêu", icon: ChartNoAxesColumn, match: (p, s) => p === "/ads/flows" && s.includes("budget") },
     { to: "/ads/flows?type=auto_run", label: "Khởi chạy theo lịch", icon: CalendarDays, match: (p, s) => p === "/ads/flows" && s.includes("auto_run") },
   ] },
-  { title: "Quảng cáo", items: [
-    { to: "/ads/quick", label: "Tạo chiến dịch nhanh", icon: Rocket },
-    { to: "/ads/library", label: "Thư viện nội dung", icon: FileText },
+  { title: "Báo cáo", items: [
+    { to: "/ads/reports?pf=all", label: "Báo cáo tổng", icon: PieChartIcon, match: rep("all") },
+    { to: "/ads/reports?pf=meta", label: "Facebook", icon: ThumbsUp, match: rep("meta") },
+    { to: "/ads/reports?pf=tiktok", label: "TikTok", icon: Music2, match: rep("tiktok") },
+    { to: "/ads/reports?pf=google_ads", label: "Google", icon: Search, match: rep("google_ads") },
   ] },
   { title: "Hạ tầng", items: [
     { to: "/ads/integrations", label: "Trung tâm tích hợp", icon: Puzzle },
-    { to: "/ads/stats", label: "Thống kê", icon: ChartColumn },
     { to: "/ads/logs", label: "Lịch sử hoạt động", icon: History },
     { to: "/ads/ai-gateway", label: "Cổng AI", icon: Sparkles, match: (p) => p.startsWith("/ads/ai-gateway") },
     { to: "/ads/help", label: "Trợ giúp", icon: CircleHelp },
