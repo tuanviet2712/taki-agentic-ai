@@ -7,6 +7,7 @@ import { buildTargeting, estimateReach, listPixels, searchInterests, searchLocat
 import { AdCreateError, activateBoost, cleanupPartial, createBoost, readDailyBudget, readStatus, storyIdOf, validateBoost, type BoostSpec, type CreatedAd } from "./meta/create.ts";
 import { FIT_LABEL, assessPosts, fetchPostsDetailed } from "./meta/posts.ts";
 export { metaPageConnector } from "./meta/page.ts";
+export { googleAdsConnector, googleAdsTest, type GoogleAdsCreds } from "./google/ads.ts";
 import { CONVERSION_ACTIONS, RESULT_SETTING, countConversions, mapObjective } from "./meta/conversions.ts";
 
 /**

@@ -47,6 +47,23 @@ export const PLATFORMS: PlatformDef[] = [
     ],
   },
   {
+    key: "google_ads", name: "Google Ads", category: "ads", status: "live", color: "#FBBC04",
+    description: "Google Ads API (theo ads-os): kéo chỉ số chiến dịch, bật/tắt chiến dịch, đổi ngân sách ngày. Kết nối bằng service account — không cần đăng nhập Google.",
+    capabilities: ["Tài khoản + MCC", "Chỉ số chiến dịch", "Bật/tắt chiến dịch", "Ngân sách"],
+    fields: [
+      { key: "service_account_json", label: "Khoá service account (JSON)", type: "textarea", secret: true, required: true, placeholder: "{ \"type\": \"service_account\", \"client_email\": \"...@....iam.gserviceaccount.com\", ... }", help: "Dán nguyên nội dung file .json. Không dán file OAuth client (client_secret…json)." },
+      { key: "customer_ids", label: "Chỉ dùng các Customer ID (tuỳ chọn)", type: "text", placeholder: "123-456-7890, 987-654-3210", help: "Để trống = mọi tài khoản service account được thêm vào (kể cả tài khoản con dưới MCC)." },
+      { key: "developer_token", label: "Developer token (tuỳ chọn)", type: "password", secret: true, help: "Google đã bỏ bắt buộc từ 9/2026 — chỉ điền nếu project còn dùng." },
+    ],
+    guide: [
+      "console.cloud.google.com → tạo / chọn project → APIs & Services → Library → Google Ads API → Enable.",
+      "Trang Tổng quan Google Ads API của project: đăng ký cấp truy cập Explorer hoặc Basic (project mới chỉ có Test — chỉ gọi được tài khoản thử nghiệm).",
+      "IAM & Admin → Service Accounts → Create → Keys → Add key → JSON → tải file khoá.",
+      "Google Ads → Quản trị → Quyền truy cập và bảo mật → thêm email service account (…@….iam.gserviceaccount.com) quyền Chuẩn trở lên. Thêm vào MCC thì thấy luôn các tài khoản con.",
+      "Dán nội dung file khoá vào đây. Hệ thống tự tìm tài khoản quảng cáo (kể cả dưới MCC) và báo rõ lý do nếu chưa dùng được.",
+    ],
+  },
+  {
     key: "sheets", name: "Google Sheets", category: "data", status: "live", color: "#0F9D58",
     description: "Ghi chỉ số quảng cáo vào Google Sheets theo lịch (cấu hình 'Kéo chỉ số').",
     capabilities: ["Ghi đè / nối dòng", "Tự tạo tab"],
@@ -112,7 +129,7 @@ export const PLATFORMS: PlatformDef[] = [
   },
   // ---- Sắp ra mắt ----
   ...([
-    ["bigquery", "BigQuery", "#4285F4"], ["postgres", "PostgreSQL", "#336791"], ["google_ads", "Google Ads", "#FBBC04"], ["ga4", "GA4", "#F9AB00"],
+    ["bigquery", "BigQuery", "#4285F4"], ["postgres", "PostgreSQL", "#336791"], ["ga4", "GA4", "#F9AB00"],
     ["sapo", "Sapo", "#16A34A"], ["haravan", "Haravan", "#1E40AF"], ["kiotviet", "KiotViet", "#0EA5E9"], ["bitrix24", "Bitrix24", "#2FC6F6"], ["zalo", "Zalo OA (chính thức)", "#0068FF"],
   ] as const).map(([key, name, color]) => ({ key, name, color, category: "data" as const, status: "soon" as const, description: "Sắp ra mắt", capabilities: [], fields: [] })),
 ];

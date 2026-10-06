@@ -58,7 +58,7 @@ export function Automations() {
   const [pf, setPf] = useAdsPlatform();
   const pst = usePlatformStatus();
   const scoped = !!type && type !== "metrics_pull"; // Tối ưu quảng cáo: chia theo nền tảng
-  const notReady = scoped && pst.loaded && (pf === "google_ads" || !pst.of(pf as AdsPf).total);
+  const notReady = scoped && pst.loaded && !pst.of(pf as AdsPf).total;
   /** Đổi nhóm luồng mà giữ nền tảng đang chọn. */
   const go = (t: AType | null) => setParams((cur) => { const n = new URLSearchParams(cur); if (t) n.set("type", t); else n.delete("type"); return n; });
   const { data, reload } = useApi<any>("automations", ["action.", "metrics.", "automation."]);
@@ -336,7 +336,7 @@ function Editor({ initial, opts, onClose, onSaved }: { initial: any; opts: any; 
           {(type === "auto_off" || type === "budget") && (
             <>
               <div className="grid gap-4 sm:grid-cols-3">
-                <Field label="Nền tảng"><select className={inputCls} value={c.platform} onChange={(e) => set({ platform: e.target.value })}><option value="any">Tất cả</option><option value="meta">Facebook</option><option value="tiktok">TikTok</option></select></Field>
+                <Field label="Nền tảng"><select className={inputCls} value={c.platform} onChange={(e) => set({ platform: e.target.value })}><option value="any">Tất cả</option><option value="meta">Facebook</option><option value="tiktok">TikTok</option><option value="google_ads">Google</option></select></Field>
                 <Field label="Lọc theo tên ad"><select className={inputCls} value={c.nameFilter?.op ?? ""} onChange={(e) => set({ nameFilter: e.target.value ? { op: e.target.value, value: c.nameFilter?.value ?? "" } : null })}><option value="">Không lọc</option><option value="contains">Tên chứa</option><option value="notContains">Tên không chứa</option><option value="startsWith">Tên bắt đầu bằng</option></select></Field>
                 <Field label="Từ khoá">{c.nameFilter ? <input className={inputCls} value={c.nameFilter.value} onChange={(e) => set({ nameFilter: { ...c.nameFilter, value: e.target.value } })} placeholder="VD: ABS" /> : <input className={inputCls} disabled placeholder="—" />}</Field>
               </div>
@@ -444,7 +444,7 @@ function AccountPicker({ accounts, value, onChange }: { accounts: any[]; value: 
         <div className="flex flex-wrap gap-2">
           {accounts.map((a) => (
             <button key={a.id} onClick={() => onChange(value.includes(a.id) ? value.filter((x) => x !== a.id) : [...value, a.id])} className={cx("rounded-xl border px-3 py-1.5 text-sm", value.includes(a.id) ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-line text-ink", !a.whitelisted && "opacity-60")}>
-              {a.platform === "tiktok" ? "♪" : "f"} {a.name}{!a.whitelisted && " (ngoài whitelist)"}{a.mode === "sandbox" && " · demo"}
+              {a.platform === "tiktok" ? "♪" : a.platform === "google_ads" ? "G" : "f"} {a.name}{!a.whitelisted && " (ngoài whitelist)"}{a.mode === "sandbox" && " · demo"}
             </button>
           ))}
         </div>

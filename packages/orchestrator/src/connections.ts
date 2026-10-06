@@ -10,7 +10,7 @@ import { AppError, decryptSecret, encryptSecret, logger, nowIso } from "@dotaka/
  */
 export type NewConnection = { platform: string; name?: string; mode: "live" | "sandbox"; credentials: Record<string, string>; config?: Record<string, string> };
 
-const SECRET_KEYS = new Set(["access_token", "bot_token", "api_key", "service_account_json"]);
+const SECRET_KEYS = new Set(["access_token", "bot_token", "api_key", "service_account_json", "developer_token", "refresh_token", "client_secret"]);
 
 export function credsOf(c: Row): Record<string, string> {
   try { return JSON.parse(decryptSecret(c.token_ciphertext)); } catch { return {}; }
@@ -32,7 +32,7 @@ export function publicConnection(c: Row) {
 
 type Discovered = {
   accountId: string; name: string;
-  adAccounts?: { externalId: string; name: string; currency: string; active: boolean }[];
+  adAccounts?: { externalId: string; name: string; currency: string; active: boolean; meta?: Record<string, unknown> }[];
   pages?: { externalId: string; name: string; token?: string; category?: string | null }[];
   config?: Record<string, unknown>;
 };
@@ -57,6 +57,8 @@ async function discover(platform: string, mode: "live" | "sandbox", cr: Record<s
       const list = await live.tiktokTest(cr as any, ids);
       return { accountId: ids.join(","), name: list.map((a) => a.name).join(", "), adAccounts: list };
     }
+    case "google_ads":
+      return live.googleAdsTest({ ...cfg, ...cr } as any);
     case "sheets": {
       const r = await live.sheetsTest(cr as any, cfg.default_spreadsheet || undefined);
       return { accountId: r.accountId, name: r.name, config: { spreadsheetTitle: r.title } };
@@ -96,8 +98,8 @@ function saveAssets(bizId: string, conn: Row, d: Discovered) {
   const platform = conn.platform as string;
   for (const a of d.adAccounts ?? []) {
     const ex = q.get<Row>("SELECT id FROM ad_account WHERE biz_id = ? AND platform = ? AND external_id = ?", bizId, platform, a.externalId);
-    if (ex) update("ad_account", ex.id, { name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled" });
-    else insert("ad_account", { biz_id: bizId, platform, external_id: a.externalId, name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled", whitelisted: 1, meta: {} });
+    if (ex) update("ad_account", ex.id, { name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled", ...(a.meta ? { meta: a.meta } : {}) });
+    else insert("ad_account", { biz_id: bizId, platform, external_id: a.externalId, name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled", whitelisted: 1, meta: a.meta ?? {} });
   }
   for (const p of d.pages ?? []) {
     const ex = q.get<Row>("SELECT id FROM channel WHERE biz_id = ? AND platform = 'facebook' AND external_id = ?", bizId, p.externalId);
@@ -187,7 +189,8 @@ export function connectorForConnection(conn: Row | undefined | null, platform: P
   const hit = liveCache.get(conn.id);
   if (hit && hit.at === conn.updated_at) return hit.c;
   const cr = credsOf(conn);
-  const c = platform === "meta" ? live.metaConnector(cr as any, conn.config ?? {}) : platform === "tiktok" ? live.tiktokConnector(cr as any) : connector(platform);
+  const c = platform === "meta" ? live.metaConnector(cr as any, conn.config ?? {}) : platform === "tiktok" ? live.tiktokConnector(cr as any)
+    : platform === "google_ads" ? live.googleAdsConnector({ ...(conn.config ?? {}), ...cr } as any) : connector(platform);
   liveCache.set(conn.id, { at: conn.updated_at, c });
   return c;
 }

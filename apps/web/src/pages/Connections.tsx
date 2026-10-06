@@ -10,7 +10,7 @@ type Platform = { key: string; name: string; status: "live" | "soon"; color: str
 /** Brand tile icon (letters on brand color — no external logos). */
 const GLYPH: Record<string, string> = {
   meta: "f", zlcrm: "Z", tiktok: "♪", sheets: "▦", telegram: "✈", ai: "✦", pancake: "P", nhanh: "N", whitelist: "✓", bigquery: "BQ", postgres: "PG",
-  google_ads: "A", ga4: "GA", sapo: "S", haravan: "H", kiotviet: "K", bitrix24: "24", zalo: "Z",
+  google_ads: "G", ga4: "GA", sapo: "S", haravan: "H", kiotviet: "K", bitrix24: "24", zalo: "Z",
 };
 export function PlatformTileIcon({ p, size = 40, round }: { p: Pick<Platform, "key" | "color">; size?: number; round?: boolean }) {
   const g = GLYPH[p.key] ?? "?";
@@ -87,7 +87,7 @@ export function Connections() {
                     {shown.map((c) => {
                       const p = platforms?.find((x) => x.key === c.platform);
                       const st = STATUS[c.status] ?? { label: c.status, tone: "gray" };
-                      const canImport = c.platform === "meta" || c.platform === "tiktok";
+                      const canImport = c.platform === "meta" || c.platform === "tiktok" || c.platform === "google_ads";
                       return (
                         <div key={c.id} className="rounded-2xl border border-line p-4">
                           <div className="flex items-start gap-3">

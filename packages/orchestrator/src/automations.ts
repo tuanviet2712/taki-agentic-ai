@@ -30,7 +30,7 @@ const Cond = z.object({
   consecutiveDays: z.number().int().optional(),
 });
 const Scope = z.object({
-  platform: z.enum(["any", "meta", "tiktok"]).default("any"),
+  platform: z.enum(["any", "meta", "tiktok", "google_ads"]).default("any"),
   accountIds: z.array(z.string()).default([]),
   nameFilter: z.object({ op: z.enum(["contains", "notContains", "startsWith"]), value: z.string() }).nullable().optional(),
 });

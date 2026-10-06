@@ -120,7 +120,7 @@ export function AdsReports() {
                       return (
                         <tr key={x.platform}>
                           <td className="px-3 py-2.5"><span className="flex items-center gap-2 font-medium text-ink"><PlatformIcon p={icon(x.platform)} size={20} />{pfLabel(x.platform)}</span></td>
-                          <td className="px-3 py-2.5">{x.platform === "google_ads" && !x.accounts ? <Badge tone="gray">Sắp có</Badge> : x.connectionError ? <Badge tone="amber">Lỗi kết nối</Badge> : x.liveAccounts ? <Badge tone="green">{x.liveAccounts} tài khoản</Badge> : <Badge tone="gray">Chưa kết nối</Badge>}</td>
+                          <td className="px-3 py-2.5">{x.connectionError ? <Badge tone="amber">Lỗi kết nối</Badge> : x.liveAccounts ? <Badge tone="green">{x.liveAccounts} tài khoản</Badge> : <Badge tone="gray">Chưa kết nối</Badge>}</td>
                           <td className="px-3 py-2.5 tabular-nums">{x.ads} ({x.activeAds})</td>
                           <td className="px-3 py-2.5 tabular-nums font-medium text-ink">{vnd(x.spend)}</td>
                           <td className="px-3 py-2.5 tabular-nums">{num(x.results)}</td>
@@ -162,7 +162,7 @@ export function AdsReports() {
           {!single && <AdsReportCard />}
         </>
       )}
-      <p className="text-xs text-muted">Nền tảng: {PLATFORMS.map((x) => `${x.label} ${st.of(x.key).live ? "đã kết nối" : x.key === "google_ads" ? "sắp có" : "chưa kết nối"}`).join(" · ")}</p>
+      <p className="text-xs text-muted">Nền tảng: {PLATFORMS.map((x) => `${x.label} ${st.of(x.key).live ? "đã kết nối" : "chưa kết nối"}`).join(" · ")}</p>
     </div>
   );
 }

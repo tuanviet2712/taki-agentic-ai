@@ -64,9 +64,7 @@ export function PlatformTabs({ value, onChange, allowAll = false, className }: {
 export function PlatformNotReady({ pf, what }: { pf: AdsPf; what: string }) {
   const st = usePlatformStatus().of(pf);
   const name = pfLabel(pf);
-  const msg = pf === "google_ads"
-    ? `Hệ thống chưa có bộ kết nối Google Ads (đang trong danh sách "sắp có" ở Trung tâm tích hợp), nên chưa ${what} cho Google được. Khi có kết nối, mục này dùng chung giao diện với Facebook và TikTok.`
-    : !st.live
+  const msg = !st.live
       ? `Chưa kết nối tài khoản ${name} Ads nào, nên chưa ${what} cho ${name} được. Kết nối ở Trung tâm tích hợp, rồi quay lại đây.`
       : `${name}: hệ thống đã đọc được số liệu, nhưng việc ${what} qua API cho ${name} chưa có — làm trực tiếp trên trình quản lý quảng cáo của ${name}.`;
   return (
@@ -74,7 +72,7 @@ export function PlatformNotReady({ pf, what }: { pf: AdsPf; what: string }) {
       <span className="grid h-14 w-14 place-items-center rounded-2xl bg-soft"><PlatformIcon p={pf} size={34} /></span>
       <p className="text-lg font-semibold text-ink">{name} — chưa sẵn sàng</p>
       <p className="max-w-xl text-sm text-muted">{msg}</p>
-      {pf !== "google_ads" && !st.live && <Link to={`/ads/integrations?p=${pf}`} className="mt-1 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"><PlugZap className="h-4 w-4" />Kết nối {name}</Link>}
+      {!st.live && <Link to={`/ads/integrations?p=${pf}`} className="mt-1 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"><PlugZap className="h-4 w-4" />Kết nối {name}</Link>}
     </div>
   );
 }
