@@ -5,7 +5,7 @@ import {
 } from "@dotaka/orchestrator";
 import { routes } from "../http.ts";
 
-/** Research đối thủ · Radar xu hướng (trang /research). */
+/** Trinh sát nội dung (trang /scout): nguồn quan sát, tín hiệu, mổ xẻ khuôn, phát triển ý tưởng. */
 export function researchRoutes(app: FastifyInstance) {
   const r = routes(app);
   r.get("/v1/research", ({ bizId, query }) => researchOverview(bizId, { days: Number(query.days ?? 30), group: typeof query.group === "string" && query.group ? query.group : null }));

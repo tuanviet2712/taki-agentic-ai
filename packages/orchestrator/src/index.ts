@@ -117,9 +117,10 @@ export function startOrchestrator() {
     if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'zalo.sync'", b.id))
       insert("schedule", { biz_id: b.id, name: "zalo.sync", queue: "chat", every_minutes: 2, enabled: 1, label: "Đồng bộ hội thoại Zalo từ ZL-CRM (2 phút)", last_run_at: nowIso() });
     // Chăm khách từ bình luận: chỉ làm việc khi Sếp bật (nurture.enabled) — tắt thì 2 lịch này không gọi Facebook.
-    // Research đối thủ: mỗi 10 phút xem đã tới giờ quét Sếp cài chưa (mặc định 06:59) — không có kênh thì không làm gì.
+    // Trinh sát nội dung: mỗi 10 phút xem đã tới giờ cập nhật Sếp cài chưa (mặc định 06:59) — không có kênh thì không làm gì.
     if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'research.tick'", b.id))
-      insert("schedule", { biz_id: b.id, name: "research.tick", queue: "agent", every_minutes: 10, enabled: 1, label: "Research đối thủ: quét kênh theo giờ đã cài", last_run_at: nowIso() });
+      insert("schedule", { biz_id: b.id, name: "research.tick", queue: "agent", every_minutes: 10, enabled: 1, label: "Trinh sát nội dung: cập nhật nguồn quan sát theo lịch", last_run_at: nowIso() });
+    q.run("UPDATE schedule SET label = 'Trinh sát nội dung: cập nhật nguồn quan sát theo lịch' WHERE biz_id = ? AND name = 'research.tick'", b.id);
     if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'nurture.poll'", b.id))
       insert("schedule", { biz_id: b.id, name: "nurture.poll", queue: "chat", every_minutes: 5, enabled: 1, label: "Chăm khách: quét bình luận mới trên Fanpage (5 phút)", last_run_at: nowIso() });
     if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'nurture.tick'", b.id))

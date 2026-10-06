@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Radio, Radar, HeartHandshake,
+import { Radio, Telescope, HeartHandshake,
   Activity, Bell, BookOpen, BrainCircuit, Clapperboard, Columns2, CreditCard, FileClock, FileText, Home, Library, Link2, Bot, CalendarDays, ChartLine, CheckCircle2,
   ChevronDown, LayoutTemplate, Megaphone, Menu, MessageCircle, MessagesSquare, MonitorCog, Moon, Network, Octagon, Play, Rocket, Send, Settings, SlidersHorizontal, Sparkles, Sun, Target, X,
 } from "lucide-react";
@@ -24,7 +24,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     { to: "/content", label: "Nội dung", icon: FileText },
     { to: "/video-flow", label: "Sản xuất video", icon: Clapperboard },
     { to: "/publish", label: "Đăng bài", icon: Send },
-    { to: "/research", label: "Research đối thủ", icon: Radar },
+    { to: "/scout", label: "Trinh sát nội dung", icon: Telescope },
     { to: "/channels", label: "Kênh đăng", icon: Radio },
     { to: "/chat", label: "Chat & Khách hàng", icon: MessageCircle, badge: "unread" },
     { to: "/nurture", label: "Chăm khách từ bình luận", icon: HeartHandshake },

@@ -7,7 +7,7 @@ import { flowSettings } from "./creative.ts";
 import { enqueue, type Handler } from "./queue.ts";
 
 /**
- * Research đối thủ · Radar xu hướng.
+ * Trinh sát nội dung (trang /scout).
  * Sếp thêm tay kênh (đối thủ + kênh của mình, chia theo nhóm kênh) → AI Agent mở trang CÔNG KHAI bằng Chrome Flow, đọc
  * ~30 video gần nhất + lượt xem → trung vị kênh, mức gấp trung vị → video "bùng nổ" (≥ 5× trung vị, đăng ≤ 7 ngày) được
  * decode (hook, khuôn, cấu trúc, vì sao nổ, gợi ý clone góc riêng) → "Clone ngay" giao Video Agent viết kịch bản → Sếp duyệt.
@@ -60,7 +60,7 @@ export const ChannelInput = z.object({
 export function addResearchChannel(bizId: string, raw: unknown, actor: string) {
   const p = ChannelInput.parse(raw);
   const c = parseChannelUrl(p.url);
-  if (q.get("SELECT id FROM research_channel WHERE biz_id = ? AND url = ?", bizId, c.url)) throw new AppError("EXISTS", "Kênh này đã có trong danh sách theo dõi");
+  if (q.get("SELECT id FROM research_channel WHERE biz_id = ? AND url = ?", bizId, c.url)) throw new AppError("EXISTS", "Nguồn này đã có trong danh sách quan sát");
   const row = insert("research_channel", {
     biz_id: bizId, platform: c.platform, url: c.url, handle: c.handle, name: p.name || c.handle || c.url, owner: p.owner, group_name: p.group, notes: p.notes ?? null, enabled: 1, meta: {},
   });
@@ -86,7 +86,7 @@ export function removeResearchChannel(bizId: string, id: string, actor: string) 
 }
 function mustChannel(bizId: string, id: string) {
   const ch = byId<Row>("research_channel", id);
-  if (!ch || ch.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy kênh", 404);
+  if (!ch || ch.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy nguồn", 404);
   return ch;
 }
 
@@ -142,8 +142,8 @@ const HOW: Record<ResearchPlatform, string> = {
 /** Quét 1 kênh: đọc video công khai + lượt xem → cập nhật video, trung vị, mức gấp. */
 export async function scanResearchChannel(bizId: string, channelId: string) {
   const ch = mustChannel(bizId, channelId);
-  if (effectiveProvider(bizId).provider !== "claude_cli") throw new AppError("NEED_CLI", "Cần chế độ Tài khoản Claude (Claude Code CLI) để AI Agent quét kênh");
-  if (!flowSettings(bizId).chromeProfileDir) throw new AppError("NO_BROWSER", "Chọn Chrome ở trang Sản xuất video trước (AI quét bằng Chrome Flow)");
+  if (effectiveProvider(bizId).provider !== "claude_cli") throw new AppError("NEED_CLI", "Cần chế độ Tài khoản Claude (Claude Code CLI) để AI Agent cập nhật nguồn");
+  if (!flowSettings(bizId).chromeProfileDir) throw new AppError("NO_BROWSER", "Chọn Chrome ở trang Sản xuất video trước (AI Agent đọc trang bằng Chrome Flow)");
   update("research_channel", ch.id, { meta: { ...(ch.meta ?? {}), scanning: nowIso() } });
   emit(bizId, "research.updated", { channelId: ch.id, status: "scanning" });
   try {
@@ -248,7 +248,7 @@ export async function decodeResearchVideo(bizId: string, videoId: string, opts: 
       `Sản phẩm: ${(dna.products ?? []).map((p: Row) => p.name).join("; ")}`,
       group ? `Clone cho nhóm kênh: ${group}` : "",
     ].filter(Boolean).join("\n"),
-    sandbox: () => { throw new AppError("NEEDS_AI", "Cần bật Claude để decode video"); },
+    sandbox: () => { throw new AppError("NEEDS_AI", "Cần bật Claude để mổ xẻ khuôn video"); },
   });
   const decode = { ...res.output, detail: detail ? { caption: detail.caption.slice(0, 1500), hashtags: detail.hashtags.slice(0, 15), onScreenText: detail.onScreenText.slice(0, 400), topComments: detail.topComments.slice(0, 5), sound: detail.sound } : null, model: res.model };
   update("research_video", v.id, { decode, decode_at: nowIso() });
