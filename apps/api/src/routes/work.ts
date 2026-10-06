@@ -4,7 +4,7 @@ import { CreateGoal, DecideApproval } from "@dotaka/contracts";
 import { retrieve } from "@dotaka/chat-engine";
 import { activeDna, audit, byId, insert, q, update, type Row } from "@dotaka/db";
 import { judge, norm, passageHeuristic, passageQuestions } from "@dotaka/jev";
-import { blankDna, chromeLock, createGoal, decideApproval, documentText, draftDnaFromText, enqueue, learnDaily, retryPublishJob, retryTask, saveDna, schedulePublish } from "@dotaka/orchestrator";
+import { approveTask, blankDna, chromeLock, createGoal, decideApproval, documentText, editedTextIssues, draftDnaFromText, enqueue, learnDaily, retryPublishJob, retryTask, saveDna, schedulePublish } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
 import { routes } from "../http.ts";
 
@@ -155,19 +155,46 @@ export function workRoutes(app: FastifyInstance) {
     if (!c || c.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy nội dung", 404);
     return { ...c, review: c.review_score_id ? byId("review_score", c.review_score_id) : null, task: c.task_id ? byId("task", c.task_id) : null, approval: q.get("SELECT id, status FROM approval WHERE subject_id = ? ORDER BY created_at DESC LIMIT 1", c.task_id) };
   });
-  r.put("/v1/content/:id", ({ bizId, params, body, actor }) => {
+  r.put("/v1/content/:id", async ({ bizId, params, body, actor }) => {
     const c = byId<Row>("content_item", params.id);
     if (!c || c.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy nội dung", 404);
-    const p = z.object({ title: z.string().optional(), body: z.string().min(1) }).parse(body);
-    update("content_item", c.id, p);
-    insert("exemplar", { biz_id: bizId, agent_key: c.agent_key, kind: "ceo_edit", text: `${c.title}\nTRƯỚC: ${String(c.body).slice(0, 400)}\nSAU: ${p.body.slice(0, 400)}`, outcome: "manual_edit" }); // edit = learning signal
-    audit(bizId, actor, "content.edited", { type: "content_item", id: c.id });
+    const p = z.object({ title: z.string().optional(), body: z.string().min(1), approve: z.boolean().optional() }).parse(body);
+    const { approve, ...edit } = p;
+    if (edit.body !== c.body || (edit.title && edit.title !== c.title)) {
+      update("content_item", c.id, edit);
+      insert("exemplar", { biz_id: bizId, agent_key: c.agent_key, kind: "ceo_edit", text: `${c.title}\nTRƯỚC: ${String(c.body).slice(0, 400)}\nSAU: ${p.body.slice(0, 400)}`, outcome: "manual_edit" }); // edit = learning signal
+      audit(bizId, actor, "content.edited", { type: "content_item", id: c.id });
+    }
+    // "Lưu & duyệt": bản sửa phải qua lại kiểm tra cứng (câu cấm, giá DNA, ký tự cấm) rồi mới duyệt như hộp Duyệt.
+    if (approve) {
+      const dna = activeDna(bizId)?.data;
+      const issues = dna ? editedTextIssues(`${edit.title ?? c.title}\n${edit.body}`, dna as any) : [];
+      if (issues.length) throw new AppError("STILL_BLOCKED", `Đã lưu bản sửa nhưng chưa duyệt được — ${issues.join("; ")}`);
+      const t = c.task_id ? byId<Row>("task", c.task_id) : undefined;
+      if (t) {
+        q.run("UPDATE approval SET status = 'expired' WHERE subject_type = 'task' AND subject_id = ? AND status = 'pending'", t.id);
+        await approveTask(t, actor);
+      } else update("content_item", c.id, { status: "approved" });
+      audit(bizId, actor, "content.approved_after_edit", { type: "content_item", id: c.id });
+    }
     return byId("content_item", c.id);
   });
-  r.post("/v1/content/:id/regenerate", ({ bizId, params }) => {
+  // Khâu không ra bài (brief, nghiên cứu, chiến lược…): Sếp sửa trực tiếp kết quả.
+  r.put("/v1/tasks/:id/output", ({ bizId, params, body, actor }) => {
+    const t = byId<Row>("task", params.id);
+    if (!t || t.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy task", 404);
+    const output = z.object({ output: z.record(z.string(), z.unknown()) }).parse(body).output;
+    update("task", t.id, { output });
+    audit(bizId, actor, "task.output_edited", { type: "task", id: t.id }, { keys: Object.keys(output) });
+    return byId("task", t.id);
+  });
+  r.post("/v1/content/:id/regenerate", ({ bizId, params, body }) => {
     const c = byId<Row>("content_item", params.id);
     if (!c?.task_id) throw new AppError("NOT_FOUND", "Nội dung không gắn task", 404);
     const t = byId<Row>("task", c.task_id)!;
+    // Góp ý của Sếp → agent viết lại theo đúng góp ý (như vòng sửa của Review Agent).
+    const note = z.object({ note: z.string().max(2000).optional() }).parse(body ?? {}).note?.trim();
+    if (note) update("task", t.id, { input: { ...(t.input ?? {}), findings: [`GÓP Ý CỦA SẾP: ${note}`, ...((t.input?.findings ?? []) as string[]).slice(0, 5)] } });
     if (["awaiting_approval"].includes(t.status)) {
       q.run("UPDATE approval SET status = 'cancelled' WHERE subject_id = ? AND status = 'pending'", t.id);
       update("task", t.id, { status: "failed" });

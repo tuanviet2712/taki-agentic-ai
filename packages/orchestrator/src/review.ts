@@ -47,6 +47,17 @@ function productPriceFails(text: string, dna: Dna): string[] {
   return fails;
 }
 
+/** Bản CEO tự sửa (trước khi duyệt): câu cấm, giá không có trong DNA, ký tự cấm — trả danh sách lỗi còn lại. */
+export function editedTextIssues(text: string, dna: Dna): string[] {
+  const out: string[] = [];
+  const forbidden = forbiddenHits(text, dna.forbiddenClaims ?? []);
+  if (forbidden.length) out.push(`Còn tuyên bố cấm: ${forbidden.join(", ")}`);
+  out.push(...productPriceFails(text, dna));
+  const left = (dna.bannedChars ?? []).filter((c) => text.includes(c));
+  if (left.length) out.push(`Còn ký tự cấm: ${left.join(" ")}`);
+  return out;
+}
+
 export function deterministicChecks(rubricKey: string, output: any, dna: Dna, existingTexts: string[], autoFixed = 0): Check[] {
   const checks: Check[] = [];
   const add = (check: string, passed: boolean, severity: Check["severity"], detail?: string) => checks.push({ check, passed, severity, detail });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Bot, CheckCircle2, Clock, Coins, Cpu, RotateCcw, Sparkles, XCircle } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { TaskResult } from "../components/TaskResult";
 import { AGENT_LABEL, TASK_STATUS, num, timeAgo } from "../lib/format";
 import { Badge, Button, Card, Empty, Loading, Modal, PageHeader, Progress, Stat, Toggle, cx, inputCls, useToast } from "../components/ui";
 
@@ -10,7 +11,6 @@ const AUTONOMY: Record<string, { label: string; hint: string }> = {
   L2: { label: "L2 · Tự làm trong giới hạn", hint: "Agent tự thực thi trong hạn mức đã đặt, vượt hạn mức mới hỏi" },
   L3: { label: "L3 · Tự chủ có giám sát", hint: "Agent tự quyết, Sếp xem báo cáo và có thể hoàn tác" },
 };
-const VERDICT: Record<string, { label: string; tone: "green" | "amber" | "red" | "violet" }> = { pass: { label: "Đạt", tone: "green" }, revise: { label: "Cần sửa", tone: "amber" }, block: { label: "Bị chặn", tone: "red" }, escalate: { label: "Cần Sếp xem", tone: "violet" } };
 const RETRYABLE = ["failed", "blocked"];
 const CANCELLABLE = ["pending", "ready", "running", "in_review", "revising", "awaiting_approval", "blocked", "failed"];
 const usd = (micros: number | null | undefined) => `$${((micros ?? 0) / 1e6).toFixed((micros ?? 0) < 1e6 ? 3 : 2)}`;
@@ -153,57 +153,8 @@ export function Agents() {
         )}
       </Modal>
 
-      <TaskDetail id={detailId} onClose={() => setDetailId(null)} onAction={(id, a) => { void taskAction(id, a); setDetailId(null); }} />
+      <TaskResult id={detailId} onClose={() => setDetailId(null)} />
     </div>
   );
 }
 
-function TaskDetail({ id, onClose, onAction }: { id: string | null; onClose: () => void; onAction: (id: string, a: "retry" | "cancel") => void }) {
-  const { data: t } = useApi<any>(id ? `tasks/${id}` : null, ["task.", "review."]);
-  const show = !!id && t?.id === id;
-  const st = show ? TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const } : null;
-  const review = t?.review?.result;
-  return (
-    <Modal open={!!id} onClose={onClose} wide title={show ? t.title : "Chi tiết tác vụ"}
-      footer={show ? <>{RETRYABLE.includes(t.status) && <Button variant="soft" icon={RotateCcw} onClick={() => onAction(t.id, "retry")}>Chạy lại</Button>}{CANCELLABLE.includes(t.status) && <Button icon={XCircle} onClick={() => onAction(t.id, "cancel")}>Hủy tác vụ</Button>}<Button onClick={onClose}>Đóng</Button></> : undefined}>
-      {!show ? <Loading /> : (
-        <div className="space-y-5 text-sm">
-          <div className="flex flex-wrap items-center gap-2"><Badge tone={st!.tone}>{st!.label}</Badge><Badge tone="blue">{AGENT_LABEL[t.agent_key] ?? t.agent_key}</Badge><span className="text-xs text-muted">Sửa {t.revisions} lần · cập nhật {timeAgo(t.updated_at)}</span></div>
-          {t.error && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-700 dark:text-rose-300"><b>Lỗi:</b> {t.error}</div>}
-          {review && (
-            <div className="rounded-xl border border-line p-3">
-              <div className="flex items-center justify-between"><p className="font-medium text-ink">Kết quả review</p><Badge tone={VERDICT[review.verdict]?.tone ?? "gray"}>{Math.round(review.total)}/100 · {VERDICT[review.verdict]?.label ?? review.verdict}</Badge></div>
-              <p className="mt-1 text-xs text-muted">{(review.deterministic ?? []).filter((c: any) => c.passed).length}/{(review.deterministic ?? []).length} kiểm tra cứng đạt · {(review.criteria ?? []).length} tiêu chí chấm bởi Jev{review.fatalFindings?.length ? ` · ${review.fatalFindings.length} lỗi nghiêm trọng` : ""}</p>
-            </div>
-          )}
-          <div>
-            <p className="mb-2 font-medium text-ink">Lượt chạy ({t.runs?.length ?? 0})</p>
-            {!t.runs?.length ? <Empty>Chưa có lượt chạy.</Empty> : (
-              <div className="overflow-x-auto rounded-xl border border-line scroll-thin">
-                <table className="w-full min-w-[480px] text-xs">
-                  <thead className="bg-soft text-muted"><tr><th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Model</th><th className="px-3 py-2 text-right">Token vào/ra</th><th className="px-3 py-2 text-right">Chi phí</th><th className="px-3 py-2 text-left">Trạng thái</th></tr></thead>
-                  <tbody className="divide-y divide-line">{t.runs.map((r: any) => (
-                    <tr key={r.id}><td className="px-3 py-2">{r.attempt}</td><td className="px-3 py-2">{r.model ?? "—"}</td><td className="px-3 py-2 text-right tabular-nums">{num(r.tokens_in)} / {num(r.tokens_out)}</td><td className="px-3 py-2 text-right tabular-nums">{usd(r.cost_micros)}</td>
-                      <td className="px-3 py-2"><Badge tone={TASK_STATUS[r.status]?.tone ?? "gray"}>{TASK_STATUS[r.status]?.label ?? r.status}</Badge>{r.error && <p className="mt-1 text-rose-500">{r.error}</p>}</td></tr>))}</tbody>
-                </table>
-              </div>
-            )}
-          </div>
-          <div>
-            <p className="mb-2 font-medium text-ink">Nhật ký</p>
-            {!t.history?.length ? <Empty>Chưa có nhật ký.</Empty> : (
-              <ol className="space-y-2 border-l-2 border-line pl-4">{t.history.map((h: any) => (
-                <li key={h.id} className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-blue-500" />
-                  <p className="text-ink">{historyText(h)}</p><p className="text-[11px] text-muted">{h.actor} · {new Date(h.at).toLocaleString("vi-VN")}</p></li>))}</ol>
-            )}
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}
-function historyText(h: any) {
-  if (h.event === "task.status" && h.data?.to) return `${TASK_STATUS[h.data.from]?.label ?? h.data.from ?? "—"} → ${TASK_STATUS[h.data.to]?.label ?? h.data.to}`;
-  if (h.event === "task.cancelled") return "Tác vụ đã bị hủy";
-  return h.event;
-}

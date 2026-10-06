@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Lightbulb, Plus, RefreshCw, Target, Wand2 } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { TaskResult } from "../components/TaskResult";
 import { AGENT_LABEL, CONTENT_STATUS, TASK_STATUS, ddmm, hhmm, num, timeAgo, vnd } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, Progress, cx, inputCls, platformName, useToast } from "../components/ui";
 
@@ -131,6 +132,7 @@ const PROP_STATUS: Record<string, string> = { draft: "Nháp", awaiting_approval:
 
 function GoalCard({ g }: { g: any }) {
   const [expanded, setExpanded] = useState(false);
+  const [openTask, setOpenTask] = useState<string | null>(null);
   const st = GOAL_STATUS[g.status] ?? { label: g.status, tone: "gray" };
   const tasks: any[] = g.tasks ?? [];
   const done = tasks.filter((t) => t.status === "done").length;
@@ -153,13 +155,15 @@ function GoalCard({ g }: { g: any }) {
         {tasks.map((t, i) => {
           const ts = TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const };
           return (
-            <div key={t.id} className="rounded-xl border border-line bg-page p-3">
+            <button key={t.id} onClick={() => setOpenTask(t.id)} title="Bấm để xem kết quả và chỉnh sửa" className="group rounded-xl border border-line bg-page p-3 text-left transition hover:border-blue-400 hover:shadow-sm">
               <div className="flex items-start justify-between gap-2"><p className="min-w-0 truncate text-sm font-medium text-ink" title={t.title}>{i + 1}. {t.title}</p><Badge tone={ts.tone}>{ts.label}</Badge></div>
               <p className="mt-0.5 text-xs text-muted">{AGENT_LABEL[t.agent_key] ?? t.agent_key}{t.step ? ` · ${t.step}` : ""}</p>
               <div className="mt-2 flex items-center gap-2"><Progress value={(t.progress ?? 0) * 100} tone={ts.tone === "red" ? "red" : "blue"} className="h-1.5" /><span className="w-9 text-right text-[11px] text-muted">{Math.round((t.progress ?? 0) * 100)}%</span></div>
-            </div>);
+              <p className="mt-1.5 text-[11px] font-medium text-blue-600 opacity-70 group-hover:opacity-100">{ts.tone === "red" ? "Xem lý do & sửa →" : t.status === "done" || t.status === "awaiting_approval" ? "Xem kết quả & chỉnh sửa →" : "Xem chi tiết →"}</p>
+            </button>);
         })}
       </div>
+      <TaskResult id={openTask} onClose={() => setOpenTask(null)} />
       {(s || b) && (
         <button onClick={() => setExpanded(!expanded)} className="mt-4 flex items-center gap-1 text-sm font-medium text-blue-600">
           {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}{expanded ? "Thu gọn" : "Xem brief & chiến lược"}
