@@ -22,7 +22,9 @@ export function Scout() {
   const [topic, setTopic] = useState("");
   const [strongOnly, setStrongOnly] = useState(true);
   const { data: d, reload } = useApi<any>(`research?days=${days}${topic ? `&group=${encodeURIComponent(topic)}` : ""}`, ["research.", "task.", "approval."]);
-  const [selId, setSelId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [sort, setSort] = useState<"strength" | "views" | "newest">("strength");
+  const [search, setSearch] = useState("");
   const [source, setSource] = useState<any | null>(null);
   const [settings, setSettings] = useState<any | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -30,9 +32,15 @@ export function Scout() {
     setBusy(key);
     try { const r = await fn(); if (ok) toast(ok(r)); reload(); return r; } catch (e: any) { toast(e.message, "err"); } finally { setBusy(null); }
   };
-  const signals: any[] = useMemo(() => (d ? (strongOnly ? d.boom : d.rising.filter((v: any) => v.channel.owner === "competitor")) : []), [d, strongOnly]);
-  useEffect(() => { if (signals.length && !signals.some((v) => v.id === selId)) setSelId(signals[0].id); }, [signals, selId]);
-  const sel = signals.find((v) => v.id === selId) ?? null;
+  const signals: any[] = useMemo(() => {
+    if (!d) return [];
+    const base: any[] = strongOnly ? d.boom : d.rising.filter((v: any) => v.channel.owner === "competitor");
+    const k = search.trim().toLowerCase();
+    const list = k ? base.filter((v) => `${v.title ?? ""} ${v.coverText ?? ""} ${v.channel.handle ?? ""} ${v.channel.name}`.toLowerCase().includes(k)) : base;
+    const by = sort === "views" ? (a: any, b: any) => b.views - a.views : sort === "newest" ? (a: any, b: any) => (b.postedAt ?? "").localeCompare(a.postedAt ?? "") : (a: any, b: any) => (b.multiple ?? 0) - (a.multiple ?? 0);
+    return [...list].sort(by);
+  }, [d, strongOnly, search, sort]);
+  const opened = openId ? [...(d?.rising ?? []), ...(d?.boom ?? [])].find((v: any) => v.id === openId) ?? null : null;
   const myTopics = useMemo(() => [...new Set((d?.channels ?? []).filter((c: any) => c.owner === "mine").map((c: any) => c.group_name))] as string[], [d]);
   const devTopics = myTopics.length ? myTopics : (d?.groups ?? []);
   const patterns = useMemo(() => {
@@ -93,71 +101,47 @@ export function Scout() {
           </div>
         </Card>
       ) : view === "signals" ? (
-        <div className="grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)_400px]">
-          {/* Cột trái: chủ đề + bộ lọc */}
-          <aside className="space-y-4">
-            <div className="rounded-2xl border border-line bg-card p-3">
-              <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted">Chủ đề</p>
-              {["", ...d.groups].map((g: string) => {
-                const n = (d.channels as any[]).filter((c) => !g || c.group_name === g).length;
-                return <button key={g || "all"} onClick={() => setTopic(g)} className={cx("flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm", topic === g ? "bg-emerald-500/10 font-semibold text-emerald-700 dark:text-emerald-300" : "text-ink hover:bg-soft")}><span className="truncate">{g || "Mọi chủ đề"}</span><span className="text-xs text-muted">{n}</span></button>;
-              })}
-            </div>
-            <div className="rounded-2xl border border-line bg-card p-3 text-sm">
-              <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted">Hiển thị</p>
-              {[[true, `Tín hiệu mạnh (×${d.settings.boomMultiple}, ≤${d.settings.boomDays} ngày)`], [false, "Mọi video đối thủ"]].map(([v, l]) => (
-                <button key={String(v)} onClick={() => setStrongOnly(v as boolean)} className={cx("flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left", strongOnly === v ? "bg-soft font-medium text-ink" : "text-muted hover:text-ink")}><span className={cx("h-3 w-3 rounded-full border-2", strongOnly === v ? "border-emerald-500 bg-emerald-500" : "border-line")} />{l}</button>
+        <div className="space-y-4">
+          {/* Thanh lọc gọn: loại tín hiệu · chủ đề · sắp xếp · tìm */}
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-card p-3">
+            <div className="inline-flex rounded-xl bg-soft p-1 text-sm">
+              {([[true, `Tín hiệu mạnh · ${d.boom.length}`], [false, "Mọi video đối thủ"]] as const).map(([v, l]) => (
+                <button key={String(v)} onClick={() => setStrongOnly(v)} className={cx("rounded-lg px-3 py-1.5", strongOnly === v ? "bg-card font-semibold text-ink shadow-sm" : "text-muted hover:text-ink")}>{l}</button>
               ))}
             </div>
-          </aside>
-
-          {/* Giữa: dòng tín hiệu */}
-          <div className="min-w-0 space-y-3">
-            {signals.length === 0 ? <Card><Empty>{strongOnly ? "Chưa có tín hiệu mạnh — thử “Mọi video đối thủ” hoặc bấm Cập nhật ngay." : "Chưa có video đối thủ trong khoảng này."}</Empty></Card> : signals.map((v) => (
-              <button key={v.id} onClick={() => setSelId(v.id)} className={cx("flex w-full items-center gap-4 rounded-2xl border bg-card p-3 text-left transition", selId === v.id ? "border-emerald-400 ring-2 ring-emerald-500/15" : "border-line hover:border-emerald-300")}>
-                <Dial value={v.multiple} boom={d.settings.boomMultiple} />
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 font-medium text-ink">{v.title || v.coverText || "(không có tiêu đề)"}</p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                    <PlatformIcon p={v.channel.platform} size={14} />{v.channel.handle ?? v.channel.name}
-                    <span>· {num(v.views)} lượt xem</span><span>· mức thường {num(v.channel.median)}</span><span>· {when(v.postedAt)}</span>
-                  </p>
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    <span className="rounded-md bg-soft px-1.5 py-0.5 text-[11px] text-muted">{v.channel.group}</span>
-                    {v.isNew && <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">vừa phát hiện</span>}
-                    {v.decode && <span className="rounded-md bg-violet-500/10 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300">đã mổ xẻ</span>}
-                    {v.cloneTask && <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-300">đã phát triển</span>}
-                  </div>
-                </div>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted" />
-              </button>
-            ))}
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <Card title={<span className="flex items-center gap-2"><Layers className="h-4 w-4 text-violet-500" />Bản đồ khuôn</span>}>
-                {patterns.length === 0 ? <p className="text-sm text-muted">Mổ xẻ vài video để thấy khuôn nào đang thắng.</p> : (
-                  <div className="flex flex-wrap gap-2">{patterns.map(([f, x]) => <span key={f} className="rounded-xl border border-line px-3 py-2 text-sm"><b className="text-ink">{f}</b><span className="block text-xs text-muted">{x.n} video · cao nhất {times(x.best)}</span></span>)}</div>
-                )}
-              </Card>
-              <Card title="Sức bật kênh của Sếp">
-                {d.compare.length === 0 ? <p className="text-sm text-muted">Chưa có chủ đề.</p> : (
-                  <div className="space-y-3">{d.compare.map((c: any) => (
-                    <div key={c.group} className="text-sm">
-                      <div className="flex justify-between"><span className="font-medium text-ink">{c.group}</span><span className="text-muted">{c.myMultiple == null ? "chưa có kênh mình" : `kênh mình ${c.myMultiple}× mức thường`}</span></div>
-                      <div className="mt-1 flex h-2 overflow-hidden rounded-full bg-soft">
-                        <span className="bg-emerald-500" style={{ width: `${c.myViews ? Math.min(100, (c.myViews / Math.max(1, c.myViews + c.theirHotViews)) * 100) : 0}%` }} />
-                        <span className="bg-slate-300 dark:bg-slate-600" style={{ width: `${c.myViews ? Math.max(0, 100 - (c.myViews / Math.max(1, c.myViews + c.theirHotViews)) * 100) : 100}%` }} />
-                      </div>
-                      <p className="mt-0.5 text-xs text-muted">Mình {c.myViews == null ? "—" : num(c.myViews)} · đối thủ (video vượt chuẩn) {num(c.theirHotViews)}</p>
-                    </div>))}</div>
-                )}
-              </Card>
+            <div className="flex flex-wrap gap-1.5">
+              {["", ...d.groups].map((g: string) => <button key={g || "all"} onClick={() => setTopic(g)} className={cx("rounded-full border px-3 py-1 text-sm", topic === g ? "border-emerald-500 bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-300" : "border-line text-ink hover:bg-soft")}>{g || "Mọi chủ đề"}</button>)}
+            </div>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <div className="w-44"><select aria-label="Sắp xếp" className={inputCls} value={sort} onChange={(e) => setSort(e.target.value as any)}><option value="strength">Vượt chuẩn cao nhất</option><option value="views">Nhiều lượt xem nhất</option><option value="newest">Mới đăng nhất</option></select></div>
+              <div className="w-56"><input className={inputCls} placeholder="Tìm theo tiêu đề, kênh…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
             </div>
           </div>
 
-          {/* Phải: phiếu mổ xẻ */}
-          <div className="xl:sticky xl:top-4 xl:self-start">
-            {sel ? <Dossier v={sel} topics={devTopics} busy={busy} onDissect={dissect} onDevelop={develop} /> : <Card><Empty>Chọn một tín hiệu để xem phiếu mổ xẻ.</Empty></Card>}
+          {signals.length === 0 ? <Card><Empty>{strongOnly ? "Chưa có tín hiệu mạnh — chọn “Mọi video đối thủ” hoặc bấm Cập nhật ngay." : search ? "Không có video khớp từ khoá." : "Chưa có video đối thủ trong khoảng này."}</Empty></Card> : (
+            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+              {signals.map((v) => <SignalCard key={v.id} v={v} topics={devTopics} busy={busy} boom={d.settings.boomMultiple} onOpen={() => setOpenId(v.id)} onDissect={() => dissect(v)} onDevelop={(g) => develop(v, g)} />)}
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card title={<span className="flex items-center gap-2"><Layers className="h-4 w-4 text-violet-500" />Bản đồ khuôn đang thắng</span>}>
+              {patterns.length === 0 ? <p className="text-sm text-muted">Mổ xẻ vài video để thấy khuôn nào đang thắng.</p> : (
+                <div className="flex flex-wrap gap-2">{patterns.map(([f, x]) => <span key={f} className="rounded-xl border border-line px-3 py-2 text-sm" title={f}><b className="text-ink">{f.split(/\s[–-]\s/)[0]}</b><span className="block text-xs text-muted">{x.n} video · cao nhất {times(x.best)}</span></span>)}</div>
+              )}
+            </Card>
+            <Card title="Sức bật kênh của Sếp">
+              {d.compare.length === 0 ? <p className="text-sm text-muted">Chưa có chủ đề.</p> : (
+                <div className="space-y-3">{d.compare.map((c: any) => (
+                  <div key={c.group} className="text-sm">
+                    <div className="flex justify-between"><span className="font-medium text-ink">{c.group}</span><span className="text-muted">{c.myMultiple == null ? "chưa thêm kênh của Sếp" : `kênh Sếp ${c.myMultiple}× mức thường`}</span></div>
+                    <div className="mt-1 flex h-2 overflow-hidden rounded-full bg-soft">
+                      <span className="bg-emerald-500" style={{ width: `${c.myViews ? Math.min(100, (c.myViews / Math.max(1, c.myViews + c.theirHotViews)) * 100) : 0}%` }} />
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted">Sếp {c.myViews == null ? "—" : num(c.myViews)} · đối thủ (video vượt chuẩn) {num(c.theirHotViews)}</p>
+                  </div>))}</div>
+              )}
+            </Card>
           </div>
         </div>
       ) : view === "sources" ? (
@@ -214,8 +198,66 @@ export function Scout() {
         </div>
       )}
 
+      <Modal open={!!opened} onClose={() => setOpenId(null)} wide title="Phiếu mổ xẻ">
+        {opened && <Dossier v={opened} topics={devTopics} busy={busy} onDissect={dissect} onDevelop={develop} />}
+      </Modal>
       <SourceModal value={source} topics={d.groups} onClose={() => setSource(null)} onSaved={() => { setSource(null); reload(); }} />
       <RulesModal value={settings} onClose={() => setSettings(null)} onSaved={() => { setSettings(null); reload(); }} />
+    </div>
+  );
+}
+
+/** Thẻ tín hiệu: đủ thông tin + thao tác ngay trên thẻ (xem video, mổ xẻ, phát triển ý tưởng). */
+function SignalCard({ v, topics, busy, boom, onOpen, onDissect, onDevelop }: { v: any; topics: string[]; busy: string | null; boom: number; onOpen: () => void; onDissect: () => void; onDevelop: (g: string) => void }) {
+  const [g, setG] = useState("");
+  const topic = g || v.cloneGroup || (topics.includes(v.channel.group) ? v.channel.group : topics[0]) || "";
+  const dc = v.decode;
+  return (
+    <div className="flex flex-col rounded-2xl border border-line bg-card p-4 transition hover:border-emerald-300 hover:shadow-sm">
+      <div className="flex gap-3">
+        <Dial value={v.multiple} boom={boom} />
+        <div className="min-w-0 flex-1">
+          <button onClick={onOpen} className="line-clamp-2 text-left font-semibold text-ink hover:text-emerald-700 dark:hover:text-emerald-300">{v.title || v.coverText || "(không có tiêu đề)"}</button>
+          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted"><PlatformIcon p={v.channel.platform} size={14} /><b className="text-ink">{v.channel.handle ?? v.channel.name}</b> · {when(v.postedAt)}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-soft p-2 text-center text-xs">
+        <div><p className="font-semibold text-ink">{num(v.views)}</p><p className="text-muted">lượt xem</p></div>
+        <div><p className="font-semibold text-ink">{num(v.channel.median)}</p><p className="text-muted">mức thường</p></div>
+        <div><p className="font-semibold text-emerald-600">{times(v.multiple)}</p><p className="text-muted">vượt chuẩn</p></div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        <span className="rounded-md bg-soft px-1.5 py-0.5 text-[11px] text-muted">{v.channel.group}</span>
+        {v.isNew && <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">vừa phát hiện</span>}
+        {v.views >= 500_000 && <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-300">500K+ lượt xem</span>}
+      </div>
+      {dc ? (
+        <div className="mt-3 rounded-xl bg-amber-500/10 p-3 text-sm">
+          <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"><Lightbulb className="h-3.5 w-3.5" />Hướng phát triển</p>
+          <p className="mt-1 font-medium text-ink">{dc.cloneTitle}</p>
+          <p className="mt-0.5 line-clamp-3 text-ink/80">{dc.cloneIdea}</p>
+          <button onClick={onOpen} className="mt-1 text-xs font-medium text-amber-700 hover:underline dark:text-amber-300">Xem phiếu mổ xẻ đầy đủ →</button>
+        </div>
+      ) : (
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-dashed border-line p-3 text-xs text-muted">
+          <span>Chưa mổ xẻ khuôn video này</span>
+          <Button size="sm" icon={Microscope} loading={busy === `dx:${v.id}`} onClick={onDissect}>Mổ xẻ</Button>
+        </div>
+      )}
+      <div className="mt-auto space-y-2 border-t border-line pt-3" style={{ marginTop: "0.75rem" }}>
+        <div className="flex gap-2">
+          <a href={v.url} target="_blank" rel="noreferrer" className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-sm font-medium text-ink hover:bg-soft"><ArrowUpRight className="h-4 w-4" />Xem video</a>
+          <button onClick={onOpen} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-sm font-medium text-ink hover:bg-soft"><Microscope className="h-4 w-4" />Phiếu mổ xẻ</button>
+        </div>
+        {v.cloneTask ? (
+          <Link to="/approvals" className="flex items-center justify-between rounded-xl bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300"><span>✓ Đã phát triển cho “{v.cloneGroup}” · {TASK[v.cloneTask.status] ?? v.cloneTask.status}</span><ChevronRight className="h-4 w-4" /></Link>
+        ) : (
+          <div className="flex gap-2">
+            <select aria-label="Phát triển cho chủ đề" className={cx(inputCls, "min-w-0 flex-1 py-1.5 text-sm")} value={topic} onChange={(e) => setG(e.target.value)}>{topics.map((x) => <option key={x} value={x}>{x}</option>)}</select>
+            <Button size="sm" variant="primary" icon={Lightbulb} disabled={!topic} loading={busy === `dv:${v.id}`} onClick={() => onDevelop(topic)}>Phát triển ý tưởng</Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -248,7 +290,7 @@ function Dossier({ v, topics, busy, onDissect, onDevelop }: { v: any; topics: st
           {[["Lượt xem", num(v.views)], ["Mức thường", num(v.channel.median)], ["Vượt chuẩn", times(v.multiple)]].map(([l, x]) => <div key={l} className="rounded-xl bg-card/80 p-2"><p className="text-base font-bold text-ink">{x}</p><p className="text-[11px] text-muted">{l}</p></div>)}
         </div>
       </div>
-      <div className="max-h-[60vh] space-y-4 overflow-y-auto p-4 text-sm scroll-thin">
+      <div className="space-y-4 p-4 text-sm">
         {!dc ? (
           <div className="rounded-xl border border-dashed border-line p-4 text-center text-muted">
             <p>Chưa mổ xẻ. AI Agent sẽ mở video (chỉ đọc), đọc caption, chữ trên màn hình, bình luận nổi rồi phân tích khuôn.</p>
