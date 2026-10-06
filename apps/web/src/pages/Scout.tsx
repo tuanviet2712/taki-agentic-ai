@@ -7,7 +7,7 @@ import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, Platform
 
 /**
  * Trinh sát nội dung: Sếp thêm nguồn quan sát (kênh đối thủ + kênh của mình, chia theo chủ đề) → AI Agent cập nhật số liệu
- * thật → bắt "tín hiệu" (video vượt mức thường của kênh) → mổ xẻ khuôn → phát triển thành ý tưởng cho kênh của Sếp.
+ * thật → bắt "tín hiệu" (video vượt mức thường của kênh) → decode khuôn → phát triển thành ý tưởng cho kênh của Sếp.
  */
 type View = "signals" | "sources" | "rhythm";
 const PLAT: Record<string, string> = { tiktok: "TikTok", facebook: "Facebook", youtube: "YouTube", instagram: "Instagram" };
@@ -53,12 +53,12 @@ export function Scout() {
   }, [d]);
   if (!d) return <Loading />;
   const newSource = () => setSource({ url: "", owner: "competitor", group: topic || d.groups[0] || "", name: "", notes: "" });
-  const dissect = (v: any) => run(`dx:${v.id}`, () => api.post(`research/videos/${v.id}/decode`), () => "Đã mổ xẻ khuôn video");
+  const dissect = (v: any) => run(`dx:${v.id}`, () => api.post(`research/videos/${v.id}/decode`), () => "Đã decode video");
   const develop = (v: any, g: string) => run(`dv:${v.id}`, () => api.post(`research/videos/${v.id}/clone`, { group: g }), (r) => (r.already ? "Video này đã được phát triển ý tưởng" : `Video Agent đang viết kịch bản cho chủ đề “${g}”`));
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Trinh sát nội dung" subtitle="Quan sát kênh cùng chủ đề, bắt tín hiệu video vượt mức thường của kênh, mổ xẻ khuôn và phát triển thành ý tưởng riêng cho kênh của Sếp."
+      <PageHeader title="Trinh sát nội dung" subtitle="Quan sát kênh cùng chủ đề, bắt tín hiệu video vượt mức thường của kênh, decode khuôn và phát triển thành ý tưởng riêng cho kênh của Sếp."
         actions={<>
           <Button variant="ghost" icon={Settings2} onClick={() => setSettings({ ...d.settings, scanTimesText: d.settings.scanTimes.join(", ") })} aria-label="Lịch & ngưỡng" />
           <Button icon={RefreshCw} loading={busy === "sync" || d.busy} disabled={!d.channels.length} onClick={() => run("sync", () => api.post("research/scan"), (r) => `AI Agent sẽ cập nhật lần lượt ${r.queued} nguồn`)}>{d.busy ? "Đang cập nhật" : "Cập nhật ngay"}</Button>
@@ -66,7 +66,7 @@ export function Scout() {
         </>} />
 
       {/* Dải tóm tắt — một dòng, không phải ô số liệu */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border border-line bg-card px-5 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border border-line bg-card px-5 py-4 text-base">
         <span className="flex items-center gap-2"><span className="relative flex h-2.5 w-2.5"><span className={cx("absolute inline-flex h-full w-full rounded-full opacity-60", d.boom.length && "animate-ping bg-emerald-400")} /><span className={cx("relative inline-flex h-2.5 w-2.5 rounded-full", d.boom.length ? "bg-emerald-500" : "bg-slate-300")} /></span><b className="text-ink">{d.boom.length}</b><span className="text-muted">tín hiệu mạnh</span></span>
         <span className="text-muted"><b className="text-ink">{d.kpi.hotCompetitor}</b> video vượt ×{d.settings.hotMultiple} trong {days} ngày</span>
         {d.kpi.strongest && <span className="text-muted">Cao nhất <b className="text-ink">{times(d.kpi.strongest.multiple)}</b> · {d.kpi.strongest.channel.handle ?? d.kpi.strongest.channel.name}</span>}
@@ -75,12 +75,12 @@ export function Scout() {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-full bg-soft p-1 text-sm">
+        <div className="inline-flex rounded-full bg-soft p-1.5 text-base">
           {([["signals", "Tín hiệu", Lightbulb], ["sources", `Nguồn quan sát · ${d.channels.length}`, Telescope], ["rhythm", "Nhịp tuần", Waves]] as const).map(([k, l, I]) => (
-            <button key={k} onClick={() => setView(k)} className={cx("flex items-center gap-1.5 rounded-full px-4 py-1.5 transition", view === k ? "bg-card font-semibold text-ink shadow-sm" : "text-muted hover:text-ink")}><I className="h-4 w-4" />{l}</button>
+            <button key={k} onClick={() => setView(k)} className={cx("flex items-center gap-2 rounded-full px-6 py-2.5 transition", view === k ? "bg-card font-semibold text-ink shadow-sm" : "text-muted hover:text-ink")}><I className="h-5 w-5" />{l}</button>
           ))}
         </div>
-        <div className="w-48"><select aria-label="Khoảng thời gian" className={inputCls} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+        <div className="w-56"><select aria-label="Khoảng thời gian" className={cx(inputCls, "h-12 text-base")} value={days} onChange={(e) => setDays(Number(e.target.value))}>
           {[7, 30, 90].map((n) => <option key={n} value={n}>{n} ngày gần đây</option>)}
         </select></div>
       </div>
@@ -94,7 +94,7 @@ export function Scout() {
               <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted">
                 <li>Dán link kênh TikTok / Facebook / YouTube / Instagram cùng chủ đề với Sếp.</li>
                 <li>AI Agent mở trang công khai, ghi lượt xem từng video và tính <b>mức thường</b> của kênh.</li>
-                <li>Video vượt mức thường thành <b>tín hiệu</b> — mổ xẻ khuôn rồi phát triển ý tưởng cho kênh mình.</li>
+                <li>Video vượt mức thường thành <b>tín hiệu</b> — decode khuôn rồi phát triển ý tưởng cho kênh mình.</li>
               </ol>
               <Button variant="primary" icon={Plus} onClick={newSource}>Thêm nguồn đầu tiên</Button>
             </div>
@@ -103,18 +103,18 @@ export function Scout() {
       ) : view === "signals" ? (
         <div className="space-y-4">
           {/* Thanh lọc gọn: loại tín hiệu · chủ đề · sắp xếp · tìm */}
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-card p-3">
-            <div className="inline-flex rounded-xl bg-soft p-1 text-sm">
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-card p-4">
+            <div className="inline-flex rounded-xl bg-soft p-1.5 text-base">
               {([[true, `Tín hiệu mạnh · ${d.boom.length}`], [false, "Mọi video đối thủ"]] as const).map(([v, l]) => (
-                <button key={String(v)} onClick={() => setStrongOnly(v)} className={cx("rounded-lg px-3 py-1.5", strongOnly === v ? "bg-card font-semibold text-ink shadow-sm" : "text-muted hover:text-ink")}>{l}</button>
+                <button key={String(v)} onClick={() => setStrongOnly(v)} className={cx("rounded-lg px-5 py-2.5", strongOnly === v ? "bg-card font-semibold text-ink shadow-sm" : "text-muted hover:text-ink")}>{l}</button>
               ))}
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {["", ...d.groups].map((g: string) => <button key={g || "all"} onClick={() => setTopic(g)} className={cx("rounded-full border px-3 py-1 text-sm", topic === g ? "border-emerald-500 bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-300" : "border-line text-ink hover:bg-soft")}>{g || "Mọi chủ đề"}</button>)}
+              {["", ...d.groups].map((g: string) => <button key={g || "all"} onClick={() => setTopic(g)} className={cx("rounded-full border px-5 py-2.5 text-base", topic === g ? "border-emerald-500 bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-300" : "border-line text-ink hover:bg-soft")}>{g || "Mọi chủ đề"}</button>)}
             </div>
             <div className="ml-auto flex flex-wrap gap-2">
-              <div className="w-44"><select aria-label="Sắp xếp" className={inputCls} value={sort} onChange={(e) => setSort(e.target.value as any)}><option value="strength">Vượt chuẩn cao nhất</option><option value="views">Nhiều lượt xem nhất</option><option value="newest">Mới đăng nhất</option></select></div>
-              <div className="w-56"><input className={inputCls} placeholder="Tìm theo tiêu đề, kênh…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+              <div className="w-52"><select aria-label="Sắp xếp" className={cx(inputCls, "h-12 text-base")} value={sort} onChange={(e) => setSort(e.target.value as any)}><option value="strength">Vượt chuẩn cao nhất</option><option value="views">Nhiều lượt xem nhất</option><option value="newest">Mới đăng nhất</option></select></div>
+              <div className="w-64"><input className={cx(inputCls, "h-12 text-base")} placeholder="Tìm theo tiêu đề, kênh…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
             </div>
           </div>
 
@@ -126,7 +126,7 @@ export function Scout() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card title={<span className="flex items-center gap-2"><Layers className="h-4 w-4 text-violet-500" />Bản đồ khuôn đang thắng</span>}>
-              {patterns.length === 0 ? <p className="text-sm text-muted">Mổ xẻ vài video để thấy khuôn nào đang thắng.</p> : (
+              {patterns.length === 0 ? <p className="text-sm text-muted">Decode vài video để thấy khuôn nào đang thắng.</p> : (
                 <div className="flex flex-wrap gap-2">{patterns.map(([f, x]) => <span key={f} className="rounded-xl border border-line px-3 py-2 text-sm" title={f}><b className="text-ink">{f.split(/\s[–-]\s/)[0]}</b><span className="block text-xs text-muted">{x.n} video · cao nhất {times(x.best)}</span></span>)}</div>
               )}
             </Card>
@@ -198,7 +198,7 @@ export function Scout() {
         </div>
       )}
 
-      <Modal open={!!opened} onClose={() => setOpenId(null)} wide title="Phiếu mổ xẻ">
+      <Modal open={!!opened} onClose={() => setOpenId(null)} wide title="Decode">
         {opened && <Dossier v={opened} topics={devTopics} busy={busy} onDissect={dissect} onDevelop={develop} />}
       </Modal>
       <SourceModal value={source} topics={d.groups} onClose={() => setSource(null)} onSaved={() => { setSource(null); reload(); }} />
@@ -207,7 +207,7 @@ export function Scout() {
   );
 }
 
-/** Thẻ tín hiệu: đủ thông tin + thao tác ngay trên thẻ (xem video, mổ xẻ, phát triển ý tưởng). */
+/** Thẻ tín hiệu: đủ thông tin + thao tác ngay trên thẻ (xem video, decode, phát triển ý tưởng). */
 function SignalCard({ v, topics, busy, boom, onOpen, onDissect, onDevelop }: { v: any; topics: string[]; busy: string | null; boom: number; onOpen: () => void; onDissect: () => void; onDevelop: (g: string) => void }) {
   const [g, setG] = useState("");
   const topic = g || v.cloneGroup || (topics.includes(v.channel.group) ? v.channel.group : topics[0]) || "";
@@ -217,14 +217,14 @@ function SignalCard({ v, topics, busy, boom, onOpen, onDissect, onDevelop }: { v
       <div className="flex gap-3">
         <Dial value={v.multiple} boom={boom} />
         <div className="min-w-0 flex-1">
-          <button onClick={onOpen} className="line-clamp-2 text-left font-semibold text-ink hover:text-emerald-700 dark:hover:text-emerald-300">{v.title || v.coverText || "(không có tiêu đề)"}</button>
+          <button onClick={onOpen} className="line-clamp-2 text-left text-lg font-semibold text-ink hover:text-emerald-700 dark:hover:text-emerald-300">{v.title || v.coverText || "(không có tiêu đề)"}</button>
           <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted"><PlatformIcon p={v.channel.platform} size={14} /><b className="text-ink">{v.channel.handle ?? v.channel.name}</b> · {when(v.postedAt)}</p>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-soft p-2 text-center text-xs">
-        <div><p className="font-semibold text-ink">{num(v.views)}</p><p className="text-muted">lượt xem</p></div>
-        <div><p className="font-semibold text-ink">{num(v.channel.median)}</p><p className="text-muted">mức thường</p></div>
-        <div><p className="font-semibold text-emerald-600">{times(v.multiple)}</p><p className="text-muted">vượt chuẩn</p></div>
+      <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-soft p-3 text-center text-sm">
+        <div><p className="text-lg font-bold text-ink">{num(v.views)}</p><p className="text-muted">lượt xem</p></div>
+        <div><p className="text-lg font-bold text-ink">{num(v.channel.median)}</p><p className="text-muted">mức thường</p></div>
+        <div><p className="text-lg font-bold text-emerald-600">{times(v.multiple)}</p><p className="text-muted">vượt chuẩn</p></div>
       </div>
       <div className="mt-2 flex flex-wrap gap-1">
         <span className="rounded-md bg-soft px-1.5 py-0.5 text-[11px] text-muted">{v.channel.group}</span>
@@ -236,25 +236,25 @@ function SignalCard({ v, topics, busy, boom, onOpen, onDissect, onDevelop }: { v
           <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"><Lightbulb className="h-3.5 w-3.5" />Hướng phát triển</p>
           <p className="mt-1 font-medium text-ink">{dc.cloneTitle}</p>
           <p className="mt-0.5 line-clamp-3 text-ink/80">{dc.cloneIdea}</p>
-          <button onClick={onOpen} className="mt-1 text-xs font-medium text-amber-700 hover:underline dark:text-amber-300">Xem phiếu mổ xẻ đầy đủ →</button>
+          <button onClick={onOpen} className="mt-1 text-xs font-medium text-amber-700 hover:underline dark:text-amber-300">Xem Decode đầy đủ →</button>
         </div>
       ) : (
-        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-dashed border-line p-3 text-xs text-muted">
-          <span>Chưa mổ xẻ khuôn video này</span>
-          <Button size="sm" icon={Microscope} loading={busy === `dx:${v.id}`} onClick={onDissect}>Mổ xẻ</Button>
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-dashed border-line p-3 text-sm text-muted">
+          <span>Chưa decode video này</span>
+          <Button icon={Microscope} loading={busy === `dx:${v.id}`} onClick={onDissect}>Decode</Button>
         </div>
       )}
       <div className="mt-auto space-y-2 border-t border-line pt-3" style={{ marginTop: "0.75rem" }}>
         <div className="flex gap-2">
-          <a href={v.url} target="_blank" rel="noreferrer" className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-sm font-medium text-ink hover:bg-soft"><ArrowUpRight className="h-4 w-4" />Xem video</a>
-          <button onClick={onOpen} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-sm font-medium text-ink hover:bg-soft"><Microscope className="h-4 w-4" />Phiếu mổ xẻ</button>
+          <a href={v.url} target="_blank" rel="noreferrer" className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-line px-3 py-2.5 text-base font-medium text-ink hover:bg-soft"><ArrowUpRight className="h-5 w-5" />Xem video</a>
+          <button onClick={onOpen} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-violet-500/5 px-3 py-2.5 text-base font-medium text-violet-700 hover:bg-violet-500/10 dark:text-violet-300"><Microscope className="h-5 w-5" />Decode</button>
         </div>
         {v.cloneTask ? (
-          <Link to="/approvals" className="flex items-center justify-between rounded-xl bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300"><span>✓ Đã phát triển cho “{v.cloneGroup}” · {TASK[v.cloneTask.status] ?? v.cloneTask.status}</span><ChevronRight className="h-4 w-4" /></Link>
+          <Link to="/approvals" className="flex items-center justify-between rounded-xl bg-emerald-500/10 px-4 py-3 text-base text-emerald-700 dark:text-emerald-300"><span>✓ Đã phát triển cho “{v.cloneGroup}” · {TASK[v.cloneTask.status] ?? v.cloneTask.status}</span><ChevronRight className="h-4 w-4" /></Link>
         ) : (
-          <div className="flex gap-2">
-            <select aria-label="Phát triển cho chủ đề" className={cx(inputCls, "min-w-0 flex-1 py-1.5 text-sm")} value={topic} onChange={(e) => setG(e.target.value)}>{topics.map((x) => <option key={x} value={x}>{x}</option>)}</select>
-            <Button size="sm" variant="primary" icon={Lightbulb} disabled={!topic} loading={busy === `dv:${v.id}`} onClick={() => onDevelop(topic)}>Phát triển ý tưởng</Button>
+          <div className="flex flex-col gap-2">
+            <select aria-label="Phát triển cho chủ đề" className={cx(inputCls, "h-11 w-full text-base")} value={topic} onChange={(e) => setG(e.target.value)}>{topics.map((x) => <option key={x} value={x}>{x}</option>)}</select>
+            <Button variant="primary" icon={Lightbulb} className="h-11 w-full text-base" disabled={!topic} loading={busy === `dv:${v.id}`} onClick={() => onDevelop(topic)}>Phát triển ý tưởng</Button>
           </div>
         )}
       </div>
@@ -283,7 +283,7 @@ function Dossier({ v, topics, busy, onDissect, onDevelop }: { v: any; topics: st
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-card">
       <div className="bg-gradient-to-br from-emerald-500/15 to-teal-500/5 p-4">
-        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300"><Microscope className="h-3.5 w-3.5" />Phiếu mổ xẻ</p>
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300"><Microscope className="h-3.5 w-3.5" />Decode</p>
         <p className="mt-1 font-semibold text-ink">{v.title || v.coverText || "(không có tiêu đề)"}</p>
         <a href={v.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline dark:text-emerald-300"><PlatformIcon p={v.channel.platform} size={14} />{v.channel.handle ?? v.channel.name} · mở video<ArrowUpRight className="h-3 w-3" /></a>
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
@@ -293,8 +293,8 @@ function Dossier({ v, topics, busy, onDissect, onDevelop }: { v: any; topics: st
       <div className="space-y-4 p-4 text-sm">
         {!dc ? (
           <div className="rounded-xl border border-dashed border-line p-4 text-center text-muted">
-            <p>Chưa mổ xẻ. AI Agent sẽ mở video (chỉ đọc), đọc caption, chữ trên màn hình, bình luận nổi rồi phân tích khuôn.</p>
-            <Button className="mt-3" icon={Microscope} loading={busy === `dx:${v.id}`} onClick={() => onDissect(v)}>Mổ xẻ khuôn</Button>
+            <p>Chưa decode. AI Agent sẽ mở video (chỉ đọc), đọc caption, chữ trên màn hình, bình luận nổi rồi phân tích khuôn.</p>
+            <Button className="mt-3" icon={Microscope} loading={busy === `dx:${v.id}`} onClick={() => onDissect(v)}>Decode</Button>
           </div>
         ) : (
           <>
@@ -319,7 +319,7 @@ function Dossier({ v, topics, busy, onDissect, onDevelop }: { v: any; topics: st
             <Button variant="primary" icon={Lightbulb} disabled={!topic} loading={busy === `dv:${v.id}`} onClick={() => onDevelop(v, topic)}>Phát triển ý tưởng</Button>
           </div>
         )}
-        {dc && <button onClick={() => onDissect(v)} className="text-xs text-muted hover:text-ink">{busy === `dx:${v.id}` ? "Đang mổ xẻ lại…" : "Mổ xẻ lại"}</button>}
+        {dc && <button onClick={() => onDissect(v)} className="text-xs text-muted hover:text-ink">{busy === `dx:${v.id}` ? "Đang decode lại…" : "Decode lại"}</button>}
         <p className="text-[11px] text-muted">Video Agent giữ khuôn, đổi chủ đề và ví dụ theo DNA của Sếp — không dùng lại lời, tên, hình ảnh của kênh khác.</p>
       </div>
     </div>
@@ -393,8 +393,8 @@ function RulesModal({ value, onClose, onSaved }: { value: any | null; onClose: (
           <Field label="Tín hiệu mạnh: vượt ×"><input type="number" step={0.5} className={inputCls} value={cur.boomMultiple} onChange={(e) => set({ boomMultiple: e.target.value })} /></Field>
           <Field label="… đăng trong (ngày)"><input type="number" className={inputCls} value={cur.boomDays} onChange={(e) => set({ boomDays: e.target.value })} /></Field>
         </div>
-        <label className="flex items-center justify-between rounded-xl border border-line p-3 text-sm"><span><b className="text-ink">Tự mổ xẻ tín hiệu mạnh</b><span className="block text-xs text-muted">Sau mỗi lần cập nhật, tối đa {cur.maxDecodePerScan} video / nguồn</span></span><Toggle checked={!!cur.autoDecode} onChange={(x) => set({ autoDecode: x })} /></label>
-        <Field label="Số video mổ xẻ tối đa mỗi nguồn / lần"><input type="number" className={inputCls} value={cur.maxDecodePerScan} onChange={(e) => set({ maxDecodePerScan: e.target.value })} /></Field>
+        <label className="flex items-center justify-between rounded-xl border border-line p-3 text-sm"><span><b className="text-ink">Tự decode tín hiệu mạnh</b><span className="block text-xs text-muted">Sau mỗi lần cập nhật, tối đa {cur.maxDecodePerScan} video / nguồn</span></span><Toggle checked={!!cur.autoDecode} onChange={(x) => set({ autoDecode: x })} /></label>
+        <Field label="Số video decode tối đa mỗi nguồn / lần"><input type="number" className={inputCls} value={cur.maxDecodePerScan} onChange={(e) => set({ maxDecodePerScan: e.target.value })} /></Field>
       </div>
     </Modal>
   );

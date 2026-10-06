@@ -248,7 +248,7 @@ export async function decodeResearchVideo(bizId: string, videoId: string, opts: 
       `Sản phẩm: ${(dna.products ?? []).map((p: Row) => p.name).join("; ")}`,
       group ? `Clone cho nhóm kênh: ${group}` : "",
     ].filter(Boolean).join("\n"),
-    sandbox: () => { throw new AppError("NEEDS_AI", "Cần bật Claude để mổ xẻ khuôn video"); },
+    sandbox: () => { throw new AppError("NEEDS_AI", "Cần bật Claude để decode video"); },
   });
   const decode = { ...res.output, detail: detail ? { caption: detail.caption.slice(0, 1500), hashtags: detail.hashtags.slice(0, 15), onScreenText: detail.onScreenText.slice(0, 400), topComments: detail.topComments.slice(0, 5), sound: detail.sound } : null, model: res.model };
   update("research_video", v.id, { decode, decode_at: nowIso() });
