@@ -136,6 +136,23 @@ CREATE TABLE IF NOT EXISTS post_comment (
 );
 -- Chăm khách từ bình luận (comment → trả lời công khai → inbox Private Reply → xin SĐT → kết bạn Zalo → follow-up).
 -- 1 dòng = 1 người bình luận dưới 1 bài. SĐT lưu MÃ HOÁ (phone_cipher) + bản che (phone_masked) để hiển thị/nhật ký.
+-- Research đối thủ (Radar xu hướng): kênh Sếp thêm tay (đối thủ + kênh của mình) và video quét được từ trang công khai.
+CREATE TABLE IF NOT EXISTS research_channel (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, platform TEXT NOT NULL, url TEXT NOT NULL, handle TEXT, name TEXT NOT NULL,
+  owner TEXT NOT NULL, group_name TEXT NOT NULL, notes TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+  followers INTEGER, median_views INTEGER, video_count INTEGER NOT NULL DEFAULT 0,
+  last_scan_at TEXT, last_error TEXT, meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (biz_id, url)
+);
+CREATE TABLE IF NOT EXISTS research_video (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, research_channel_id TEXT NOT NULL, platform TEXT NOT NULL, external_id TEXT NOT NULL,
+  url TEXT NOT NULL, title TEXT, views INTEGER NOT NULL DEFAULT 0, likes INTEGER, comments INTEGER, shares INTEGER,
+  posted_at TEXT, duration_sec INTEGER, cover_text TEXT, pinned INTEGER NOT NULL DEFAULT 0, multiple REAL,
+  history TEXT NOT NULL DEFAULT '[]', decode TEXT, decode_at TEXT, clone_task_id TEXT, clone_group TEXT,
+  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (research_channel_id, external_id)
+);
+CREATE INDEX IF NOT EXISTS research_video_hot ON research_video (biz_id, multiple, posted_at);
 CREATE TABLE IF NOT EXISTS nurture_lead (
   id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, post_id TEXT NOT NULL, comment_id TEXT NOT NULL UNIQUE, channel_id TEXT NOT NULL,
   author_name TEXT NOT NULL, author_external_id TEXT, comment_text TEXT, label TEXT, stage TEXT NOT NULL,

@@ -31,6 +31,7 @@ import { Orchestra } from "./pages/Orchestra";
 import { Logs } from "./pages/Logs";
 import { Channels } from "./pages/Channels";
 import { AdsReports } from "./pages/AdsReports";
+import { Research } from "./pages/Research";
 import { Nurture } from "./pages/Nurture";
 
 /** Redirect keeping the query string (e.g. ?type=…, ?p=…). */
@@ -62,6 +63,7 @@ export function App() {
           <Route path="/publish" element={<Publish />} />
           <Route path="/channels" element={<Channels />} />
           <Route path="/nurture" element={<Nurture />} />
+          <Route path="/research" element={<Research />} />
           {/* AI Agent Ads workspace (own layout, see AdsLayout) */}
           <Route path="/ads" element={<Navigate to="/ads/flows?type=metrics_pull" replace />} />
           <Route path="/ads/setup" element={<AdsSetup />} />

@@ -10,7 +10,7 @@ const JSON_COLS = new Set([
   "settings", "config", "options", "last_result", "ext", "scopes", "data", "tags", "input", "output", "depends_on", "error", "limits", "tools", "preview",
   "payload", "metrics", "components", "reasons", "definition", "skipped", "summary", "params", "before", "after",
   "meta", "analysis", "evidence", "applies_when", "diff", "lesson_ids", "report", "permissions", "result",
-  "state", "questions", "answers", "decision", "refs", "skills", "log",
+  "state", "questions", "answers", "decision", "refs", "skills", "log", "history", "decode",
 ]);
 
 let _db: DatabaseSync | null = null;
