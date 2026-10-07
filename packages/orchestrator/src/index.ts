@@ -16,6 +16,7 @@ import { connectionHealthAll, liveMessengerConnector, registerTelegramFromDb } f
 import { MESSENGER_HANDLERS } from "./messenger-sync.ts";
 import { NURTURE_HANDLERS } from "./nurture.ts";
 import { RESEARCH_HANDLERS } from "./research.ts";
+import { AUTOPILOT_HANDLERS, autopilotPublishOpts } from "./autopilot.ts";
 import { startTelegramAssistant } from "./telegram-assistant.ts";
 import { automationsTick, ensureAutomations } from "./automations.ts";
 import { registerZaloProxy, runZaloFollowUps, syncZalo } from "./zalo-followup.ts";
@@ -37,6 +38,7 @@ export * from "./nurture.ts";
 export * from "./script-video.ts";
 export * from "./dna-intake.ts";
 export * from "./research.ts";
+export * from "./autopilot.ts";
 export * from "./telegram-assistant.ts";
 export * from "./chrome-profiles.ts";
 export * from "./flow-browser.ts";
@@ -64,7 +66,8 @@ export const HANDLERS: Record<string, Handler> = {
   "creative.flow": async (p) => runVideoJob(p.jobId),
   "creative.local": async (p) => runLocalVideoJob(p.jobId),
   "publish.draft": async (p) => runDraftUpload(p.publishJobId),
-  "publish.schedule": async (p, job) => void schedulePublish(job.biz_id, p.contentItemId),
+  // Bài của Lái tự động + chế độ "Đăng ngay" → đăng luôn khi vừa duyệt (trừ giờ yên lặng / đủ trần bài/ngày).
+  "publish.schedule": async (p, job) => void schedulePublish(job.biz_id, p.contentItemId, autopilotPublishOpts(job.biz_id, p.contentItemId)),
   "publish.run": async (p) => runPublishJob(p.publishJobId),
   "posts.snapshot": async (p) => snapshotPost(p.postId, p.mark),
   "candidate.publish": async (p, job) => publishCandidate(job.biz_id, p.candidateId),
@@ -77,6 +80,7 @@ export const HANDLERS: Record<string, Handler> = {
   ...MESSENGER_HANDLERS,
   ...NURTURE_HANDLERS,
   ...RESEARCH_HANDLERS,
+  ...AUTOPILOT_HANDLERS,
   "learn.daily": async (p) => void learnDaily(p.bizId),
   "ads.weekly_report": async (p) => { if (q.scalar<number>("SELECT COUNT(*) FROM ad WHERE biz_id = ?", p.bizId)) startAdsReport(p.bizId); },
   "report.daily": async (p) => dailyReport(p.bizId),
@@ -129,6 +133,9 @@ export function startOrchestrator() {
       insert("schedule", { biz_id: b.id, name: "nurture.tick", queue: "chat", every_minutes: 5, enabled: 1, label: "Chăm khách: trả lời, nhắc SĐT, kết bạn Zalo (5 phút)", last_run_at: nowIso() });
     if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'messenger.sync'", b.id))
       insert("schedule", { biz_id: b.id, name: "messenger.sync", queue: "chat", every_minutes: 3, enabled: 1, label: "Đồng bộ hội thoại Messenger của Fanpage thật (3 phút)", last_run_at: nowIso() });
+    // Lái tự động: mỗi 15 phút đo độ phủ nội dung — chỉ làm việc khi Sếp bật ở trang Lái tự động.
+    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'autopilot.tick'", b.id))
+      insert("schedule", { biz_id: b.id, name: "autopilot.tick", queue: "agent", every_minutes: 15, enabled: 1, label: "Lái tự động: giữ đủ nội dung cho các ngày tới (15 phút)", last_run_at: nowIso() });
     q.run("UPDATE schedule SET every_minutes = 5, label = 'Chạy rule/cấu hình quảng cáo (5 phút)' WHERE biz_id = ? AND name = 'rules.evaluate' AND every_minutes > 5", b.id);
   }
   const stopWorkers = startWorkers(HANDLERS);

@@ -64,6 +64,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ["post_comment", "dm_sent_at", "TEXT"],
   ["post_comment", "external_created_at", "TEXT"],
   ["post", "meta", "TEXT NOT NULL DEFAULT '{}'"],
+  // Lái tự động: khóa chống trùng + nền tảng/khóa học/ý tưởng Trinh sát của chiến dịch tự tạo
+  ["goal", "params", "TEXT NOT NULL DEFAULT '{}'"],
 ];
 function migrate(d: DatabaseSync) {
   for (const [table, column, ddl] of MIGRATIONS) {

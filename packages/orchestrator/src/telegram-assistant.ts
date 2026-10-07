@@ -46,6 +46,18 @@ async function send(token: string, chatId: string, text: string, extra: Row = {}
   return last;
 }
 
+/** Báo tin chủ động (Lái tự động, nhắc việc) tới mọi chat Telegram đã ghép nối. Chưa nối/ghép → bỏ qua (trả về số chat đã gửi). */
+export async function notifyTelegramChats(bizId: string, text: string): Promise<number> {
+  const t = telegramConn(bizId);
+  const chats = state(bizId).chats;
+  if (!t || !chats.length) return 0;
+  let n = 0;
+  for (const c of chats) {
+    try { await send(t.token, c.id, text); n++; } catch (e) { logger.warn("telegram.notify_failed", { chatId: c.id, error: String(e) }); }
+  }
+  return n;
+}
+
 // ---------------- Ghép nối (web) ----------------
 export async function telegramAssistantStatus(bizId: string) {
   const t = telegramConn(bizId);

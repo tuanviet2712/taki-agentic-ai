@@ -33,6 +33,7 @@ import { Channels } from "./pages/Channels";
 import { AdsReports } from "./pages/AdsReports";
 import { Scout } from "./pages/Scout";
 import { Nurture } from "./pages/Nurture";
+import { Autopilot } from "./pages/Autopilot";
 
 /** Redirect keeping the query string (e.g. ?type=…, ?p=…). */
 function Keep({ to }: { to: string }) {
@@ -58,6 +59,7 @@ export function App() {
           <Route path="/brain" element={<Brain />} />
           <Route path="/dna" element={<Dna />} />
           <Route path="/plan" element={<Plan />} />
+          <Route path="/autopilot" element={<Autopilot />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/content" element={<Content />} />
           <Route path="/publish" element={<Publish />} />

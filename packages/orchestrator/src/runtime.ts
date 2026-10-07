@@ -33,17 +33,17 @@ export function setTaskStatus(task: Row, to: TaskStatus, patch: Row = {}, actor 
 }
 
 // ---------------- Goals -> task graph (graph templates defined in code) ----------------
-export function createGoal(bizId: string, input: { title: string; description: string; template: "launch_campaign" | "weekly_content"; budgetAds: number; dueDate?: string }) {
+export function createGoal(bizId: string, input: { title: string; description: string; template: "launch_campaign" | "weekly_content"; budgetAds: number; dueDate?: string; contentCount?: number; params?: Row }, actor = "ceo") {
   return tx(() => {
-    const goal = insert("goal", { biz_id: bizId, title: input.title, description: input.description, template: input.template, budget_ads: input.budgetAds, due_date: input.dueDate ?? null, status: "active" });
+    const goal = insert("goal", { biz_id: bizId, title: input.title, description: input.description, template: input.template, budget_ads: input.budgetAds, due_date: input.dueDate ?? null, status: "active", params: input.params ?? {} });
     const brief = insert("task", { biz_id: bizId, goal_id: goal.id, agent_key: "brief", title: "Chuẩn hóa brief", status: "ready", input: {}, depends_on: [] });
     let prev = brief.id;
     if (input.template === "launch_campaign") {
       const r = insert("task", { biz_id: bizId, goal_id: goal.id, agent_key: "market_research", title: "Nghiên cứu thị trường & đối thủ", status: "pending", input: {}, depends_on: [prev] });
       prev = r.id;
     }
-    insert("task", { biz_id: bizId, goal_id: goal.id, agent_key: "strategy", title: "Chiến lược & kế hoạch nội dung", status: "pending", input: { contentCount: input.template === "launch_campaign" ? 5 : 4 }, depends_on: [prev] });
-    audit(bizId, "ceo", "goal.created", { type: "goal", id: goal.id }, input);
+    insert("task", { biz_id: bizId, goal_id: goal.id, agent_key: "strategy", title: "Chiến lược & kế hoạch nội dung", status: "pending", input: { contentCount: input.contentCount ?? (input.template === "launch_campaign" ? 5 : 4) }, depends_on: [prev] });
+    audit(bizId, actor, "goal.created", { type: "goal", id: goal.id }, input);
     emit(bizId, "goal.created", { goalId: goal.id });
     enqueue("agent", "agent.run", { taskId: brief.id }, { bizId, idempotencyKey: `run:${brief.id}:0` });
     return goal;
@@ -52,9 +52,8 @@ export function createGoal(bizId: string, input: { title: string; description: s
 
 function expandFromStrategy(strategyTask: Row) {
   const goal = byId<Row>("goal", strategyTask.goal_id);
-  const plan = strategyTask.output?.contentPlan ?? [];
   const created: string[] = [];
-  for (const [i, item] of plan.entries()) {
+  for (const [i, item] of planForGoal(goal, strategyTask.output?.contentPlan ?? []).entries()) {
     const agent = item.format === "reel" || item.format === "video" ? "video_script" : "content";
     const t = insert("task", {
       biz_id: strategyTask.biz_id, goal_id: strategyTask.goal_id, parent_id: strategyTask.id, agent_key: agent,
@@ -68,6 +67,22 @@ function expandFromStrategy(strategyTask: Row) {
     created.push(t.id);
   }
   for (const id of created) enqueue("agent", "agent.run", { taskId: id }, { bizId: strategyTask.biz_id, idempotencyKey: `run:${id}:0` });
+}
+
+/**
+ * Chiến dịch của Lái tự động (goal.params.autopilot): mọi nội dung về đúng nền tảng đã chọn, đúng số bài,
+ * TikTok luôn là video ngắn, chế độ "không làm video" thì đổi video → bài ảnh. Chiến dịch thường giữ nguyên kế hoạch.
+ */
+export function planForGoal(goal: Row | undefined, plan: Row[]): Row[] {
+  const ap = goal?.params?.autopilot;
+  if (!ap?.platform) return plan;
+  const isVideo = (f: string) => f === "video" || f === "reel";
+  return plan.slice(0, Math.max(1, Number(ap.contentCount) || plan.length)).map((item) => {
+    let format = String(item.format ?? "text");
+    if (ap.platform === "tiktok") format = "reel";
+    else if (ap.videoMode === "none" && isVideo(format)) format = "image";
+    return { ...item, channel: ap.platform, format };
+  });
 }
 
 export function onTaskDone(task: Row) {
@@ -107,7 +122,10 @@ function buildContext(task: Row, dna: Dna): RunContext {
   };
 }
 
-function needsApproval(agentKey: string, autonomy: string, verdict: string, total: number): boolean {
+function needsApproval(agentKey: string, autonomy: string, verdict: string, total: number, autopilot?: Row): boolean {
+  // Lái tự động: kế hoạch nội dung (ngân sách ads = 0) đạt chấm điểm thì tự chạy tiếp nếu Sếp bật; bài/kịch bản luôn chờ Sếp nếu bật cổng duyệt.
+  if (autopilot && agentKey === "strategy" && autopilot.autoStrategy) return verdict !== "pass";
+  if (autopilot?.gate && ["content", "video_script"].includes(agentKey)) return true;
   if (agentKey === "strategy") return true; // strategy/budget split is always the CEO's call
   if (["brief", "market_research"].includes(agentKey)) return false; // internal artefacts, no external effect
   if (autonomy === "L0" || autonomy === "L1") return true;
@@ -196,7 +214,8 @@ export async function runTask(taskId: string) {
     return;
   }
   const notPassed = review.verdict === "revise";
-  if (needsApproval(task.agent_key, cfg.autonomy, review.verdict, review.total) || notPassed) {
+  const autopilot = task.goal_id ? byId<Row>("goal", task.goal_id)?.params?.autopilot : undefined;
+  if (needsApproval(task.agent_key, cfg.autonomy, review.verdict, review.total, autopilot) || notPassed) {
     setTaskStatus(task, "awaiting_approval", { progress: 0.9, step: "Chờ CEO duyệt" });
     if (contentItemId) update("content_item", contentItemId, { status: "awaiting_approval" });
     const settings = q.get<Row>("SELECT settings FROM biz WHERE id = ?", task.biz_id)?.settings ?? {};
@@ -211,8 +230,8 @@ export async function runTask(taskId: string) {
     return;
   }
   // Autonomy allows proceeding without the CEO (L2+ and a clean pass).
-  setTaskStatus(task, "awaiting_approval", { step: "Tự duyệt theo mức tự chủ" });
-  await approveTask(task, "auto:" + cfg.autonomy);
+  setTaskStatus(task, "awaiting_approval", { step: autopilot && task.agent_key === "strategy" ? "Lái tự động: kế hoạch đạt chấm điểm, tự chạy tiếp" : "Tự duyệt theo mức tự chủ" });
+  await approveTask(task, autopilot && task.agent_key === "strategy" ? "autopilot" : "auto:" + cfg.autonomy);
 }
 
 export async function approveTask(task: Row, actor: string, edited?: string) {
