@@ -231,6 +231,8 @@ export interface TerminalRunOptions {
   /** Fixed, pre-trusted working directory (no "trust this folder?" question). */
   cwd: string;
   allowedTools: string[];
+  /** Built-in tools the agent must not use (e.g. TaskCreate/TaskUpdate bookkeeping that only adds turns). */
+  disallowedTools?: string[];
   addDirs: string[];
   /** The agent writes its final JSON here (absolute path); the run completes when this file parses. */
   resultFile: string;
@@ -294,7 +296,7 @@ export async function runClaudeInTerminal(o: TerminalRunOptions): Promise<unknow
     const args = [
       prompt, "-p", "--model", o.model, "--permission-mode", "dontAsk", ...(resume ? ["--resume", sessionId] : ["--session-id", sessionId]), "--no-chrome",
       "--mcp-config", mcpFile, "--strict-mcp-config", "--setting-sources", "", "--append-system-prompt-file", systemFile,
-      "--allowedTools", ...o.allowedTools, ...o.addDirs.flatMap((d) => ["--add-dir", d]),
+      "--allowedTools", ...o.allowedTools, ...(o.disallowedTools?.length ? ["--disallowedTools", ...o.disallowedTools] : []), ...o.addDirs.flatMap((d) => ["--add-dir", d]),
     ];
     // Detached: survives an API restart (the job is re-attached through resultFile).
     return spawn(bin, args, { cwd: o.cwd, env, stdio: ["ignore", "ignore", "ignore"], detached: true });

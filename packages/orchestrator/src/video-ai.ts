@@ -79,6 +79,7 @@ export function ensureVideoBins() {
   w("taki-video-finish", `"${py(TOOLS)}" "${join(TOOLS, "finish.py")}"`);
   w("taki-video-stt", `"${py(TOOLS)}" "${join(TOOLS, "stt.py")}"`);
   w("taki-flow-save", `"${process.execPath}" "${resolve("packages/orchestrator/bin/flow-save.mjs")}"`);
+  w("taki-flow-wait", `"${process.execPath}" "${resolve("packages/orchestrator/bin/flow-wait.mjs")}"`);
   const sh = (name: string, body: string) => { const p = join(dir, name); writeFileSync(p, `#!/bin/sh\n# TAKI Agentic AI (${resolve(".")})\n${body}\n`); chmodSync(p, 0o755); };
   // Edge TTS sometimes answers "No audio was received" and succeeds on the next call: retry up to 3 times.
   if (existsSync(join(MPT, ".venv", "bin", "edge-tts"))) sh("taki-tts", `for i in 1 2 3; do "${join(MPT, ".venv", "bin", "edge-tts")}" "$@" && exit 0; echo "taki-tts: thử lại ($i)" >&2; sleep 2; done\nexit 1`);

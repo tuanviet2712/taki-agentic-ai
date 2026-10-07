@@ -292,8 +292,9 @@ function environmentInstructions(o: { toolLabel: string; toolUrl: string | null;
   return [
     "# MÔI TRƯỜNG CHẠY (máy Mac của doanh nghiệp, chạy tự động, KHÔNG có người theo dõi) — áp cho skill ở trên",
     `- Trình duyệt = các tool mcp__flow__browser_* (Playwright) đã gắn sẵn vào "Chrome Flow"${o.email ? `, đăng nhập Google ${o.email}` : ""}. Đây là thay thế cho Claude in Chrome trong skill: bỏ qua bước đọc skill chrome-browser / ToolSearch / tabs_context_mcp.`,
-    "- Playwright nhìn thấy và thao tác được BÊN TRONG iframe của Tool. Cách làm chuẩn: browser_snapshot → lấy ref của nút/ô theo chữ → browser_click / browser_type / browser_select_option / browser_file_upload theo ref → snapshot lại để xác nhận. Chờ bằng browser_wait_for (text hoặc time ≤ 60s), không chờ mù.",
-    "- Snapshot dài: chỉ đọc phần cần. Dùng browser_take_screenshot khi cần NHÌN ảnh/khung hình (chấm khung chủ, storyboard).",
+    "- Playwright nhìn thấy và thao tác được BÊN TRONG iframe của Tool. Cách làm chuẩn: browser_snapshot → lấy ref của nút/ô theo chữ → browser_click / browser_type / browser_select_option / browser_file_upload theo ref → snapshot lại để xác nhận.",
+    "- TỐC ĐỘ (quan trọng — mỗi lượt gọi tool là 1 lượt AI đọc lại toàn bộ ngữ cảnh): CHỜ Flow tạo ảnh/khung/video thì dùng ĐÚNG 1 lệnh Bash `taki-flow-wait` (chờ tối đa 8 phút/lần, tự dừng khi xong hoặc khi trang báo lỗi/hết tín dụng), đặt timeout 600000 cho lệnh Bash: `taki-flow-wait --videos <N>` (đủ N video trên trang), `--images <N>`, `--text \"4 / 4\"`, `--gone \"Đang tạo\"`. Chưa xong (done:false) thì gọi lại. KHÔNG lặp browser_wait_for(time) + snapshot / take_screenshot / evaluate / find để theo dõi tiến độ.",
+    "- Snapshot dài: chỉ đọc phần cần. browser_take_screenshot CHỈ khi cần NHÌN ảnh/khung hình để chấm (khung chủ, storyboard) — không chụp để xem tiến độ (mỗi ảnh làm ngữ cảnh phình to, các lượt sau chậm dần). Gộp nhiều thao tác chắc chắn vào ít lượt; không dùng TaskCreate/TaskUpdate/TodoWrite.",
     "- Dùng 1 tab duy nhất (browser_tabs: đóng tab thừa). Không tắt trình duyệt.",
     "- Giao diện Flow (ngoài Tool) có thể là tiếng Anh hoặc tiếng Việt tuỳ tài khoản: nhận nút theo nghĩa (vd \"Select media\" = hộp chọn nội dung nghe nhìn, \"Upload media\" = Tải lên, \"Open\" = Mở, \"Done\" = Xong, Images = Hình ảnh).",
     ...(o.generator ? [
@@ -649,11 +650,13 @@ export async function runVideoJob(jobId: string) {
       resultFile: join(workdir, "result.json"),
       timeoutMs: (fs.timeoutMin ?? tool.minutes + 30) * 60_000,
       mcpConfig: flowMcpConfig(rawDir),
-      env: { PATH: `${ensureVideoBins()}:${process.env.PATH ?? ""}` }, // taki-video-* of THIS repo
+      // taki-video-* of THIS repo; Bash được chờ tới 10 phút cho taki-flow-wait (mặc định Claude Code cắt ở 2 phút).
+      env: { PATH: `${ensureVideoBins()}:${process.env.PATH ?? ""}`, BASH_DEFAULT_TIMEOUT_MS: "600000", BASH_MAX_TIMEOUT_MS: "600000" },
+      disallowedTools: ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite"],
       allowedTools: [
         "mcp__flow", "Read", "Write", "Glob",
         "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(taki-video-finish:*)", "Bash(taki-video-stt:*)",
-        "Bash(taki-flow-save:*)", "Bash(taki-tts:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(ls:*)", "Bash(mkdir:*)", "Bash(unzip:*)", "Bash(stat:*)",
+        "Bash(taki-flow-save:*)", "Bash(taki-flow-wait:*)", "Bash(taki-tts:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(ls:*)", "Bash(mkdir:*)", "Bash(unzip:*)", "Bash(stat:*)",
       ],
       addDirs: [workdir, UPLOAD_DIR],
       onStep: (s) => { log.push(s); flush(); },
