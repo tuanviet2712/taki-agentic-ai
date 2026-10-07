@@ -3,6 +3,7 @@ import { z } from "zod";
 import { byId, type Row } from "@dotaka/db";
 import { MODEL_CATALOG, cliInfo, effectiveProvider, modelFor } from "@dotaka/llm-gateway";
 import {
+  createTelegramPairCode, removeTelegramChat, telegramAssistantStatus,
   ASSISTANT, assistantBusy, assistantFindings, assistantSettings, checkActionPath, createAction, createThread, deleteThread, dispatchAgentTask,
   finishAction, getThread, listDispatches, listFeedback, listThreads, recordDispatch, saveAssistantSettings, sendAssistantMessage, setFeedback, stopAssistant,
 } from "@dotaka/orchestrator";
@@ -89,6 +90,10 @@ export function assistantRoutes(app: FastifyInstance) {
     if (!assistantSettings(bizId).autoConfirm) return a;
     return execute(bizId, a.id, `${ASSISTANT.actor} · tự thực hiện`);
   });
+  // Ngân Nguyệt trên Telegram: trạng thái, mã ghép nối, bỏ ghép nối 1 chat.
+  r.get("/v1/assistant/telegram", ({ bizId }) => telegramAssistantStatus(bizId));
+  r.post("/v1/assistant/telegram/pair", (c) => { ceoOnly(c); return createTelegramPairCode(c.bizId, c.actor); });
+  r.del("/v1/assistant/telegram/chats/:id", (c) => { ceoOnly(c); return removeTelegramChat(c.bizId, c.params.id, c.actor); });
   r.post("/v1/assistant/actions/:id/confirm", async (c) => { ceoOnly(c); return execute(c.bizId, c.params.id, "Sếp · qua Ngân Nguyệt"); });
   r.post("/v1/assistant/actions/:id/cancel", (c) => {
     ceoOnly(c);

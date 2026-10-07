@@ -16,6 +16,7 @@ import { connectionHealthAll, liveMessengerConnector, registerTelegramFromDb } f
 import { MESSENGER_HANDLERS } from "./messenger-sync.ts";
 import { NURTURE_HANDLERS } from "./nurture.ts";
 import { RESEARCH_HANDLERS } from "./research.ts";
+import { startTelegramAssistant } from "./telegram-assistant.ts";
 import { automationsTick, ensureAutomations } from "./automations.ts";
 import { registerZaloProxy, runZaloFollowUps, syncZalo } from "./zalo-followup.ts";
 
@@ -36,6 +37,7 @@ export * from "./nurture.ts";
 export * from "./script-video.ts";
 export * from "./dna-intake.ts";
 export * from "./research.ts";
+export * from "./telegram-assistant.ts";
 export * from "./chrome-profiles.ts";
 export * from "./flow-browser.ts";
 export * from "./assistant.ts";
@@ -131,8 +133,11 @@ export function startOrchestrator() {
   }
   const stopWorkers = startWorkers(HANDLERS);
   const stopScheduler = startScheduler();
+  // Ngân Nguyệt trên Telegram (long polling; ngủ khi chưa có kết nối Telegram).
+  const stopTelegram = startTelegramAssistant();
   return () => {
     stopWorkers();
     stopScheduler();
+    stopTelegram();
   };
 }

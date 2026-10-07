@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api, useApi } from "../lib/api";
 import { LlmPanel } from "../components/LlmPanel";
 import { AccountForm } from "../components/Account";
+import { TelegramAssistantCard } from "../components/TelegramAssistant";
 import { AGENT_LABEL, num, timeAgo, vndFull } from "../lib/format";
 import type { Tone } from "../lib/format";
 import { Avatar, Badge, Button, Card, Empty, Field, JevBadge, Loading, Modal, PageHeader, PlatformIcon, Toggle, cx, inputCls, useToast } from "../components/ui";
@@ -181,6 +182,7 @@ export function Settings() {
 
       <div className="grid gap-6">
         <Card title="Tài khoản của tôi"><AccountForm /></Card>
+        <TelegramAssistantCard />
         <UsersCard users={users ?? []} onChange={reloadUsers} />
       </div>
 

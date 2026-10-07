@@ -64,8 +64,8 @@ async function discover(platform: string, mode: "live" | "sandbox", cr: Record<s
       return { accountId: r.accountId, name: r.name, config: { spreadsheetTitle: r.title } };
     }
     case "telegram": {
-      const r = await live.telegramTest(cr as any, cfg.chat_id);
-      return { accountId: `${r.accountId}:${cfg.chat_id}`, name: `${r.name} → ${r.chat}`, config: { chatTitle: r.chat } };
+      const r = await live.telegramTest(cr as any, cfg.chat_id || undefined);
+      return { accountId: cfg.chat_id ? `${r.accountId}:${cfg.chat_id}` : String(r.accountId), name: cfg.chat_id ? `${r.name} → ${r.chat}` : `${r.name} (chưa chọn chat cảnh báo)`, config: { chatTitle: r.chat } };
     }
     case "pancake": {
       const shops = await live.pancakeTest(cr as any);
