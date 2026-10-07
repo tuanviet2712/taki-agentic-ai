@@ -54,9 +54,8 @@ export function Agents() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Agent & Tác vụ" subtitle="Giao việc riêng cho từng agent, bật/tắt, đặt mức tự chủ và theo dõi mọi tác vụ đội AI đang làm cho doanh nghiệp." />
-
-      <AssignWork request={assign} onRequest={setAssign} />
+      <PageHeader title="Agent & Tác vụ" subtitle="Bật/tắt từng agent, đặt mức tự chủ và theo dõi mọi tác vụ đội AI đang làm cho doanh nghiệp. Các agent tự chạy theo luồng; khi cần, giao việc riêng cho 1 agent — làm xong là dừng."
+        actions={<Button variant="primary" icon={Send} className="whitespace-nowrap" onClick={() => setAssign({ agent: "" })}>Giao việc riêng</Button>} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Stat icon={Cpu} tone="blue" label="Token (7 ngày)" value={num(tokens)} sub={`${(u?.byAgent ?? []).reduce((a: number, r: any) => a + r.calls, 0)} lượt gọi model`} />
@@ -98,7 +97,7 @@ export function Agents() {
                   <Progress value={usedPct} tone={usedPct > 90 ? "red" : usedPct > 70 ? "amber" : "blue"} className="h-1.5" />
                 </div>
                 {a.key !== "assistant" && (
-                  <Button size="sm" variant="soft" icon={Send} disabled={!enabled} onClick={() => setAssign({ agent: a.key })}>Giao việc riêng</Button>
+                  <Button size="sm" variant="ghost" icon={Send} disabled={!enabled} title="Chạy riêng 1 việc ngoài luồng tự động — xong là dừng" onClick={() => setAssign({ agent: a.key })}>Giao việc riêng</Button>
                 )}
                 <div className="mt-auto flex flex-wrap items-center gap-1.5">
                   {a.avgReview != null && <Badge tone={a.avgReview >= 80 ? "green" : a.avgReview >= 65 ? "amber" : "red"}>Review TB {a.avgReview}</Badge>}
@@ -108,6 +107,8 @@ export function Agents() {
           })}
         </div>
       )}
+
+      <AssignWork request={assign} onRequest={setAssign} />
 
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <Card title="Tác vụ gần đây" action={

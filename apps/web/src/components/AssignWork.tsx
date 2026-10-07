@@ -39,66 +39,67 @@ const CHANNELS = [["facebook", "Facebook"], ["instagram", "Instagram"], ["tiktok
 
 export type AssignRequest = { agent: string; basedOn?: string[] } | null;
 
-/** Giao việc riêng cho từng agent — làm xong bước đó là dừng (trang Agent & Tác vụ). */
+/**
+ * Giao việc riêng (tuỳ chọn, ngoài luồng tự động): bình thường các agent chạy theo chuỗi; khi cần, Sếp bấm "Giao việc riêng"
+ * (nút đầu trang hoặc trên thẻ agent) → 1 agent làm đúng 1 việc rồi DỪNG. request.agent = "" → mở bảng chọn agent.
+ * Thẻ "Việc đã giao riêng" chỉ hiện khi đã có việc.
+ */
 export function AssignWork({ request, onRequest }: { request: AssignRequest; onRequest: (r: AssignRequest) => void }) {
   const data = useApi<Overview>("agents/assigned", ["task.", "review.", "approval."]);
   const [openTask, setOpenTask] = useState<string | null>(null);
   const agents = data.data?.agents ?? {};
+  const tasks = data.data?.tasks ?? [];
 
   return (
-    <Card title="Giao việc riêng cho từng Agent" action={<span className="text-xs text-muted">Làm xong bước đó là dừng — không tự chạy các khâu sau</span>}>
-      <div className="space-y-5">
-        {GROUPS.map((g) => (
-          <div key={g.title}>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{g.title}</p>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {g.keys.filter((k) => agents[k]).map((k) => {
-                const s = agents[k];
-                const Icon = ICON[k] ?? ExternalLink;
-                return (
-                  <button key={k} type="button" onClick={() => onRequest({ agent: k })}
-                    className="group flex items-start gap-3 rounded-xl border border-line bg-page p-3.5 text-left transition hover:border-blue-400 hover:shadow-sm">
-                    <span className={cx("grid h-10 w-10 shrink-0 place-items-center rounded-xl", s.kind === "page" ? "bg-soft text-muted" : "bg-blue-500/10 text-blue-600")}><Icon className="h-5 w-5" /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5 text-sm font-semibold text-ink">{AGENT_LABEL[k] ?? k}{s.kind === "page" && <ExternalLink className="h-3.5 w-3.5 text-muted" />}</span>
-                      <span className="mt-0.5 block text-xs text-muted">{s.does}</span>
-                      <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-blue-600 opacity-80 group-hover:opacity-100">
-                        {s.kind === "page" ? "Mở trang làm việc" : `Giao: ${TASK_NAME[k]}`}<ArrowRight className="h-3.5 w-3.5" />
-                      </span>
-                    </span>
+    <>
+      {tasks.length > 0 && (
+        <Card title="Việc đã giao riêng" action={<span className="text-xs text-muted">Chạy ngoài luồng tự động · xong bước đó là dừng</span>}>
+          <ul className="-mx-5 -mb-5 divide-y divide-line">
+            {tasks.slice(0, 8).map((t) => {
+              const ts = TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const };
+              const next = t.status === "done" ? NEXT[t.agent_key] : undefined;
+              return (
+                <li key={t.id} className="flex flex-wrap items-center gap-2 px-5 py-2.5">
+                  <button onClick={() => setOpenTask(t.id)} className="min-w-0 flex-1 basis-60 text-left">
+                    <p className="truncate text-sm font-medium text-ink hover:text-blue-600">{t.title}</p>
+                    <p className="text-xs text-muted">{AGENT_LABEL[t.agent_key] ?? t.agent_key} · {timeAgo(t.created_at)}{t.step ? ` · ${t.step}` : ""}</p>
                   </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Việc đã giao riêng</p>
-          {!data.data?.tasks.length ? <p className="rounded-xl border border-dashed border-line p-4 text-center text-sm text-muted">Chưa giao việc riêng nào. Bấm 1 agent ở trên để giao.</p> : (
-            <ul className="divide-y divide-line rounded-xl border border-line">
-              {data.data.tasks.slice(0, 12).map((t) => {
-                const ts = TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const };
-                const next = t.status === "done" ? NEXT[t.agent_key] : undefined;
-                return (
-                  <li key={t.id} className="flex flex-wrap items-center gap-2 px-3.5 py-2.5">
-                    <button onClick={() => setOpenTask(t.id)} className="min-w-0 flex-1 basis-60 text-left">
-                      <p className="truncate text-sm font-medium text-ink hover:text-blue-600">{t.title}</p>
-                      <p className="text-xs text-muted">{AGENT_LABEL[t.agent_key] ?? t.agent_key} · {timeAgo(t.created_at)}{t.step ? ` · ${t.step}` : ""}</p>
-                    </button>
-                    <Badge tone={ts.tone}>{ts.label}</Badge>
-                    {next && <Button size="sm" variant="soft" icon={ArrowRight} onClick={() => onRequest({ agent: next, basedOn: [t.id] })}>Giao bước tiếp: {TASK_NAME[next]}</Button>}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      </div>
+                  <Badge tone={ts.tone}>{ts.label}</Badge>
+                  {next && <Button size="sm" variant="soft" icon={ArrowRight} onClick={() => onRequest({ agent: next, basedOn: [t.id] })}>Giao bước tiếp: {TASK_NAME[next]}</Button>}
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
       <TaskResult id={openTask} onClose={() => setOpenTask(null)} />
-      <AssignModal request={request} spec={request ? agents[request.agent] : undefined} sources={data.data?.sources ?? []}
+      <Modal open={request?.agent === ""} onClose={() => onRequest(null)} title="Giao việc riêng — chọn agent" wide>
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Bình thường các agent tự chạy theo luồng (Kế hoạch / Lái tự động). Giao việc riêng = 1 agent làm đúng 1 việc rồi <b className="text-ink">dừng</b>, không mở khâu sau.</p>
+          {GROUPS.map((g) => (
+            <div key={g.title}>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{g.title}</p>
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {g.keys.filter((k) => agents[k]).map((k) => {
+                  const sp = agents[k];
+                  const Icon = ICON[k] ?? ExternalLink;
+                  return (
+                    <button key={k} type="button" onClick={() => onRequest({ agent: k })} title={sp.does}
+                      className="flex items-center gap-2.5 rounded-xl border border-line px-3 py-2 text-left text-sm transition hover:border-blue-400 hover:bg-blue-500/5">
+                      <Icon className={cx("h-4 w-4 shrink-0", sp.kind === "page" ? "text-muted" : "text-blue-600")} />
+                      <span className="min-w-0 flex-1 truncate"><b className="font-medium text-ink">{sp.kind === "page" ? AGENT_LABEL[k] : TASK_NAME[k]}</b><span className="text-muted"> · {sp.kind === "page" ? "mở trang" : AGENT_LABEL[k]}</span></span>
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+      <AssignModal request={request?.agent ? request : null} spec={request?.agent ? agents[request.agent] : undefined} sources={data.data?.sources ?? []}
         onClose={() => onRequest(null)} onDone={(taskId) => { data.reload(); if (taskId) setOpenTask(taskId); }} />
-    </Card>
+    </>
   );
 }
 
