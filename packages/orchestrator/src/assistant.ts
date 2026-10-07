@@ -251,8 +251,13 @@ async function runTurn(bizId: string, thread: Row, messageId: string, prompt: st
   running.delete(thread.id);
   if (timer) clearTimeout(timer);
 
-  const text = show() || (typeof final?.result === "string" ? final.result : "");
   const ok = final && !final.is_error && final.subtype === "success";
+  const rawErr = `${typeof final?.result === "string" ? final.result : ""} ${err}`;
+  // Claude CLI trên máy bị đăng xuất / hết phiên → nói rõ cách sửa (Telegram + web), không trả nguyên lỗi tiếng Anh.
+  const authLost = !ok && /Failed to authenticate|OAuth session expired|not logged in|Invalid API key|Please run \/login|authentication_error/i.test(rawErr);
+  const text = authLost
+    ? "Dạ Claude CLI trên máy chạy hệ thống đã hết phiên đăng nhập nên em chưa trả lời được. Sếp mở Terminal trên máy đó, gõ `claude` rồi gõ `/login` và đăng nhập lại tài khoản Claude; xong Sếp nhắn lại em nhé."
+    : show() || (typeof final?.result === "string" ? final.result : "");
   if (final) update("assistant_thread", thread.id, { started: 1 }); // session exists from now on → --resume next time
   update("assistant_message", messageId, {
     text: ctrl.signal.aborted ? `${text}${text ? "\n\n" : ""}_(Sếp đã dừng)_` : text || (ok ? "" : "Em gặp lỗi khi xử lý, Sếp thử lại giúp em."),
