@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname } from "node:path";
 import { z } from "zod";
 import { activeDna, audit, insert, q, type Row } from "@dotaka/db";
+import { readWebsite, type WebPage } from "./web-read.ts";
 import { generate } from "@dotaka/llm-gateway";
 import { AppError } from "@dotaka/shared";
 
@@ -65,6 +66,22 @@ export function documentText(path: string): string {
   if (TEXTUTIL_EXT.has(ext)) return execFileSync("/usr/bin/textutil", ["-convert", "txt", "-stdout", path], { encoding: "utf8", maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
   if (ext === ".pdf") throw new AppError("PDF", "Máy chưa đọc được PDF — mở PDF, chọn hết chữ (Cmd+A, Cmd+C) rồi dán vào ô nội dung");
   throw new AppError("BAD_TYPE", `Chưa đọc được tệp ${ext} — dùng .docx, .txt, .md, .rtf, .html hoặc dán chữ`);
+}
+
+/**
+ * Nguồn cho DNA Agent: chữ dán / tài liệu + (tuỳ chọn) WEBSITE — tải thật trang chủ + giới thiệu / khóa học / sản phẩm /
+ * bảng giá / liên hệ (web-read.ts). Không đọc được website và không có nguồn khác → báo rõ, hướng dẫn dán nội dung.
+ */
+export async function dnaSourceText(text: string, website?: string): Promise<{ text: string; pages: { url: string; title: string }[] }> {
+  if (!website?.trim()) return { text, pages: [] };
+  let pages: WebPage[] = [];
+  let reason = "";
+  try { pages = (await readWebsite(website)).pages.filter((p) => p.text.trim().length > 80); }
+  catch (e) { reason = e instanceof Error ? e.message : String(e); }
+  if (!pages.length && text.trim().length < 80)
+    throw new AppError("WEB_UNREADABLE", `Không đọc được nội dung website ${website}${reason ? ` — ${reason}` : " (trang gần như không có chữ, có thể dựng bằng JavaScript)"}. Sếp mở website, copy nội dung trang giới thiệu / khóa học / sản phẩm dán vào ô nội dung rồi bấm lại.`);
+  const web = pages.map((p) => `TRANG ${p.url}${p.title ? ` — ${p.title}` : ""}\n${p.text}`).join("\n\n---\n\n");
+  return { text: [web, text.trim()].filter(Boolean).join("\n\n---\n\n"), pages: pages.map((p) => ({ url: p.url, title: p.title })) };
 }
 
 /** DNA Agent: tài liệu tự do → khung DNA. Chỉ điền điều tài liệu có; thiếu/mâu thuẫn → pendingConfirmations. */

@@ -10,7 +10,7 @@ import {
   trashNote, upcomingReminders, vaultGraph, vaultOf, vaultTree, vnDate, writeDaily, writeMonthly, writeNoteFile, writeWeekly,
 } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
-import { routes } from "../http.ts";
+import { currentBizId, routes } from "../http.ts";
 
 const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".mp4": "video/mp4", ".mp3": "audio/mpeg", ".md": "text/markdown; charset=utf-8", ".txt": "text/plain; charset=utf-8" };
 
@@ -99,7 +99,7 @@ export function brainRoutes(app: FastifyInstance) {
 
   // Drop files into the brain: text/markdown become notes in Inbox; anything else is attached + linked from an Inbox note
   app.post("/v1/brain/:v/upload", { bodyLimit: 45 * 1024 * 1024 }, async (req) => {
-    const bizId = defaultBizId(), actor = "Phòng Marketing TAKI";
+    const bizId = currentBizId(req), actor = "Phòng Marketing TAKI";
     const v = vaultOf(bizId, (req.params as Row).v);
     const p = z.object({ name: z.string().min(1).max(200), data: z.string().min(1), folder: z.string().optional() }).parse(req.body);
     const buf = Buffer.from(p.data.replace(/^data:[^;]+;base64,/, ""), "base64");
@@ -117,7 +117,7 @@ export function brainRoutes(app: FastifyInstance) {
   });
   // Serve attachments (images in previews)
   app.get("/v1/brain/:v/file", async (req, reply) => {
-    const v = vaultOf(defaultBizId(), (req.params as Row).v);
+    const v = vaultOf(currentBizId(req), (req.params as Row).v);
     let rel = String((req.query as Row).path ?? "");
     if (!rel.includes("/") && !noteExists(v, rel)) rel = `${F.files}/${rel}`;
     const abs = safePath(v, rel);

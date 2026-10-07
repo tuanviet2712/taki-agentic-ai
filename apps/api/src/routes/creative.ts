@@ -9,7 +9,7 @@ import {
   profileAvatarPath, makeVideoFromScript, planVideoFromScript, scriptsAwaitingVideo, setStockKeys, setWindowState, startVideoJob, toolUrlFor, transcribe, videoAiFile, videoAiStatus, voiceOver, drivingPreset,
 } from "@dotaka/orchestrator";
 import { AppError, uuidv7 } from "@dotaka/shared";
-import { routes } from "../http.ts";
+import { currentBizId, routes } from "../http.ts";
 
 export function creativeRoutes(app: FastifyInstance) {
   const r = routes(app);
@@ -121,7 +121,7 @@ export function creativeRoutes(app: FastifyInstance) {
     mkdirSync(UPLOAD_DIR, { recursive: true });
     const path = join(UPLOAD_DIR, `${uuidv7().slice(-12)}_${safe}`);
     writeFileSync(path, Buffer.from(p.data.replace(/^data:[^;]+;base64,/, ""), "base64"));
-    audit(defaultBizId(), "CEO", "upload.file", undefined, { path });
+    audit(currentBizId(req), "CEO", "upload.file", undefined, { path });
     return { path, size: statSync(path).size };
   });
 
@@ -134,7 +134,7 @@ export function creativeRoutes(app: FastifyInstance) {
     mkdirSync(UPLOAD_DIR, { recursive: true });
     const path = join(UPLOAD_DIR, `${uuidv7().slice(-12)}_${safe}`);
     await pipeline(req.body as NodeJS.ReadableStream, createWriteStream(path));
-    audit(defaultBizId(), "CEO", "upload.file", undefined, { path, size: statSync(path).size });
+    audit(currentBizId(req), "CEO", "upload.file", undefined, { path, size: statSync(path).size });
     return { path, size: statSync(path).size };
   });
 

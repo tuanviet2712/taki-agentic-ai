@@ -18,7 +18,8 @@ export function Dna() {
   const toast = useToast();
   const [edit, setEdit] = useState<{ key: EditKey; draft: any } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [intake, setIntake] = useState(false);
+  // ?import=1 (vừa tạo doanh nghiệp mới) → mở luôn hộp Nạp DNA.
+  const [intake, setIntake] = useState(() => new URLSearchParams(window.location.search).get("import") === "1");
   if (!d) return <Loading />;
   const dna = d.data ?? {};
   const goals = dna.goals ?? {};
@@ -311,6 +312,8 @@ function List({ items }: { items?: string[] }) {
 function DnaIntake({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [text, setText] = useState("");
+  const [website, setWebsite] = useState("");
+  const [readPages, setReadPages] = useState<{ url: string; title: string }[]>([]);
   const [file, setFile] = useState<{ path: string; name: string } | null>(null);
   const [draft, setDraft] = useState<any | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -323,7 +326,11 @@ function DnaIntake({ open, onClose, onSaved }: { open: boolean; onClose: () => v
   };
   const runAi = async () => {
     setBusy("ai");
-    try { const r = await api.post("dna/draft", { text, path: file?.path }); setDraft(r.draft); toast("DNA Agent đã soạn xong bản nháp — Sếp xem lại rồi lưu"); } catch (e: any) { toast(e.message, "err"); } finally { setBusy(null); }
+    try {
+      const r = await api.post("dna/draft", { text, path: file?.path, website: website.trim() || undefined });
+      setDraft(r.draft); setReadPages(r.pages ?? []);
+      toast(r.pages?.length ? `DNA Agent đã đọc ${r.pages.length} trang website và soạn xong bản nháp — Sếp xem lại rồi lưu` : "DNA Agent đã soạn xong bản nháp — Sếp xem lại rồi lưu");
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(null); }
   };
   const save = async (data: any, source: string) => {
     setBusy("save");
@@ -348,12 +355,17 @@ function DnaIntake({ open, onClose, onSaved }: { open: boolean; onClose: () => v
       {!draft ? (
         <div className="space-y-5">
           <div className="space-y-3 rounded-xl border border-line p-4">
-            <p className="flex items-center gap-2 text-sm font-semibold text-ink"><Sparkles className="h-4 w-4 text-blue-600" />AI đọc tài liệu → điền DNA</p>
+            <p className="flex items-center gap-2 text-sm font-semibold text-ink"><Sparkles className="h-4 w-4 text-blue-600" />AI đọc website / tài liệu → điền DNA</p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink">Link website doanh nghiệp</label>
+              <input className={inputCls} placeholder="VD: nguyentatkiem.com" value={website} onChange={(e) => setWebsite(e.target.value)} />
+              <p className="mt-1 text-xs text-muted">AI tự đọc trang chủ + trang giới thiệu, khóa học / sản phẩm, bảng giá, liên hệ. Có thể dùng một mình hoặc kèm tài liệu bên dưới.</p>
+            </div>
             <p className="text-xs text-muted">Dán hồ sơ công ty, bảng sản phẩm/giá, chân dung khách hàng, quy định thương hiệu… hoặc tải file (.docx, .txt, .md, .rtf, .html). DNA Agent chỉ ghi điều tài liệu có; chỗ chưa chắc đưa vào “Điều chờ xác nhận”.</p>
             <textarea rows={8} className={inputCls} placeholder="Dán nội dung tài liệu vào đây…" value={text} onChange={(e) => setText(e.target.value)} />
             <div className="flex flex-wrap items-center gap-2">
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-xs hover:bg-soft"><FileUp className="h-4 w-4" />{busy === "upload" ? "Đang tải…" : file ? file.name : "Tải tài liệu"}<input type="file" className="hidden" accept=".docx,.doc,.txt,.md,.rtf,.html,.htm,.odt,.json,.csv" onChange={(e) => pickDoc(e.target.files?.[0])} /></label>
-              <Button variant="primary" icon={Sparkles} loading={busy === "ai"} disabled={!text.trim() && !file} onClick={runAi}>AI soạn DNA</Button>
+              <Button variant="primary" icon={Sparkles} loading={busy === "ai"} disabled={!text.trim() && !file && !website.trim()} onClick={runAi}>AI soạn DNA</Button>
               <span className="text-xs text-muted">mất khoảng 1–2 phút</span>
             </div>
           </div>
@@ -368,6 +380,12 @@ function DnaIntake({ open, onClose, onSaved }: { open: boolean; onClose: () => v
         </div>
       ) : (
         <div className="space-y-4 text-sm">
+          {readPages.length > 0 && (
+            <div className="rounded-xl border border-line px-3 py-2 text-xs text-muted">
+              <p className="font-medium text-ink">Đã đọc {readPages.length} trang website:</p>
+              <ul className="mt-1 space-y-0.5">{readPages.map((p) => <li key={p.url} className="truncate">• <a href={p.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{p.title || p.url}</a></li>)}</ul>
+            </div>
+          )}
           <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">Bản nháp — xem lại trước khi lưu. Lưu sẽ thay TOÀN BỘ DNA hiện tại (bản cũ vẫn ở Lịch sử phiên bản). Sau khi lưu, sửa từng mục bằng nút “Chỉnh sửa”.</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Preview label="Thương hiệu" value={[dn.company?.brand || dn.company?.name, dn.company?.industry, dn.company?.website].filter(Boolean).join(" · ")} />

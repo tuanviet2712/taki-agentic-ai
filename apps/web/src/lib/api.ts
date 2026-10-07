@@ -6,6 +6,36 @@ export class ApiError extends Error {
   }
 }
 
+// ---------------- Doanh nghiệp đang chọn (nhiều doanh nghiệp) ----------------
+// localStorage + cookie taki_biz (cookie để EventSource, <img>, <video>, tải tệp cũng mang theo). Máy chủ kiểm & tự về
+// doanh nghiệp mặc định nếu id lạ / đã lưu trữ.
+const BIZ_KEY = "taki_biz";
+function bizCookie(): string | null {
+  const m = document.cookie.match(/(?:^|;\s*)taki_biz=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function writeBizCookie(id: string) {
+  document.cookie = `${BIZ_KEY}=${encodeURIComponent(id)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+}
+export function currentBizId(): string | null {
+  let id: string | null = null;
+  try { id = localStorage.getItem(BIZ_KEY); } catch { /* storage unavailable */ }
+  return id || bizCookie();
+}
+function rememberBiz(id: string) {
+  try { localStorage.setItem(BIZ_KEY, id); } catch { /* storage unavailable */ }
+  writeBizCookie(id);
+}
+/** Đổi doanh nghiệp → nạp lại toàn bộ trang (mọi dữ liệu / SSE theo doanh nghiệp mới). */
+export function switchBiz(id: string, to = "/") {
+  rememberBiz(id);
+  window.location.assign(to);
+}
+{
+  const id = currentBizId();
+  if (id && bizCookie() !== id) writeBizCookie(id);
+}
+
 /** Full API path (for <img src>, downloads…) — same base as request() below. */
 export const apiUrl = (p: string) => (p.startsWith("/") ? p : `/v1/${p}`);
 
@@ -15,9 +45,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(method !== "GET" ? { "idempotency-key": crypto.randomUUID() } : {}),
+      ...(currentBizId() ? { "x-biz-id": currentBizId()! } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  // Máy chủ báo doanh nghiệp thực dùng (id cũ đã lưu trữ → mặc định): ghi nhớ lại cho khớp.
+  const used = res.headers.get("x-biz-id");
+  if (used && used !== currentBizId()) rememberBiz(used);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.code ?? "HTTP", data.message ?? `Lỗi ${res.status}`, data.details);
   return data as T;

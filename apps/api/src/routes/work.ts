@@ -4,7 +4,7 @@ import { CreateGoal, DecideApproval } from "@dotaka/contracts";
 import { retrieve } from "@dotaka/chat-engine";
 import { activeDna, audit, byId, insert, q, update, type Row } from "@dotaka/db";
 import { judge, norm, passageHeuristic, passageQuestions } from "@dotaka/jev";
-import { approveTask, assignAgentTask, assignedOverview, recordDispatch, blankDna, chromeLock, continueGoal, createGoal, decideApproval, documentText, editedTextIssues, draftDnaFromText, enqueue, learnDaily, retryPublishJob, retryTask, saveDna, schedulePublish } from "@dotaka/orchestrator";
+import { approveTask, assignAgentTask, assignedOverview, recordDispatch, blankDna, chromeLock, continueGoal, createGoal, decideApproval, documentText, editedTextIssues, draftDnaFromText, dnaSourceText, enqueue, learnDaily, retryPublishJob, retryTask, saveDna, schedulePublish } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
 import { routes } from "../http.ts";
 
@@ -37,9 +37,11 @@ export function workRoutes(app: FastifyInstance) {
   r.put("/v1/dna", ({ bizId, body, actor }) => saveDna(bizId, z.record(z.string(), z.unknown()).parse(body.data ?? body), actor));
   // Nạp DNA cho doanh nghiệp bất kỳ: tài liệu (dán / tải file) → DNA Agent soạn bản nháp → Sếp xem rồi mới lưu.
   r.post("/v1/dna/draft", async ({ bizId, body }) => {
-    const p = z.object({ text: z.string().max(200_000).optional(), path: z.string().optional() }).parse(body);
+    const p = z.object({ text: z.string().max(200_000).optional(), path: z.string().optional(), website: z.string().max(300).optional() }).parse(body);
     const text = [p.path ? documentText(p.path) : "", p.text ?? ""].filter(Boolean).join("\n\n");
-    return draftDnaFromText(bizId, text);
+    // Link website → tải nội dung thật các trang chính (trước đây AI chỉ nhận được chuỗi URL).
+    const src = await dnaSourceText(text, p.website);
+    return { ...(await draftDnaFromText(bizId, src.text)), pages: src.pages };
   });
   r.post("/v1/dna/import", ({ bizId, body, actor }) => {
     const p = z.object({ data: z.record(z.string(), z.unknown()), replace: z.boolean().default(true), source: z.string().max(60).optional() }).parse(body);

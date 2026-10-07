@@ -1,4 +1,4 @@
-import { audit, emit, insert, q, update, type Row } from "@dotaka/db";
+import { activeBizIds, audit, emit, insert, q, update, type Row } from "@dotaka/db";
 import { sendTelegram } from "@dotaka/connectors";
 import { handleIncoming, runFollowUps, setConversationConnector } from "@dotaka/chat-engine";
 import { formatVnd, logger, nowIso } from "@dotaka/shared";
@@ -18,6 +18,7 @@ import { NURTURE_HANDLERS } from "./nurture.ts";
 import { RESEARCH_HANDLERS } from "./research.ts";
 import { AUTOPILOT_HANDLERS, autopilotPublishOpts } from "./autopilot.ts";
 import { quickReport } from "./assign.ts";
+import { ensureBizSchedules } from "./business.ts";
 import { startTelegramAssistant } from "./telegram-assistant.ts";
 import { automationsTick, ensureAutomations } from "./automations.ts";
 import { registerZaloProxy, runZaloFollowUps, syncZalo } from "./zalo-followup.ts";
@@ -41,6 +42,7 @@ export * from "./dna-intake.ts";
 export * from "./research.ts";
 export * from "./autopilot.ts";
 export * from "./assign.ts";
+export * from "./business.ts";
 export * from "./telegram-assistant.ts";
 export * from "./chrome-profiles.ts";
 export * from "./flow-browser.ts";
@@ -107,32 +109,11 @@ export function startOrchestrator() {
   registerBrainHooks();
   registerZaloProxy();
   setConversationConnector(liveMessengerConnector);
-  for (const b of q.all<Row>("SELECT id FROM biz")) {
-    ensureAssistantAgent(b.id);
-    setTimeout(() => void brainTick(b.id, { full: true }).catch((e) => logger.warn("brain.boot_tick_failed", { error: String(e) })), 3000);
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'brain.tick'", b.id))
-      insert("schedule", { biz_id: b.id, name: "brain.tick", queue: "agent", every_minutes: 5, enabled: 1, label: "Bộ não: nhật ký, dashboard, nhắc việc, đồng bộ (5 phút)", last_run_at: nowIso() });
-    ensureAutomations(b.id);
-    // Configs can run every 5 minutes: the tick and rule evaluation must be at least that frequent.
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'automations.tick'", b.id))
-      insert("schedule", { biz_id: b.id, name: "automations.tick", queue: "ads", every_minutes: 5, enabled: 1, label: "Chạy cấu hình tự động (5 phút)", last_run_at: nowIso() });
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'zalo.sync'", b.id))
-      insert("schedule", { biz_id: b.id, name: "zalo.sync", queue: "chat", every_minutes: 2, enabled: 1, label: "Đồng bộ hội thoại Zalo từ ZL-CRM (2 phút)", last_run_at: nowIso() });
-    // Chăm khách từ bình luận: chỉ làm việc khi Sếp bật (nurture.enabled) — tắt thì 2 lịch này không gọi Facebook.
-    // Trinh sát nội dung: mỗi 10 phút xem đã tới giờ cập nhật Sếp cài chưa (mặc định 06:59) — không có kênh thì không làm gì.
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'research.tick'", b.id))
-      insert("schedule", { biz_id: b.id, name: "research.tick", queue: "agent", every_minutes: 10, enabled: 1, label: "Trinh sát nội dung: cập nhật nguồn quan sát theo lịch", last_run_at: nowIso() });
-    q.run("UPDATE schedule SET label = 'Trinh sát nội dung: cập nhật nguồn quan sát theo lịch' WHERE biz_id = ? AND name = 'research.tick'", b.id);
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'nurture.poll'", b.id))
-      insert("schedule", { biz_id: b.id, name: "nurture.poll", queue: "chat", every_minutes: 5, enabled: 1, label: "Chăm khách: quét bình luận mới trên Fanpage (5 phút)", last_run_at: nowIso() });
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'nurture.tick'", b.id))
-      insert("schedule", { biz_id: b.id, name: "nurture.tick", queue: "chat", every_minutes: 5, enabled: 1, label: "Chăm khách: trả lời, nhắc SĐT, kết bạn Zalo (5 phút)", last_run_at: nowIso() });
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'messenger.sync'", b.id))
-      insert("schedule", { biz_id: b.id, name: "messenger.sync", queue: "chat", every_minutes: 3, enabled: 1, label: "Đồng bộ hội thoại Messenger của Fanpage thật (3 phút)", last_run_at: nowIso() });
-    // Lái tự động: mỗi 15 phút đo độ phủ nội dung — chỉ làm việc khi Sếp bật ở trang Lái tự động.
-    if (!q.get("SELECT id FROM schedule WHERE biz_id = ? AND name = 'autopilot.tick'", b.id))
-      insert("schedule", { biz_id: b.id, name: "autopilot.tick", queue: "agent", every_minutes: 15, enabled: 1, label: "Lái tự động: giữ đủ nội dung cho các ngày tới (15 phút)", last_run_at: nowIso() });
-    q.run("UPDATE schedule SET every_minutes = 5, label = 'Chạy rule/cấu hình quảng cáo (5 phút)' WHERE biz_id = ? AND name = 'rules.evaluate' AND every_minutes > 5", b.id);
+  // Mọi doanh nghiệp đang hoạt động: trợ lý, bộ não, bộ lịch nền đầy đủ (business.ts ensureBizSchedules).
+  for (const id of activeBizIds()) {
+    ensureAssistantAgent(id);
+    setTimeout(() => void brainTick(id, { full: true }).catch((e) => logger.warn("brain.boot_tick_failed", { error: String(e) })), 3000);
+    ensureBizSchedules(id);
   }
   const stopWorkers = startWorkers(HANDLERS);
   const stopScheduler = startScheduler();

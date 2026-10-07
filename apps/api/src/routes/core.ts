@@ -7,7 +7,7 @@ import { JEV_MODEL, jevEnabled } from "@dotaka/jev";
 import { DEFAULT_LLM, MODEL_CATALOG, cliInfo, effectiveProvider, llmSettings, modelFor, testModel, tokensUsedToday, type Tier } from "@dotaka/llm-gateway";
 import { latestDaily, sumMetrics, today } from "@dotaka/orchestrator";
 import { AppError, sha256 } from "@dotaka/shared";
-import { routes } from "../http.ts";
+import { currentBizId, routes } from "../http.ts";
 import { publicProfile } from "./account.ts";
 
 const since = (days: number) => new Date(Date.now() - days * 86400_000).toISOString();
@@ -189,7 +189,9 @@ export function coreRoutes(app: FastifyInstance) {
   app.get("/v1/stream", (req, reply) => {
     reply.raw.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": "*" });
     reply.raw.write(`event: hello\ndata: {}\n\n`);
-    const onEvent = (e: Row) => reply.raw.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
+    // Chỉ sự kiện của doanh nghiệp đang chọn (cookie taki_biz — EventSource không gửi header) + sự kiện chung (bizId null).
+    const biz = currentBizId(req);
+    const onEvent = (e: Row) => { if (!e.bizId || e.bizId === biz) reply.raw.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`); };
     bus.on("event", onEvent);
     const ping = setInterval(() => reply.raw.write(`: ping\n\n`), 20_000);
     req.raw.on("close", () => {

@@ -12,7 +12,7 @@ import {
   attributionInfo, attributionOptions, liveMetaToken,
 } from "@dotaka/orchestrator";
 import { AppError, decryptSecret, sha256 } from "@dotaka/shared";
-import { routes } from "../http.ts";
+import { currentBizId, routes } from "../http.ts";
 
 /** Connections hub, whitelist, automation configs, quick ad publish, ad templates, MCP keys. */
 export function connectRoutes(app: FastifyInstance) {
@@ -118,7 +118,7 @@ export function connectRoutes(app: FastifyInstance) {
     const id = (req.params as Row).id as string;
     const a = byId<Row>("automation", id);
     const file = join(resolve(process.env.DATA_DIR ?? "data", "exports"), `${id}.csv`);
-    if (!a || a.biz_id !== defaultBizId() || !existsSync(file)) return reply.status(404).send({ code: "NOT_FOUND", message: "Chưa có file — hãy chạy cấu hình trước" });
+    if (!a || a.biz_id !== currentBizId(req) || !existsSync(file)) return reply.status(404).send({ code: "NOT_FOUND", message: "Chưa có file — hãy chạy cấu hình trước" });
     reply.header("content-disposition", `attachment; filename="chi-so-ads-${today()}.csv"`).type("text/csv; charset=utf-8");
     return reply.send(createReadStream(file));
   });

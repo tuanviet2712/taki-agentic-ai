@@ -233,8 +233,19 @@ export function activeDna(bizId: string): Row | undefined {
   return q.get("SELECT * FROM dna_profile WHERE biz_id = ? AND status = 'active' ORDER BY version DESC LIMIT 1", bizId);
 }
 
+/** Doanh nghiệp đã lưu trữ (settings.archived): ẩn khỏi bộ chọn, dừng lịch nền — dữ liệu giữ nguyên. */
+export const NOT_ARCHIVED = "COALESCE(json_extract(settings, '$.archived'), 0) = 0";
+export function isActiveBiz(id: string | null | undefined): boolean {
+  return Boolean(id && q.get(`SELECT id FROM biz WHERE id = ? AND ${NOT_ARCHIVED}`, id));
+}
+/** Mọi doanh nghiệp đang hoạt động (cho việc nền: lịch, đảm bảo cấu hình). */
+export function activeBizIds(): string[] {
+  return q.all<{ id: string }>(`SELECT id FROM biz WHERE ${NOT_ARCHIVED} ORDER BY created_at`).map((b) => b.id);
+}
+
 export function defaultBizId(): string {
-  const b = q.get<{ id: string }>("SELECT id FROM biz ORDER BY created_at LIMIT 1");
+  const b = q.get<{ id: string }>(`SELECT id FROM biz WHERE ${NOT_ARCHIVED} ORDER BY created_at LIMIT 1`)
+    ?? q.get<{ id: string }>("SELECT id FROM biz ORDER BY created_at LIMIT 1");
   if (!b) throw new Error("No biz found. Run `pnpm seed` first.");
   return b.id;
 }

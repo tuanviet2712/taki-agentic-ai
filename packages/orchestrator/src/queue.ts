@@ -84,7 +84,8 @@ async function runJob(queue: QueueName, job: Row, h: Handler) {
 export function startScheduler(tickMs = 20_000) {
   const tick = () => {
     const now = Date.now();
-    for (const s of q.all<Row>("SELECT * FROM schedule WHERE enabled = 1")) {
+    // Doanh nghiệp đã lưu trữ: không chạy lịch nền (dữ liệu & cài đặt lịch giữ nguyên để khôi phục).
+    for (const s of q.all<Row>(`SELECT s.* FROM schedule s JOIN biz b ON b.id = s.biz_id WHERE s.enabled = 1 AND COALESCE(json_extract(b.settings, '$.archived'), 0) = 0`)) {
       const last = s.last_run_at ? new Date(s.last_run_at).getTime() : 0;
       if (now - last >= s.every_minutes * 60_000) {
         const slot = Math.floor(now / (s.every_minutes * 60_000));

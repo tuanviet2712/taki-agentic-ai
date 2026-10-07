@@ -8,6 +8,7 @@ import { api, useApi, useEvents } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import { Button, Modal, cx, useToast } from "./ui";
 import { AccountMenu, PROFILE_EVENT } from "./Account";
+import { BusinessSwitcher } from "./BusinessSwitcher";
 
 type NavItem = { to: string; label: string; icon: any; badge?: "unread" | "approvals"; special?: boolean; children?: { to: string; label: string; icon: any }[] };
 const NAV: { title: string; items: NavItem[] }[] = [
@@ -159,7 +160,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line bg-card px-4 md:px-6">
           <button className="lg:hidden" onClick={() => setOpen(true)} aria-label="Mở menu"><Menu className="h-5 w-5" /></button>
-          <div className="hidden items-center gap-2 rounded-xl border border-line px-3 py-1.5 text-sm font-medium sm:flex">🏢 {sys?.biz?.name ?? ""}<ChevronDown className="h-4 w-4 text-muted" /></div>
+          <BusinessSwitcher />
           <div className="flex-1" />
           {!standalone && installEvt && <Button size="sm" icon={MonitorCog} onClick={async () => { installEvt.prompt(); await installEvt.userChoice.catch(() => null); setInstallEvt(null); }}>Mở như app</Button>}
           <Button variant={killed ? "danger" : "secondary"} size="sm" icon={Octagon} onClick={() => setKillOpen(true)}>{killed ? "Đang dừng khẩn cấp" : "Dừng khẩn cấp"}</Button>
