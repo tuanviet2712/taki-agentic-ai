@@ -4,7 +4,7 @@ import { CreateGoal, DecideApproval } from "@dotaka/contracts";
 import { retrieve } from "@dotaka/chat-engine";
 import { activeDna, audit, byId, insert, q, update, type Row } from "@dotaka/db";
 import { judge, norm, passageHeuristic, passageQuestions } from "@dotaka/jev";
-import { approveTask, blankDna, chromeLock, createGoal, decideApproval, documentText, editedTextIssues, draftDnaFromText, enqueue, learnDaily, retryPublishJob, retryTask, saveDna, schedulePublish } from "@dotaka/orchestrator";
+import { approveTask, assignAgentTask, assignedOverview, recordDispatch, blankDna, chromeLock, continueGoal, createGoal, decideApproval, documentText, editedTextIssues, draftDnaFromText, enqueue, learnDaily, retryPublishJob, retryTask, saveDna, schedulePublish } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
 import { routes } from "../http.ts";
 
@@ -55,7 +55,12 @@ export function workRoutes(app: FastifyInstance) {
     strategy: q.get<Row>("SELECT output FROM task WHERE goal_id = ? AND agent_key = 'strategy' AND output IS NOT NULL", g.id)?.output ?? null,
     brief: q.get<Row>("SELECT output FROM task WHERE goal_id = ? AND agent_key = 'brief' AND output IS NOT NULL", g.id)?.output ?? null,
   })));
-  r.post("/v1/goals", ({ bizId, body }) => createGoal(bizId, CreateGoal.parse(body)));
+  r.post("/v1/goals", ({ bizId, body, actor }) => {
+    const { stopAfter, ...p } = CreateGoal.parse(body);
+    if (stopAfter === "market_research" && p.template !== "launch_campaign") throw new AppError("BAD_STOP", "Mẫu Nội dung tuần không có bước Nghiên cứu — chọn mẫu Ra mắt chiến dịch hoặc dừng sau Brief / Kế hoạch");
+    return createGoal(bizId, { ...p, params: stopAfter ? { stopAfter } : {} }, actor);
+  });
+  r.post("/v1/goals/:id/continue", ({ bizId, params, actor }) => continueGoal(bizId, params.id, actor));
   r.get("/v1/calendar", ({ bizId, query }) => {
     const from = query.from ?? new Date(Date.now() - 7 * 86400_000).toISOString();
     const to = query.to ?? new Date(Date.now() + 21 * 86400_000).toISOString();
@@ -80,6 +85,14 @@ export function workRoutes(app: FastifyInstance) {
       content: ci, review: ci?.review_score_id ? byId("review_score", ci.review_score_id) : q.get("SELECT * FROM review_score WHERE subject_id = ? ORDER BY created_at DESC LIMIT 1", t.id),
       history: q.all("SELECT * FROM audit_log WHERE ref_id = ? ORDER BY at", t.id),
     };
+  });
+  // Giao việc riêng cho từng agent (xong bước đó là dừng) — trang Agent & Tác vụ + Ngân Nguyệt (giao_viec_rieng).
+  r.get("/v1/agents/assigned", ({ bizId }) => assignedOverview(bizId));
+  r.post("/v1/agents/assign", async ({ bizId, body, actor }) => {
+    const r0 = await assignAgentTask(bizId, body, actor);
+    const threadId = (body as Row)?.threadId;
+    if (r0.kind === "task") recordDispatch(bizId, { threadId: typeof threadId === "string" ? threadId : null, kind: r0.agent, refType: "task", refId: r0.taskId, title: r0.title });
+    return r0;
   });
   r.post("/v1/tasks/:id/retry", ({ bizId, params }) => retryTask(bizId, params.id));
   r.post("/v1/tasks/:id/cancel", ({ bizId, params, actor }) => {

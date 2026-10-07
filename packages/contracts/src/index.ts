@@ -221,6 +221,8 @@ export const CreateGoal = z.object({
   template: z.enum(["launch_campaign", "weekly_content"]).default("weekly_content"),
   budgetAds: z.number().int().nonnegative().default(0),
   dueDate: z.string().optional(),
+  /** Chạy đến bước này thì dừng (không triển khai các khâu sau) — Sếp bấm "Triển khai tiếp" khi muốn. */
+  stopAfter: z.enum(["brief", "market_research", "strategy"]).optional(),
 });
 export const DecideApproval = z.object({
   decision: z.enum(["approve", "edit", "reject"]),

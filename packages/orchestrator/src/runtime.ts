@@ -85,9 +85,24 @@ export function planForGoal(goal: Row | undefined, plan: Row[]): Row[] {
   });
 }
 
+/** Khâu chiến dịch dừng tại đây? (Sếp chọn "Dừng sau bước …" khi tạo kế hoạch). Việc giao riêng luôn dừng ở chính nó. */
+export function stopsHere(task: Row, goal?: Row): boolean {
+  return Boolean(task.input?.standalone) || (goal?.params?.stopAfter != null && goal.params.stopAfter === task.agent_key);
+}
+
 export function onTaskDone(task: Row) {
-  if (task.agent_key === "strategy") expandFromStrategy(task);
+  const goal = task.goal_id ? byId<Row>("goal", task.goal_id) : undefined;
+  if (task.agent_key === "strategy" && !stopsHere(task, goal)) expandFromStrategy(task);
   if (task.agent_key === "ads") createAdsProposals(task);
+  // Dừng sau bước Sếp chọn: không mở khâu tiếp theo, chiến dịch "Tạm dừng" chờ Sếp bấm Triển khai tiếp.
+  if (goal && stopsHere(task, goal)) {
+    if (goal.status === "active") {
+      update("goal", goal.id, { status: "paused" });
+      audit(task.biz_id, "orchestrator", "goal.stopped_after", { type: "goal", id: goal.id }, { agent: task.agent_key, taskId: task.id });
+      emit(task.biz_id, "goal.updated", { goalId: goal.id, status: "paused" });
+    }
+    return;
+  }
   const deps = q.all<Row>("SELECT * FROM task WHERE goal_id = ? AND status = 'pending'", task.goal_id);
   for (const d of deps) {
     const ok = (d.depends_on as string[]).every((id) => byId<Row>("task", id)?.status === "done");
@@ -104,15 +119,23 @@ export function onTaskDone(task: Row) {
 function buildContext(task: Row, dna: Dna): RunContext {
   const goal = task.goal_id ? byId<Row>("goal", task.goal_id) : undefined;
   const done = task.goal_id ? q.all<Row>("SELECT agent_key, output FROM task WHERE goal_id = ? AND status = 'done' AND output IS NOT NULL", task.goal_id) : [];
-  const out = (k: string) => done.find((t) => t.agent_key === k)?.output;
-  const topic = task.input?.item?.topic ?? goal?.title ?? "";
+  // Việc giao riêng có thể dựa trên kết quả các việc trước (vd: lập kế hoạch dựa trên bản nghiên cứu đã làm).
+  const basedOn = ((task.input?.basedOn ?? []) as string[]).slice(0, 5);
+  const based = basedOn.length
+    ? q.all<Row>(`SELECT agent_key, output FROM task WHERE biz_id = ? AND id IN (${basedOn.map(() => "?").join(",")}) AND output IS NOT NULL`, task.biz_id, ...basedOn)
+    : [];
+  const out = (k: string) => done.find((t) => t.agent_key === k)?.output ?? based.find((t) => t.agent_key === k)?.output;
+  const topic = task.input?.item?.topic ?? task.input?.instruction ?? goal?.title ?? "";
+  const standaloneGoal = !goal && task.input?.instruction
+    ? { title: `Việc Sếp giao riêng cho ${AGENTS[task.agent_key]?.label ?? task.agent_key} (làm xong bước này là dừng)`, description: String(task.input.instruction), budget_ads: Number(task.input.budgetAds ?? 0) }
+    : undefined;
   return {
     dna,
-    goal: goal as RunContext["goal"],
+    goal: (goal ?? standaloneGoal) as RunContext["goal"],
     upstream: {
       brief: out("brief"),
-      research: task.agent_key === "strategy" ? out("market_research") : undefined,
-      strategy: ["content", "video_script", "seo_web"].includes(task.agent_key) ? undefined : out("strategy"),
+      research: task.agent_key === "strategy" || based.length ? out("market_research") : undefined,
+      strategy: ["content", "video_script", "seo_web"].includes(task.agent_key) && !based.length ? undefined : out("strategy"),
     },
     knowledge: retrieve(task.biz_id, topic, 4).map((k) => ({ ref: k.ref, text: k.text })),
     lessons: q.all<Row>("SELECT statement FROM lesson WHERE biz_id = ? AND status = 'active' AND (agent_key IS NULL OR agent_key = ?) LIMIT 5", task.biz_id, task.agent_key).map((l) => l.statement),
@@ -122,7 +145,9 @@ function buildContext(task: Row, dna: Dna): RunContext {
   };
 }
 
-function needsApproval(agentKey: string, autonomy: string, verdict: string, total: number, autopilot?: Row): boolean {
+function needsApproval(agentKey: string, autonomy: string, verdict: string, total: number, autopilot?: Row, stop = false): boolean {
+  // Khâu nội bộ (brief / nghiên cứu / kế hoạch) dừng tại đây: không kích hoạt gì tiếp → Sếp chỉ cần xem kết quả, không cần duyệt.
+  if (stop && ["brief", "market_research", "strategy"].includes(agentKey)) return verdict === "escalate";
   // Lái tự động: kế hoạch nội dung (ngân sách ads = 0) đạt chấm điểm thì tự chạy tiếp nếu Sếp bật; bài/kịch bản luôn chờ Sếp nếu bật cổng duyệt.
   if (autopilot && agentKey === "strategy" && autopilot.autoStrategy) return verdict !== "pass";
   if (autopilot?.gate && ["content", "video_script"].includes(agentKey)) return true;
@@ -214,8 +239,9 @@ export async function runTask(taskId: string) {
     return;
   }
   const notPassed = review.verdict === "revise";
-  const autopilot = task.goal_id ? byId<Row>("goal", task.goal_id)?.params?.autopilot : undefined;
-  if (needsApproval(task.agent_key, cfg.autonomy, review.verdict, review.total, autopilot) || notPassed) {
+  const goalRow = task.goal_id ? byId<Row>("goal", task.goal_id) : undefined;
+  const autopilot = goalRow?.params?.autopilot;
+  if (needsApproval(task.agent_key, cfg.autonomy, review.verdict, review.total, autopilot, stopsHere(task, goalRow)) || notPassed) {
     setTaskStatus(task, "awaiting_approval", { progress: 0.9, step: "Chờ CEO duyệt" });
     if (contentItemId) update("content_item", contentItemId, { status: "awaiting_approval" });
     const settings = q.get<Row>("SELECT settings FROM biz WHERE id = ?", task.biz_id)?.settings ?? {};
@@ -239,12 +265,28 @@ export async function approveTask(task: Row, actor: string, edited?: string) {
   const ci = q.get<Row>("SELECT * FROM content_item WHERE task_id = ?", task.id);
   if (ci) {
     update("content_item", ci.id, { status: "approved", ...(edited ? { body: edited } : {}) });
-    if (ci.channel && ["facebook", "instagram", "tiktok", "zalo", "website"].includes(ci.channel) && ci.kind !== "video_script") {
+    // Việc giao riêng "chỉ viết, không đăng": duyệt xong là dừng — Sếp tự bấm đăng ở trang Nội dung khi muốn.
+    if (!task.input?.noPublish && ci.channel && ["facebook", "instagram", "tiktok", "zalo", "website"].includes(ci.channel) && ci.kind !== "video_script") {
       enqueue("publish", "publish.schedule", { contentItemId: ci.id }, { bizId: task.biz_id, idempotencyKey: `sched-pub:${ci.id}` });
     }
   }
   setTaskStatus(task, "done", { progress: 1, step: null }, actor);
   onTaskDone(task);
+}
+
+/** Chiến dịch đang dừng sau 1 bước (Sếp chọn) → Sếp bấm "Triển khai tiếp": chạy các khâu còn lại như bình thường. */
+export function continueGoal(bizId: string, goalId: string, actor: string) {
+  const goal = byId<Row>("goal", goalId);
+  if (!goal || goal.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy kế hoạch", 404);
+  const stopAt = goal.params?.stopAfter;
+  if (goal.status !== "paused" || !stopAt) throw new AppError("NOT_STOPPED", "Kế hoạch này không ở trạng thái dừng chờ triển khai tiếp");
+  const last = q.get<Row>("SELECT * FROM task WHERE goal_id = ? AND agent_key = ? AND status = 'done' ORDER BY updated_at DESC LIMIT 1", goalId, stopAt);
+  if (!last) throw new AppError("NOT_READY", "Bước dừng chưa xong — chờ bước đó hoàn thành rồi triển khai tiếp");
+  update("goal", goalId, { status: "active", params: { ...goal.params, stopAfter: null, continuedAt: nowIso() } });
+  audit(bizId, actor, "goal.continued", { type: "goal", id: goalId }, { from: stopAt });
+  emit(bizId, "goal.updated", { goalId, status: "active" });
+  onTaskDone(last);
+  return { goalId, status: "active", from: stopAt };
 }
 
 export function retryTask(bizId: string, taskId: string) {

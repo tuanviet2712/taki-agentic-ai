@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Bot, CheckCircle2, Clock, Coins, Cpu, RotateCcw, Sparkles, XCircle } from "lucide-react";
+import { Bot, Send, CheckCircle2, Clock, Coins, Cpu, RotateCcw, Sparkles, XCircle } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { TaskResult } from "../components/TaskResult";
+import { AssignWork, type AssignRequest } from "../components/AssignWork";
 import { AGENT_LABEL, TASK_STATUS, num, timeAgo } from "../lib/format";
 import { Badge, Button, Card, Empty, Loading, Modal, PageHeader, Progress, Stat, Toggle, cx, inputCls, useToast } from "../components/ui";
 
@@ -28,6 +29,7 @@ export function Agents() {
   const [pending, setPending] = useState<{ agent: any; autonomy: string } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [assign, setAssign] = useState<AssignRequest>(null);
 
   const putConfig = async (key: string, patch: any, msg: string) => {
     try { await api.put(`agents/${key}/config`, patch); toast(msg); agents.reload(); } catch (e: any) { toast(e.message, "err"); }
@@ -52,7 +54,9 @@ export function Agents() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Agent & Tác vụ" subtitle="Bật/tắt từng agent, đặt mức tự chủ và theo dõi mọi tác vụ đội AI đang làm cho doanh nghiệp." />
+      <PageHeader title="Agent & Tác vụ" subtitle="Giao việc riêng cho từng agent, bật/tắt, đặt mức tự chủ và theo dõi mọi tác vụ đội AI đang làm cho doanh nghiệp." />
+
+      <AssignWork request={assign} onRequest={setAssign} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Stat icon={Cpu} tone="blue" label="Token (7 ngày)" value={num(tokens)} sub={`${(u?.byAgent ?? []).reduce((a: number, r: any) => a + r.calls, 0)} lượt gọi model`} />
@@ -93,6 +97,9 @@ export function Agents() {
                   <div className="flex justify-between text-[11px] text-muted"><span>Token hôm nay</span><span className="tabular-nums">{num(a.tokensToday)} / {num(budget)}</span></div>
                   <Progress value={usedPct} tone={usedPct > 90 ? "red" : usedPct > 70 ? "amber" : "blue"} className="h-1.5" />
                 </div>
+                {a.key !== "assistant" && (
+                  <Button size="sm" variant="soft" icon={Send} disabled={!enabled} onClick={() => setAssign({ agent: a.key })}>Giao việc riêng</Button>
+                )}
                 <div className="mt-auto flex flex-wrap items-center gap-1.5">
                   {a.avgReview != null && <Badge tone={a.avgReview >= 80 ? "green" : a.avgReview >= 65 ? "amber" : "red"}>Review TB {a.avgReview}</Badge>}
                   {a.usesJev?.length > 0 && <span title={a.usesJev.join(", ")} className="inline-flex max-w-full items-center gap-1 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 px-2 py-0.5 text-[11px] font-semibold text-white"><Sparkles className="h-3 w-3 shrink-0" /><span className="truncate">Jev · {a.usesJev.join(", ")}</span></span>}

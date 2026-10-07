@@ -114,10 +114,20 @@ tool("giao_viec", "Giao NGAY 1 việc cho agent nội dung: content (bài mạng
   tu_khoa: z.string().optional().describe("Từ khóa SEO (cho seo_web)"),
   pheu: z.enum(["tofu", "mofu", "bofu"]).optional(),
 }, async (a) => call("POST", "/v1/assistant/agent-task", { threadId: THREAD, agent: a.agent, instruction: a.yeu_cau, channel: a.kenh, format: a.dinh_dang, keyword: a.tu_khoa, funnel: a.pheu }));
+tool("giao_viec_rieng", "Giao 1 việc RIÊNG cho đúng 1 agent, làm xong bước đó là DỪNG (không tự mở khâu sau). brief = chuẩn hóa yêu cầu thành KPI; market_research = nghiên cứu thị trường/đối thủ; strategy = lập kế hoạch marketing (không tự viết bài); content / video_script / seo_web = viết 1 bài/kịch bản, Sếp duyệt xong chỉ lưu (không đăng) trừ khi dang_sau_duyet=true. Dùng dua_tren = mã việc đã xong (vd nghiên cứu) để làm bước sau dựa trên kết quả đó. Ưu tiên tool này khi Sếp nói 'chỉ nghiên cứu', 'chỉ lập kế hoạch', 'làm xong thì dừng'.", {
+  agent: z.enum(["brief", "market_research", "strategy", "content", "video_script", "seo_web"]),
+  yeu_cau: z.string().min(5),
+  dua_tren: z.array(z.string()).max(5).optional().describe("Mã các việc đã xong dùng làm đầu vào"),
+  kenh: z.enum(["facebook", "instagram", "tiktok", "zalo", "website", "youtube"]).optional(),
+  dinh_dang: z.enum(["text", "image", "video", "reel", "article"]).optional(),
+  ngan_sach_ads: z.number().int().min(0).optional(),
+  dang_sau_duyet: z.boolean().optional().describe("Bài/kịch bản: Sếp duyệt xong thì lên lịch đăng (mặc định không)"),
+}, async (a) => call("POST", "/v1/agents/assign", { threadId: THREAD, agent: a.agent, instruction: a.yeu_cau, basedOn: a.dua_tren ?? [], channel: a.kenh, format: a.dinh_dang, budgetAds: a.ngan_sach_ads, publishAfterApproval: a.dang_sau_duyet ?? false }));
 tool("tao_chien_dich", "Tạo mục tiêu → chuỗi agent tự chạy: brief → (nghiên cứu thị trường) → chiến lược (Sếp duyệt) → nội dung từng kênh. launch_campaign = ra mắt/chiến dịch có nghiên cứu; weekly_content = lịch nội dung tuần.", {
   tieu_de: z.string().min(3), mo_ta: z.string().min(5), loai: z.enum(["launch_campaign", "weekly_content"]), ngan_sach_ads: z.number().int().min(0).optional(), han: z.string().optional().describe("YYYY-MM-DD"),
+  dung_sau: z.enum(["brief", "market_research", "strategy"]).optional().describe("Chạy chuỗi đến bước này thì dừng (Sếp bấm Triển khai tiếp ở Kế hoạch khi muốn)"),
 }, async (a) => {
-  const g = await call("POST", "/v1/goals", { title: a.tieu_de, description: a.mo_ta, template: a.loai, budgetAds: a.ngan_sach_ads ?? 0, dueDate: a.han });
+  const g = await call("POST", "/v1/goals", { title: a.tieu_de, description: a.mo_ta, template: a.loai, budgetAds: a.ngan_sach_ads ?? 0, dueDate: a.han, stopAfter: a.dung_sau });
   await dispatched(a.loai, "goal", g.id, a.tieu_de);
   return { goalId: g.id, status: g.status, ghiChu: "Brief Agent bắt đầu ngay; Chiến lược sẽ chờ Sếp duyệt rồi mới sinh nội dung." };
 });

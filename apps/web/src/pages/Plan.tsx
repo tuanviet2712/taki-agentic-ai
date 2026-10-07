@@ -11,7 +11,10 @@ const GOAL_STATUS: Record<string, { label: string; tone: any }> = {
 };
 const FUNNEL: Record<string, { label: string; tone: any }> = { tofu: { label: "TOFU · Nhận biết", tone: "blue" }, mofu: { label: "MOFU · Cân nhắc", tone: "violet" }, bofu: { label: "BOFU · Chốt đơn", tone: "green" } };
 const DAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-const EMPTY_FORM = { title: "", description: "", template: "launch_campaign", budgetAds: "", dueDate: "" };
+const EMPTY_FORM = { title: "", description: "", template: "launch_campaign", budgetAds: "", dueDate: "", stopAfter: "" };
+/** Chạy chuỗi đến bước nào thì dừng (Sếp bấm "Triển khai tiếp" khi muốn đi tiếp). */
+const STOP_LABEL: Record<string, string> = { "": "Chạy hết chuỗi (đến khi ra bài / kịch bản)", brief: "Dừng sau Brief", market_research: "Dừng sau Nghiên cứu thị trường", strategy: "Dừng sau Kế hoạch (chưa viết bài)" };
+const STOP_SHORT: Record<string, string> = { brief: "Brief", market_research: "Nghiên cứu", strategy: "Kế hoạch" };
 
 export function Plan() {
   const goals = useApi<any[]>("goals", ["task.", "goal.", "review.", "approval."]);
@@ -34,8 +37,8 @@ export function Plan() {
     if (form.title.trim().length < 3 || form.description.trim().length < 3) return toast("Sếp nhập tiêu đề và mô tả (tối thiểu 3 ký tự)", "err");
     setBusy(true);
     try {
-      await api.post("goals", { title: form.title.trim(), description: form.description.trim(), template: form.template, budgetAds: Math.max(0, Math.round(Number(form.budgetAds) || 0)), dueDate: form.dueDate || undefined });
-      toast("Đội agent đã bắt đầu");
+      await api.post("goals", { title: form.title.trim(), description: form.description.trim(), template: form.template, budgetAds: Math.max(0, Math.round(Number(form.budgetAds) || 0)), dueDate: form.dueDate || undefined, stopAfter: form.stopAfter || undefined });
+      toast(form.stopAfter ? `Đội agent đã bắt đầu — sẽ dừng sau bước ${STOP_SHORT[form.stopAfter]}` : "Đội agent đã bắt đầu");
       setOpen(false); setForm(EMPTY_FORM); goals.reload();
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   };
@@ -118,7 +121,14 @@ export function Plan() {
         <div className="space-y-3">
           <Field label="Tiêu đề mục tiêu"><input className={inputCls} placeholder="VD: Tuyển 120 học viên khóa CEO Vận Hành Tự Động đợt tháng 11" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
           <Field label="Mô tả"><textarea rows={3} className={inputCls} placeholder="Bối cảnh, sản phẩm ưu tiên, kênh, ràng buộc…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-          <Field label="Mẫu quy trình"><select className={inputCls} value={form.template} onChange={(e) => setForm({ ...form, template: e.target.value })}>{Object.entries(TEMPLATE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Mẫu quy trình"><select className={inputCls} value={form.template} onChange={(e) => setForm({ ...form, template: e.target.value, stopAfter: e.target.value !== "launch_campaign" && form.stopAfter === "market_research" ? "" : form.stopAfter })}>{Object.entries(TEMPLATE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+            <Field label="Chạy đến đâu" hint={form.stopAfter ? "Xong bước này là dừng — Sếp xem kết quả rồi bấm Triển khai tiếp" : "Chuỗi tự chạy, Kế hoạch vẫn chờ Sếp duyệt"}>
+              <select className={inputCls} value={form.stopAfter} onChange={(e) => setForm({ ...form, stopAfter: e.target.value })}>
+                {Object.entries(STOP_LABEL).filter(([v]) => v !== "market_research" || form.template === "launch_campaign").map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Ngân sách quảng cáo (VND)" hint={Number(form.budgetAds) ? vnd(Number(form.budgetAds)) : "Để trống nếu không chạy ads"}><input type="number" min={0} className={inputCls} value={form.budgetAds} onChange={(e) => setForm({ ...form, budgetAds: e.target.value })} /></Field>
             <Field label="Hạn hoàn thành"><input type="date" className={inputCls} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field>
@@ -131,6 +141,13 @@ export function Plan() {
 const PROP_STATUS: Record<string, string> = { draft: "Nháp", awaiting_approval: "Chờ duyệt", testing: "Đang thử", applied: "Đã áp dụng", rejected: "Bị từ chối", reverted: "Đã hoàn tác" };
 
 function GoalCard({ g }: { g: any }) {
+  const toast = useToast();
+  const [continuing, setContinuing] = useState(false);
+  const stopAt: string | null = g.params?.stopAfter ?? null;
+  const goOn = async () => {
+    setContinuing(true);
+    try { await api.post(`goals/${g.id}/continue`); toast("Đã triển khai tiếp — các khâu sau bắt đầu chạy"); } catch (e: any) { toast(e.message, "err"); } finally { setContinuing(false); }
+  };
   const [expanded, setExpanded] = useState(false);
   const [openTask, setOpenTask] = useState<string | null>(null);
   const st = GOAL_STATUS[g.status] ?? { label: g.status, tone: "gray" };
@@ -141,7 +158,7 @@ function GoalCard({ g }: { g: any }) {
     <Card>
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2"><Target className="h-4 w-4 text-blue-600" /><h3 className="font-semibold text-ink">{g.title}</h3><Badge tone={st.tone}>{st.label}</Badge></div>
+          <div className="flex flex-wrap items-center gap-2"><Target className="h-4 w-4 text-blue-600" /><h3 className="font-semibold text-ink">{g.title}</h3><Badge tone={st.tone}>{st.label}</Badge>{stopAt && <Badge tone="violet">Dừng sau: {STOP_SHORT[stopAt] ?? stopAt}</Badge>}</div>
           <p className="mt-1 text-sm text-muted">{g.description}</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-4 text-sm">
@@ -150,6 +167,12 @@ function GoalCard({ g }: { g: any }) {
           <div><p className="text-xs text-muted">Hạn</p><p className="font-medium text-ink">{g.due_date ? new Date(g.due_date).toLocaleDateString("vi-VN") : "—"}</p></div>
         </div>
       </div>
+      {stopAt && g.status === "paused" && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-violet-400/40 bg-violet-500/5 p-3">
+          <p className="min-w-0 flex-1 basis-60 text-sm text-ink">Đã xong bước <b>{STOP_SHORT[stopAt] ?? stopAt}</b> và dừng theo yêu cầu. Bấm vào ô bên dưới để xem / sửa kết quả; khi ưng thì triển khai các khâu tiếp theo.</p>
+          <Button size="sm" variant="primary" icon={Wand2} loading={continuing} onClick={goOn}>Triển khai tiếp</Button>
+        </div>
+      )}
       <div className="mt-4 flex items-center gap-3"><Progress value={tasks.length ? (done / tasks.length) * 100 : 0} tone="green" /><span className="whitespace-nowrap text-xs text-muted">{done}/{tasks.length} khâu xong</span></div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {tasks.map((t, i) => {
