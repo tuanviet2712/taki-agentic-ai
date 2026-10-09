@@ -3,7 +3,7 @@ import { bizSettings, insert, q } from "@dotaka/db";
 import { AppError, logger } from "@dotaka/shared";
 import { cliAvailable, runClaudeCli } from "./cli.ts";
 
-export { cliAvailable, cliInfo, followClaudeRun, runClaudeAgent, runClaudeInTerminal, type AgentRunResult } from "./cli.ts";
+export { cliAvailable, cliInfo, followClaudeRun, noteCliAuth, probeCliAuth, runClaudeAgent, runClaudeInTerminal, type AgentRunResult } from "./cli.ts";
 
 /**
  * LLM Gateway (spec §16): the ONLY place that calls a language model.

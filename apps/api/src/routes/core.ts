@@ -30,7 +30,7 @@ export function coreRoutes(app: FastifyInstance) {
     brand: activeDna(bizId)?.data?.company?.brand ?? null,
     pendingConfirmations: activeDna(bizId)?.data?.pendingConfirmations?.length ?? 0,
     jev: { enabled: jevEnabled(), model: JEV_MODEL },
-    llm: { enabled: effectiveProvider(bizId).provider !== "sandbox", ...effectiveProvider(bizId), chosen: llmSettings(bizId).provider, models: llmSettings(bizId).models },
+    llm: { enabled: effectiveProvider(bizId).provider !== "sandbox", ...effectiveProvider(bizId), chosen: llmSettings(bizId).provider, models: llmSettings(bizId).models, loggedIn: cliInfo().loggedIn, authError: cliInfo().authError },
     connectorsMode: "sandbox",
     killSwitch: bizSettings(bizId).killSwitch,
     connections: {

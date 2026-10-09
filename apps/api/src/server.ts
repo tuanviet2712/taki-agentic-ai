@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { openDb, q } from "@dotaka/db";
 import { jevEnabled } from "@dotaka/jev";
-import { cliInfo, effectiveProvider, llmSettings } from "@dotaka/llm-gateway";
+import { cliInfo, effectiveProvider, llmSettings, probeCliAuth } from "@dotaka/llm-gateway";
 import { startOrchestrator } from "@dotaka/orchestrator";
 import { logger } from "@dotaka/shared";
 import { errorHandler } from "./http.ts";
@@ -76,7 +76,11 @@ async function main() {
   console.log(`  Jev (TypeSafe): ${jevEnabled() ? "LIVE" : "chế độ heuristic (thiếu TYPESAFE_API_KEY)"}`);
   const bizId = q.get<{ id: string }>("SELECT id FROM biz LIMIT 1")!.id;
   const eff = effectiveProvider(bizId);
-  console.log(`  Claude:         ${eff.provider === "claude_cli" ? `Claude Code CLI (${cliInfo().version}) — tài khoản đã đăng nhập` : `sandbox${eff.reason ? ` — ${eff.reason}` : ""}`}`);
+  if (eff.provider === "claude_cli") {
+    const loggedIn = await probeCliAuth(); // `claude --version` still passes with an expired token — ask Claude itself
+    const state = loggedIn === true ? "tài khoản đã đăng nhập" : loggedIn === false ? `⚠️  CHƯA ĐĂNG NHẬP — mở Terminal, gõ \`claude\` rồi \`/login\`${cliInfo().authError ? ` (${cliInfo().authError})` : ""}` : `⚠️  chưa xác minh được đăng nhập${cliInfo().authError ? ` (${cliInfo().authError})` : ""}`;
+    console.log(`  Claude:         Claude Code CLI (${cliInfo().version}) — ${state}`);
+  } else console.log(`  Claude:         sandbox${eff.reason ? ` — ${eff.reason}` : ""}`);
   console.log(`  Model:          small=${llmSettings(bizId).models.small} · medium=${llmSettings(bizId).models.medium} · large=${llmSettings(bizId).models.large}`);
   const conns = q.all<{ platform: string; mode: string }>("SELECT platform, mode FROM connection WHERE status = 'active'");
   console.log(`  Nền tảng:       ${conns.length ? conns.map((c) => `${c.platform}${c.mode === "live" ? "" : " (mô phỏng)"}`).join(", ") : "chưa kết nối — kênh chạy mô phỏng"}\n`);

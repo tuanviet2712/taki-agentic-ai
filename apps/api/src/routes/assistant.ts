@@ -34,7 +34,8 @@ export function assistantRoutes(app: FastifyInstance) {
 
   r.get("/v1/assistant", ({ bizId }) => ({
     name: ASSISTANT.name, settings: assistantSettings(bizId), defaultModel: modelFor(bizId, ASSISTANT.key, "medium"),
-    models: MODEL_CATALOG, ready: effectiveProvider(bizId).provider === "claude_cli" && cliInfo().available,
+    models: MODEL_CATALOG, ready: effectiveProvider(bizId).provider === "claude_cli" && cliInfo().available && cliInfo().loggedIn !== false,
+    authError: cliInfo().loggedIn === false ? (cliInfo().authError ?? "Claude CLI chưa đăng nhập") : undefined,
     suggestions: [
       "Hôm nay hệ thống có gì cần em để ý không?",
       "Báo cáo nhanh tình hình quảng cáo 7 ngày qua",

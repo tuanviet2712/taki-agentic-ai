@@ -54,9 +54,10 @@ export function LlmPanel() {
 
       <div className="flex flex-wrap items-center gap-2 rounded-xl bg-soft p-3 text-xs">
         <Terminal className="h-4 w-4 text-muted" />
-        <span>Claude CLI: {data.cli.available ? <Badge tone="green">{data.cli.version}</Badge> : <Badge tone="red">không tìm thấy lệnh `claude`</Badge>}</span>
+        <span>Claude CLI: {data.cli.available ? <Badge tone={data.cli.loggedIn === false ? "red" : data.cli.loggedIn === null ? "amber" : "green"}>{data.cli.version}</Badge> : <Badge tone="red">không tìm thấy lệnh `claude`</Badge>}</span>
         <span>· Đang dùng thực tế: <Badge tone={data.effective.provider === "sandbox" ? "amber" : "green"}>{PROVIDERS.find((p) => p.id === data.effective.provider)?.label}</Badge></span>
         {data.effective.reason && <span className="text-amber-600">({data.effective.reason})</span>}
+        {data.cli.loggedIn === false && <span className="w-full text-rose-600">Hết phiên đăng nhập — mở Terminal, gõ <code className="rounded bg-white/60 px-1">claude</code> rồi <code className="rounded bg-white/60 px-1">/login</code>.{data.cli.authError ? ` (${data.cli.authError})` : ""}</span>}
       </div>
 
       <div className="overflow-x-auto">

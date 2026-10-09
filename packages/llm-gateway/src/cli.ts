@@ -17,6 +17,77 @@ const WORKDIR = join(tmpdir(), "dotaka-claude-cli");
 
 let info: { available: boolean; version?: string; checkedAt: number } | null = null;
 export function cliInfo() {
+  const i = cliInfoRaw();
+  // `--version` keeps working after the OAuth token expires, so it only proves the binary is there.
+  // Whether the account still works is a separate fact — see `auth` below; never block on it here.
+  if (i.available && !authFresh()) void probeCliAuth();
+  return { ...i, bin: BIN, loggedIn: i.available ? (auth?.loggedIn ?? null) : false, authError: auth?.error, authCheckedAt: auth?.checkedAt };
+}
+export const cliAvailable = () => cliInfo().available;
+
+/* ---------------- Login state: `--version` cannot see an expired token ---------------- */
+
+const PROBE_MODEL = process.env.LLM_MODEL_SMALL ?? "claude-haiku-4-5";
+const PROBE_TIMEOUT_MS = Number(process.env.CLAUDE_CLI_PROBE_TIMEOUT_MS ?? 30_000);
+const AUTH_TTL_OK = 10 * 60_000; // a working login rarely drops; re-check sparingly
+const AUTH_TTL_BAD = 60_000; // after /login, pick the recovery up quickly
+const AUTH_ERR_RE = /Failed to authenticate|OAuth[^.]*expire|session expired|not logged in|Invalid API key|Please run \/login|authentication_error/i;
+
+/** `loggedIn: null` = could not tell (timeout, no network) — report it, never cry wolf. */
+let auth: { loggedIn: boolean | null; error?: string; checkedAt: number } | null = null;
+let probing: Promise<boolean | null> | null = null;
+const authFresh = () => !!auth && Date.now() - auth.checkedAt < (auth.loggedIn === true ? AUTH_TTL_OK : AUTH_TTL_BAD);
+
+function setAuth(loggedIn: boolean | null, error?: string) {
+  auth = { loggedIn, error: error?.slice(0, 200), checkedAt: Date.now() };
+}
+
+/** What a real `claude` call just proved about the login — keeps the state fresh for free. */
+export function noteCliAuth(ok: boolean, error?: string) {
+  if (!ok && !AUTH_ERR_RE.test(error ?? "")) return; // an ordinary failure says nothing about the login
+  setAuth(ok, ok ? undefined : error);
+}
+
+/** Spends one tiny `claude -p` call to find out whether the account still works. */
+export function probeCliAuth(): Promise<boolean | null> {
+  if (authFresh()) return Promise.resolve(auth!.loggedIn);
+  if (probing) return probing;
+  probing = new Promise<boolean | null>((resolve) => {
+    const done = (loggedIn: boolean | null, error?: string) => {
+      setAuth(loggedIn, error);
+      probing = null;
+      resolve(loggedIn);
+    };
+    if (!cliInfoRaw().available) return done(false, "Không tìm thấy lệnh `claude`");
+    mkdirSync(WORKDIR, { recursive: true });
+    const child = spawn(BIN, ["-p", "--output-format", "json", "--model", PROBE_MODEL, "--tools", "", "--no-session-persistence", "--setting-sources", ""], { cwd: WORKDIR, env: childEnv(), stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, PROBE_TIMEOUT_MS);
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", (e) => { clearTimeout(timer); done(null, `Không chạy được Claude CLI: ${e.message}`); });
+    child.on("close", () => {
+      clearTimeout(timer);
+      if (timedOut) return done(null, `Claude CLI không phản hồi sau ${Math.round(PROBE_TIMEOUT_MS / 1000)} giây`);
+      const raw = `${out}\n${err}`.trim();
+      if (AUTH_ERR_RE.test(raw)) return done(false, firstLine(raw));
+      let j: any;
+      try { j = JSON.parse(out.trim().split("\n").filter(Boolean).at(-1) ?? "{}"); } catch { j = null; }
+      if (j && !j.is_error && j.subtype === "success") return done(true);
+      // Reached Claude but got something else (usage limit, transient error): the login is not the problem.
+      return done(null, firstLine(raw) || `Claude CLI trả về bất thường (${j?.subtype ?? "không rõ"})`);
+    });
+    feedStdin(child, "hi");
+  });
+  return probing;
+}
+
+const firstLine = (s: string) => (s.split("\n").find((l) => AUTH_ERR_RE.test(l)) ?? s).trim().slice(0, 200);
+
+/** Is the `claude` binary there, and which version — cached, no probe side-effect. */
+function cliInfoRaw() {
   if (!info || Date.now() - info.checkedAt > 60_000) {
     try {
       const v = execFileSync(BIN, ["--version"], { encoding: "utf8", timeout: 10_000, env: childEnv() }).trim();
@@ -25,9 +96,18 @@ export function cliInfo() {
       info = { available: false, checkedAt: Date.now() };
     }
   }
-  return { ...info, bin: BIN };
+  return info;
 }
-export const cliAvailable = () => cliInfo().available;
+
+/**
+ * Feed the prompt in. A CLI that exits before reading it (an expired login prints its error and quits)
+ * makes this write fail with EPIPE — an unhandled 'error' on the socket would take the API process down,
+ * so swallow it: the real outcome is read from stdout/close.
+ */
+function feedStdin(child: ChildProcess, text: string) {
+  child.stdin?.on("error", () => { /* child already gone; close handler reports why */ });
+  try { child.stdin?.end(text); } catch { /* same */ }
+}
 
 function childEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
@@ -93,8 +173,10 @@ export function runClaudeCli(opts: { prompt: string; system: string; model: stri
       if (j.is_error || j.subtype !== "success") {
         const msg = String(j.result ?? j.api_error_status ?? err ?? "lỗi không rõ").slice(0, 400);
         const code2 = /login|auth|credential|not logged/i.test(msg) ? "CLI_NOT_LOGGED_IN" : /limit|quota|usage/i.test(msg) ? "CLI_USAGE_LIMIT" : "CLI_ERROR";
+        noteCliAuth(false, msg);
         return reject(new AppError(code2, `Claude CLI: ${msg}`, 502));
       }
+      noteCliAuth(true);
       const mu = Object.entries(j.modelUsage ?? {}) as [string, any][];
       const main = mu.sort((a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0))[0];
       const u = j.usage ?? {};
@@ -106,7 +188,7 @@ export function runClaudeCli(opts: { prompt: string; system: string; model: stri
         durationMs: j.duration_ms ?? 0,
       });
     });
-    child.stdin.end(opts.prompt);
+    feedStdin(child, opts.prompt);
   }));
 }
 
@@ -202,8 +284,16 @@ export function runClaudeAgent(o: AgentRunOptions): Promise<AgentRunResult> {
     child.on("error", (e) => { clearTimeout(timer); reject(new AppError("CLI_NOT_FOUND", `Không chạy được Claude CLI: ${e.message}`, 503)); });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (!final) return reject(new AppError("CLI_BAD_OUTPUT", `Agent dừng không có kết quả (code ${code}): ${err.slice(-400)}`, 502));
-      if (final.is_error || final.subtype !== "success") return reject(new AppError("AGENT_ERROR", `Agent lỗi: ${String(final.result ?? final.subtype).slice(0, 400)}`, 502));
+      if (!final) {
+        noteCliAuth(false, err);
+        return reject(new AppError("CLI_BAD_OUTPUT", `Agent dừng không có kết quả (code ${code}): ${err.slice(-400)}`, 502));
+      }
+      if (final.is_error || final.subtype !== "success") {
+        const msg = String(final.result ?? final.subtype).slice(0, 400);
+        noteCliAuth(false, msg);
+        return reject(new AppError("AGENT_ERROR", `Agent lỗi: ${msg}`, 502));
+      }
+      noteCliAuth(true);
       const mu = Object.entries(final.modelUsage ?? {}) as [string, any][];
       const main = mu.sort((a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0))[0];
       const u = final.usage ?? {};
@@ -217,7 +307,7 @@ export function runClaudeAgent(o: AgentRunOptions): Promise<AgentRunResult> {
         denials: final.permission_denials ?? [],
       });
     });
-    child.stdin.end(o.prompt);
+    feedStdin(child, o.prompt);
   });
 }
 
