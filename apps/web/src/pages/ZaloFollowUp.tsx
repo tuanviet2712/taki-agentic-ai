@@ -65,14 +65,14 @@ export function ZaloFollowUp() {
             </div>
           </Card>
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             <Stat icon={Users} tone="blue" label="Hội thoại Zalo đã phân tích" value={st.conversations} sub={`${st.hot} nóng · ${st.warm} ấm`} />
             <Stat icon={CalendarClock} tone="violet" label="Follow-up đã lên lịch" value={st.scheduled} sub={`${st.waiting} khách đang im lặng`} />
             <Stat icon={CheckCircle2} tone="amber" label="Chờ Sếp duyệt" value={st.awaitingApproval} sub={<Link to="/approvals?type=follow_up" className="text-blue-600">Mở mục duyệt</Link>} />
             <Stat icon={Send} tone="green" label="Đã gửi hôm nay" value={st.sentToday} sub={`Tổng ${st.sentTotal} · ${st.replied} khách trả lời lại`} />
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[1fr_400px]">
+          <div className="grid gap-6 wide:grid-cols-[minmax(0,1fr)_400px]">
             <Card title="Hàng đợi follow-up">
               {!plans ? <Loading /> : plans.length === 0 ? <Empty>Chưa có follow-up. Khi nhân viên trả lời khách trên ZL-CRM mà khách im lặng quá {f?.delay1Hours ?? 6} giờ, hệ thống sẽ soạn tin ở đây.</Empty> : (
                 <div className="overflow-x-auto scroll-thin">

@@ -1,0 +1,96 @@
+{
+  "_ghi_chu": "Ví dụ hoàn chỉnh 46 giây. Đọc kèm references/module-library.md. Mọi toạ độ đã kiểm tra không đè nhau, dùng làm khuôn để chỉnh lại theo lời thoại thật.",
+
+  "source": "clean.mp4",
+  "output": "final.mp4",
+  "fps": 30,
+  "theme": { "grid": 90 },
+
+  "framing": [
+    { "t": 0.0,  "preset": "hero",      "pan_y": 0.40 },
+    { "t": 8.7,  "preset": "mid",       "pan_y": 0.38 },
+    { "t": 13.2, "preset": "hero",      "pan_y": 0.40 },
+    { "t": 24.1, "preset": "hero-low",  "pan_y": 0.40 },
+    { "t": 34.0, "preset": "mini-center" },
+    { "t": 40.6, "preset": "full",      "pan_y": 0.45 }
+  ],
+
+  "captions": [
+    { "t": 0.0,  "d": 1.0, "text": "Nếu bạn đang |loay hoay| với AI," },
+    { "t": 1.0,  "d": 1.1, "text": "thì video này |dành cho bạn|." },
+    { "t": 2.1,  "d": 1.1, "text": "Bạn muốn |kiếm được tiền|," },
+    { "t": 3.2,  "d": 1.2, "text": "hay muốn thêm |dòng thu nhập|?" },
+    { "t": 4.4,  "d": 1.0, "text": "Cả hai đều làm được," },
+    { "t": 5.4,  "d": 1.1, "text": "nhưng phải bắt đầu |đúng chỗ|." },
+    { "t": 6.5,  "d": 1.1, "text": "Và bạn chỉ cần |một phút|" },
+    { "t": 7.6,  "d": 1.1, "text": "để nắm được |toàn bộ|." },
+    { "t": 8.7,  "d": 1.0, "text": "Đúng một phút |thôi|," },
+    { "t": 9.7,  "d": 1.2, "text": "bạn sẽ thấy AI đang" },
+    { "t": 10.9, "d": 1.2, "text": "|thay đổi| công việc thế nào." },
+    { "t": 12.1, "d": 1.1, "text": "Bắt đầu từ nhóm đầu tiên." },
+    { "t": 13.2, "d": 1.0, "text": "Người làm |văn phòng|" },
+    { "t": 14.2, "d": 1.1, "text": "có thể dùng AI để |viết|" },
+    { "t": 15.3, "d": 1.1, "text": "những bản |báo cáo| dài," },
+    { "t": 16.4, "d": 1.1, "text": "soạn |nội dung| gửi khách," },
+    { "t": 17.5, "d": 1.1, "text": "dựng cả bộ |thuyết trình|." },
+    { "t": 18.6, "d": 1.1, "text": "Những việc trước đây mất cả ngày" },
+    { "t": 19.7, "d": 1.1, "text": "giờ chỉ còn |vài phút|." },
+    { "t": 20.8, "d": 1.1, "text": "Toàn bộ công việc lặp lại" },
+    { "t": 21.9, "d": 1.1, "text": "đều được |tối ưu hoá|." },
+    { "t": 23.0, "d": 1.1, "text": "Nhóm thứ hai là chủ doanh nghiệp." },
+    { "t": 24.1, "d": 1.1, "text": "Người |kinh doanh một mình|" },
+    { "t": 25.2, "d": 1.1, "text": "dùng AI |tạo ảnh| sản phẩm," },
+    { "t": 26.3, "d": 1.1, "text": "viết |bài đăng| mạng xã hội," },
+    { "t": 27.4, "d": 1.1, "text": "làm video để xây kênh." },
+    { "t": 28.5, "d": 1.1, "text": "Không cần thuê cả một đội," },
+    { "t": 29.6, "d": 1.1, "text": "không cần |chờ đợi| ai." },
+    { "t": 30.7, "d": 1.1, "text": "Một người vẫn |chạy được| hết," },
+    { "t": 31.8, "d": 1.1, "text": "miễn là biết |dùng đúng công cụ|." },
+    { "t": 32.9, "d": 1.1, "text": "Nhóm thứ ba: |xây thương hiệu|." },
+    { "t": 34.0, "d": 1.1, "text": "Một người có thể |nhân bản|" },
+    { "t": 35.1, "d": 1.1, "text": "thành |mười hai kênh| khác nhau," },
+    { "t": 36.2, "d": 1.1, "text": "mỗi kênh một tệp khán giả." },
+    { "t": 37.3, "d": 1.1, "text": "Lượt xem vì thế |tăng đều|," },
+    { "t": 38.4, "d": 1.1, "text": "và từ lượt xem đó" },
+    { "t": 39.5, "d": 1.1, "text": "sẽ ra |khách hàng thật|." },
+    { "t": 40.6, "d": 1.1, "text": "Đó là lý do tôi mở" },
+    { "t": 41.7, "d": 1.1, "text": "chương trình này |miễn phí|." },
+    { "t": 42.8, "d": 1.1, "text": "Bạn hãy bấm |link bên dưới|" },
+    { "t": 43.9, "d": 1.1, "text": "để giữ chỗ |ngay hôm nay|." },
+    { "t": 45.0, "d": 1.1, "text": "Hẹn gặp bạn ở |buổi đầu tiên|." }
+  ],
+
+  "graphics": [
+    { "module": "qchips", "t": 2.1, "out": 8.4, "x": 68, "y": 700, "stagger": 1.1,
+      "items": ["Kiếm được tiền", "Dòng thu nhập"] },
+
+    { "module": "bigtype", "t": 8.7, "out": 13.0, "x": 68, "y": 110, "w": 584,
+      "kicker": "Chỉ cần", "big": "1 phút", "sub": "là bạn |nắm được hết|" },
+
+    { "module": "tag", "t": 13.4, "out": 23.9, "x": 68, "y": 676, "w": "auto",
+      "text": "Người làm văn phòng" },
+    { "module": "rows", "t": 14.4, "out": 23.9, "x": 68, "y": 735, "w": 584, "stagger": 1.1,
+      "items": [ { "text": "Báo cáo", "icon": "doc" },
+                 { "text": "Nội dung", "icon": "folder" },
+                 { "text": "Thuyết trình", "icon": "laptop" } ] },
+    { "module": "pill", "t": 21.0, "out": 23.9, "x": "center", "y": 950, "w": "auto",
+      "text": "Tối ưu hoá công việc" },
+
+    { "module": "tag", "t": 24.3, "out": 33.8, "x": 68, "y": 40, "w": "auto",
+      "text": "Chủ doanh nghiệp một mình" },
+    { "module": "rows", "t": 25.3, "out": 33.8, "x": 68, "y": 100, "w": 584, "stagger": 1.1,
+      "items": [ { "text": "Ảnh sản phẩm", "icon": "img" },
+                 { "text": "Bài đăng mạng xã hội", "icon": "doc" },
+                 { "text": "Kênh video", "icon": "vid" } ] },
+
+    { "module": "tag", "t": 34.2, "out": 40.4, "x": 68, "y": 40, "w": "auto",
+      "text": "Thương hiệu cá nhân" },
+    { "module": "gridfill", "t": 35.2, "out": 40.4, "x": 68, "y": 110, "w": 584,
+      "kicker": "Nhân bản", "unit": "kênh", "total": 18, "count": 12, "draw": 1.6 },
+    { "module": "chart", "t": 37.4, "out": 40.4, "x": 68, "y": 340, "w": 584,
+      "kicker": "Tăng đều", "label": "Lượt view", "h": 90, "draw": 1.4 },
+
+    { "module": "cta", "t": 41.0, "x": 68, "y": 860, "w": 584,
+      "text": "ĐĂNG KÝ NGAY", "sub": "Link ngay bên dưới · miễn phí" }
+  ]
+}

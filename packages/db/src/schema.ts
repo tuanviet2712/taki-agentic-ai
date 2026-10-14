@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS connection (
 );
 
 -- Knowledge & DNA
+-- Named ChatGPT login profiles; OAuth credentials stay in their isolated CLI home, never in API responses.
+CREATE TABLE IF NOT EXISTS ai_account (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, provider TEXT NOT NULL, name TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_account_biz ON ai_account (biz_id, provider);
+
 CREATE TABLE IF NOT EXISTS dna_profile (
   id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, version INTEGER NOT NULL, status TEXT NOT NULL,
   data TEXT NOT NULL, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -134,6 +141,19 @@ CREATE TABLE IF NOT EXISTS post_comment (
   id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, post_id TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL,
   label TEXT, label_source TEXT, label_confidence REAL, hidden INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+-- Link đo click dưới bình luận (bài nào ra click): /r/<code> ghi click (IP đã băm, KHÔNG lưu IP thô) rồi 302 kèm UTM.
+-- is_bot = 1: trình thu thập xem trước link (Facebook / Zalo…) — vẫn chuyển hướng nhưng không tính là click của khách.
+CREATE TABLE IF NOT EXISTS track_link (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, code TEXT NOT NULL UNIQUE, post_id TEXT, content_item_id TEXT, goal_id TEXT,
+  product_key TEXT, channel TEXT, target_url TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS track_link_ci ON track_link (content_item_id);
+CREATE INDEX IF NOT EXISTS track_link_post ON track_link (post_id);
+CREATE TABLE IF NOT EXISTS track_click (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, link_id TEXT NOT NULL, at TEXT NOT NULL, ip_hash TEXT, ua TEXT, referer TEXT,
+  is_bot INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS track_click_link ON track_click (link_id, at);
 -- Chăm khách từ bình luận (comment → trả lời công khai → inbox Private Reply → xin SĐT → kết bạn Zalo → follow-up).
 -- 1 dòng = 1 người bình luận dưới 1 bài. SĐT lưu MÃ HOÁ (phone_cipher) + bản che (phone_masked) để hiển thị/nhật ký.
 -- Research đối thủ (Radar xu hướng): kênh Sếp thêm tay (đối thủ + kênh của mình) và video quét được từ trang công khai.
@@ -166,6 +186,25 @@ CREATE TABLE IF NOT EXISTS nurture_lead (
 );
 CREATE INDEX IF NOT EXISTS nurture_lead_stage ON nurture_lead (biz_id, stage, next_check_at);
 CREATE INDEX IF NOT EXISTS nurture_lead_conv ON nurture_lead (conversation_id);
+-- Khách không nhận tin (opt-out): mọi lượt gửi TỰ ĐỘNG (bot/follow-up) đều kiểm bảng này.
+-- channel: facebook (id người bình luận) · messenger (PSID) · zalo (mã hội thoại) · phone (external_id = phone_hash).
+-- SĐT chỉ lưu dạng băm (phone_hash) + bản che (phone_masked) — không lưu số thật.
+CREATE TABLE IF NOT EXISTS contact_optout (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, channel TEXT NOT NULL, external_id TEXT NOT NULL,
+  phone_hash TEXT, phone_masked TEXT, name TEXT, reason TEXT, source TEXT NOT NULL, conversation_id TEXT,
+  created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (biz_id, channel, external_id)
+);
+CREATE INDEX IF NOT EXISTS contact_optout_phone ON contact_optout (biz_id, phone_hash);
+-- Kịch bản chốt đơn (Messenger + Zalo) theo từng sản phẩm trong DNA: 7 bước, băn khoăn thường gặp, tin nhắc lại.
+CREATE TABLE IF NOT EXISTS sales_flow (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, product_key TEXT NOT NULL, data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft',
+  source TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (biz_id, product_key)
+);
+-- Vòng lặp Thấu hiểu khách: 7 bước Lắng nghe → Sàng lọc → Nối dữ liệu → Phân nhóm → Thấu hiểu → Tối ưu → Feedback (data = kết quả từng bước + số liệu).
+CREATE TABLE IF NOT EXISTS chat_insight (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS chat_insight_recent ON chat_insight (biz_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS post_score (
   id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, post_id TEXT NOT NULL, formula_version INTEGER NOT NULL, score REAL NOT NULL,
   low_data INTEGER NOT NULL DEFAULT 0, components TEXT NOT NULL, reasons TEXT NOT NULL, computed_at TEXT NOT NULL,

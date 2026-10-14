@@ -88,6 +88,23 @@ class ZaloAccountPool {
   // Đang tắt server (SIGTERM) — chặn mọi auto-reconnect khi listener 'closed' do ta
   // chủ động stop, để Zalo nhận close frame sạch và giải phóng session.
   private shuttingDown = false;
+  // Phiên đăng nhập QR đang chờ quét, theo account. `withProxy` giữ khoá toàn cục suốt lúc chờ quét và zca-js tự
+  // tạo lại QR khi hết hạn (retry) KHÔNG giới hạn → một phiên bị bỏ quên (đóng hộp thoại, bấm lại) giữ khoá mãi,
+  // mọi lần "Đăng nhập QR" sau đó đứng chờ khoá và không bao giờ ra QR. Vì vậy: mỗi phiên bị chặn thời gian,
+  // bị huỷ khi bấm lại hoặc khi đóng hộp thoại.
+  private qrSessions = new Map<string, { abort: (() => unknown) | null; cancelled: boolean; timer: NodeJS.Timeout }>();
+
+  /** Huỷ phiên QR đang chờ của 1 account (nhả khoá proxy). Trả true nếu có phiên bị huỷ. */
+  cancelQR(accountId: string): boolean {
+    const session = this.qrSessions.get(accountId);
+    if (!session) return false;
+    session.cancelled = true;
+    clearTimeout(session.timer);
+    this.qrSessions.delete(accountId);
+    try { session.abort?.(); } catch { /* đã kết thúc */ }
+    logger.info(`[zalo:${accountId}] QR login session cancelled`);
+    return true;
+  }
 
   setIO(io: Server): void {
     this.io = io;
@@ -122,13 +139,31 @@ class ZaloAccountPool {
   // Initiate QR-based login; emits QR events to frontend via Socket.IO
   async loginQR(accountId: string, proxyUrl?: string | null): Promise<void> {
     this.manuallyDisabled.delete(accountId);
+    // Phiên QR cũ (nếu còn) phải nhả khoá trước, nếu không lượt này sẽ đứng chờ khoá mãi.
+    this.cancelQR(accountId);
     // Stop any previous listener/sync before replacing the instance (anti-leak).
     this.teardownInstance(accountId);
     const zalo = new Zalo({ logging: false, selfListen: true, imageMetadataGetter });
     this.instances.set(accountId, { zalo, api: null, status: 'qr_pending', lastActivity: new Date() });
 
+    const QR_SESSION_MS = Number(process.env.ZALO_QR_SESSION_MS) || 3 * 60_000;
+    let timedOut = false;
+    const session: { abort: (() => unknown) | null; cancelled: boolean; timer: NodeJS.Timeout } = {
+      abort: null,
+      cancelled: false,
+      timer: setTimeout(() => {
+        if (this.qrSessions.get(accountId) !== session) return;
+        timedOut = true;
+        this.cancelQR(accountId);
+      }, QR_SESSION_MS),
+    };
+    this.qrSessions.set(accountId, session);
+
     try {
       const api: any = await withProxy(proxyUrl, () => zalo.loginQR({}, (event: any) => {
+        if (event.actions?.abort) session.abort = event.actions.abort;
+        // Bị huỷ khi còn đang xếp hàng chờ khoá / chưa có hàm abort → dừng ngay ở sự kiện đầu tiên.
+        if (session.cancelled) { try { event.actions?.abort?.(); } catch { /* đã kết thúc */ } return; }
         switch (event.type) {
           case 0: // QRCodeGenerated
             this.io?.to(`account:${accountId}`).emit('zalo:qr', { accountId, qrImage: event.data.image });
@@ -154,6 +189,8 @@ class ZaloAccountPool {
         }
       }));
 
+      clearTimeout(session.timer);
+      if (this.qrSessions.get(accountId) === session) this.qrSessions.delete(accountId);
       let activeAccountId = accountId;
       const instance = this.instances.get(accountId)!;
       instance.api = api;
@@ -223,9 +260,17 @@ class ZaloAccountPool {
 
       this.autoSyncOnConnect(activeAccountId);
     } catch (err) {
+      clearTimeout(session.timer);
+      if (this.qrSessions.get(accountId) === session) this.qrSessions.delete(accountId);
+      // Chỉ đụng tới instance của CHÍNH phiên này: nếu đã bị phiên QR mới thay thế thì giữ nguyên bản mới.
       const instance = this.instances.get(accountId);
-      if (instance) instance.status = 'disconnected';
-      this.io?.emit('zalo:error', { accountId, error: String(err) });
+      if (instance && instance.zalo === zalo) instance.status = 'disconnected';
+      if (timedOut) {
+        this.io?.emit('zalo:error', { accountId, error: 'Phiên quét QR đã hết hạn — bấm tạo QR lại' });
+      } else if (!session.cancelled) {
+        // Huỷ chủ động (bấm lại / đóng hộp thoại) thì im lặng; lỗi thật mới báo lên giao diện.
+        this.io?.emit('zalo:error', { accountId, error: String(err) });
+      }
       throw err;
     }
   }

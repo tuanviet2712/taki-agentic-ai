@@ -139,6 +139,13 @@ const HOW: Record<ResearchPlatform, string> = {
   instagram: "Instagram: mở tab Reels (thêm /reels/) — mỗi ô có lượt xem. Gặp màn hình bắt đăng nhập → status \"blocked\".",
 };
 
+/**
+ * Lỗi tạm thời của môi trường (Chrome Flow vừa rớt, mạng/DNS chập chờn) — thử lại được, khác với lỗi thật như
+ * "bắt đăng nhập". Chrome Flow tự được bật lại ở lần thử sau (runChromeAgent gọi ensureFlowBrowser).
+ */
+const TRANSIENT_ERR = /ECONNREFUSED|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_CONNECTION|ERR_TIMED_OUT|DNS|kết nối trình duyệt|không khả dụng|connection (failed|lost|closed)|(browser|page|context|target)[^.]{0,40}(has been|was) closed/i;
+const SCAN_ATTEMPTS = 2;
+
 /** Quét 1 kênh: đọc video công khai + lượt xem → cập nhật video, trung vị, mức gấp. */
 export async function scanResearchChannel(bizId: string, channelId: string) {
   const ch = mustChannel(bizId, channelId);
@@ -147,26 +154,44 @@ export async function scanResearchChannel(bizId: string, channelId: string) {
   update("research_channel", ch.id, { meta: { ...(ch.meta ?? {}), scanning: nowIso() } });
   emit(bizId, "research.updated", { channelId: ch.id, status: "scanning" });
   try {
-    const r = await runChromeAgent(bizId, {
-      tag: `research-${ch.id}`, tier: "small", timeoutMs: 12 * 60_000, addDirs: [], schema: ScanOut,
-      prompt: [
-        `Mở kênh ${ch.platform} sau trong tab mới: ${ch.url}`,
-        HOW[ch.platform as ResearchPlatform] ?? "",
-        "CHỈ ĐỌC: không bấm theo dõi, không thích, không bình luận, không nhắn tin, không đăng nhập.",
-        "Với mỗi video (mới nhất trước, tối đa 30): url đầy đủ, title (mô tả/tiêu đề nếu thấy, rỗng nếu không), viewsText = đúng chữ lượt xem hiển thị (vd \"3,4M\", \"215,9K\", \"1,2 Tr\"), likesText/commentsText nếu hiển thị (rỗng nếu không), postedText = ngày đăng nếu trang hiện (vd \"2 ngày trước\", rỗng nếu không), pinned, durationText nếu có, coverText = chữ in to trên ảnh bìa nếu đọc được trong snapshot (rỗng nếu không).",
-        "Không bịa số: ô không hiện lượt xem thì bỏ qua ô đó. Trả JSON theo schema; status \"ok\" khi đọc được ít nhất 1 video.",
-      ].join("\n"),
-    });
-    const out = ScanOut.safeParse(r.structured);
-    if (!out.success) throw new AppError("BAD_RESULT", "AI Agent không trả kết quả đúng định dạng");
-    if (out.data.status !== "ok") throw new AppError("BLOCKED", out.data.notes || "Không đọc được trang kênh");
-    return saveScan(bizId, ch, out.data);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await scanOnce(bizId, ch);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (attempt >= SCAN_ATTEMPTS || !TRANSIENT_ERR.test(msg)) throw e;
+        logger.warn("research.scan_retry", { channel: ch.id, attempt, error: msg.slice(0, 200) });
+        await new Promise((r) => setTimeout(r, 8_000)); // cho mạng / Chrome Flow ổn lại rồi bật lại Chrome Flow
+      }
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     update("research_channel", ch.id, { last_error: msg.slice(0, 300), last_scan_at: nowIso(), meta: { ...(byId<Row>("research_channel", ch.id)?.meta ?? {}), scanning: null } });
     emit(bizId, "research.updated", { channelId: ch.id, status: "error" });
     throw e;
   }
+}
+
+async function scanOnce(bizId: string, ch: Row) {
+  const r = await runChromeAgent(bizId, {
+    untrusted: true,
+    tag: `research-${ch.id}`, tier: "small", timeoutMs: 12 * 60_000, addDirs: [], schema: ScanOut,
+    prompt: [
+      `Mở kênh ${ch.platform} sau trong tab mới: ${ch.url}`,
+      HOW[ch.platform as ResearchPlatform] ?? "",
+      "CHỈ ĐỌC: không bấm theo dõi, không thích, không bình luận, không nhắn tin, không đăng nhập.",
+      "Hộp thoại mời đăng nhập/cookie che một phần trang: bấm nút đóng (X) hoặc nhấn Escape rồi đọc tiếp — KHÔNG đóng tab, KHÔNG dùng browser_close (đóng tab cuối cùng làm Chrome Flow tắt hẳn). Chỉ báo \"blocked\" khi nội dung bị che hoàn toàn và không đọc được ô video nào.",
+      "Với mỗi video (mới nhất trước, tối đa 30): url đầy đủ, title (mô tả/tiêu đề nếu thấy, rỗng nếu không), viewsText = đúng chữ lượt xem hiển thị (vd \"3,4M\", \"215,9K\", \"1,2 Tr\"), likesText/commentsText nếu hiển thị (rỗng nếu không), postedText = ngày đăng nếu trang hiện (vd \"2 ngày trước\", rỗng nếu không), pinned, durationText nếu có, coverText = chữ in to trên ảnh bìa nếu đọc được trong snapshot (rỗng nếu không).",
+      "title / likes / comments / ngày đăng / thời lượng / chữ ảnh bìa chỉ là phụ, rỗng được: có url + lượt xem của ít nhất 1 video là status \"ok\" — đừng báo failed chỉ vì thiếu các trường phụ. Không bịa số: ô không hiện lượt xem thì bỏ qua ô đó.",
+      "Trả JSON theo schema.",
+    ].join("\n"),
+  });
+  const out = ScanOut.safeParse(r.structured);
+  if (!out.success) throw new AppError("BAD_RESULT", "AI Agent không trả kết quả đúng định dạng");
+  // Đã đọc được video thật (url + lượt xem) thì lưu dù agent gắn "failed" vì thiếu trường phụ; chỉ báo lỗi khi không có gì đọc được.
+  const readable = out.data.videos.some((v) => v.url && parseCount(v.viewsText) != null);
+  if (out.data.status !== "ok" && !readable) throw new AppError("BLOCKED", out.data.notes || "Không đọc được trang kênh");
+  return saveScan(bizId, ch, out.data);
 }
 
 function saveScan(bizId: string, ch: Row, data: z.infer<typeof ScanOut>) {
@@ -217,6 +242,7 @@ export async function decodeResearchVideo(bizId: string, videoId: string, opts: 
   let detail: z.infer<typeof DetailOut> | null = null;
   try {
     const r = await runChromeAgent(bizId, {
+      untrusted: true,
       tag: `research-v-${v.id}`, tier: "small", timeoutMs: 6 * 60_000, addDirs: [], schema: DetailOut,
       prompt: [
         `Mở video ${ch.platform} sau trong tab mới: ${v.url}`,

@@ -3,7 +3,12 @@ import { useSearchParams } from "react-router-dom";
 import { Check, CheckCircle2, Clock, FileText, Pencil, ShieldAlert, X, XCircle } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { AGENT_LABEL, timeAgo, vnd } from "../lib/format";
-import { Badge, Button, Card, Empty, JevBadge, Loading, Modal, PageHeader, PlatformIcon, ProbBar, Stat, Tabs, cx, inputCls, useToast } from "../components/ui";
+import { Badge, Button, Card, Empty, ExpandableText, JevBadge, Loading, Modal, PageHeader, PlatformIcon, ProbBar, Stat, Tabs, cx, inputCls, useToast } from "../components/ui";
+import { OrderDraftPanel } from "../components/PancakeOrders";
+import { PostImage } from "../components/PostImage";
+import { SeoImages } from "../components/SeoImages";
+import { ArticleMarkdown } from "../components/ArticleMarkdown";
+import { AutoApprove } from "../components/AutoApprove";
 
 const TYPES = [
   { value: "", label: "Tất cả" },
@@ -12,12 +17,15 @@ const TYPES = [
   { value: "action", label: "Thay đổi ngân sách/ads" },
   { value: "creative_job", label: "Video Flow" },
   { value: "follow_up", label: "Follow-up Zalo" },
+  { value: "nurture_send", label: "Chăm khách từ bình luận" },
+  { value: "order_draft", label: "Đơn hàng" },
   { value: "change_proposal", label: "Đề xuất học" },
 ];
 const RISK = { low: { label: "Rủi ro thấp", tone: "green" }, medium: { label: "Rủi ro trung bình", tone: "amber" }, high: { label: "Rủi ro cao", tone: "red" } } as const;
 const EVENT_VI: Record<string, string> = {
   "task.status": "Đổi trạng thái", "approval.approved": "Đã duyệt", "approval.rejected": "Từ chối", "approval.edited": "Sửa & duyệt",
   "goal.created": "Tạo mục tiêu", "publish.scheduled": "Lên lịch đăng",
+  "approval.auto_approved": "Tự động duyệt", "approval.auto_skipped": "Chưa tự duyệt được",
 };
 
 export function Approvals() {
@@ -26,7 +34,7 @@ export function Approvals() {
   const list = useApi<any[]>(`approvals${type ? `?type=${type}` : ""}`, ["approval."]);
   const stats = useApi<any>("approvals/stats", ["approval."]);
   const selectedId = params.get("id") ?? list.data?.[0]?.id ?? null;
-  const detail = useApi<any>(selectedId ? `approvals/${selectedId}` : null, ["approval."]);
+  const detail = useApi<any>(selectedId ? `approvals/${selectedId}` : null, ["approval.", "content.image"]);
   const [mode, setMode] = useState<null | "edit" | "reject">(null);
   const [note, setNote] = useState("");
   const [edited, setEdited] = useState("");
@@ -55,26 +63,28 @@ export function Approvals() {
   return (
     <div>
       <PageHeader title="Duyệt & Phê duyệt" subtitle="Xem xét và phê duyệt các nội dung, chiến dịch và thay đổi do Agent đề xuất." />
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat icon={FileText} tone="blue" label="Chờ phê duyệt" value={stats.data?.pending ?? "—"} sub="đang chờ Sếp" />
         <Stat icon={CheckCircle2} tone="green" label="Đã phê duyệt" value={stats.data?.approved ?? "—"} sub="tổng cộng" />
         <Stat icon={XCircle} tone="red" label="Đã từ chối" value={stats.data?.rejected ?? "—"} sub="lý do được dùng để học" />
         <Stat icon={Clock} tone="violet" label="Thời gian duyệt TB" value={stats.data?.avgMinutes != null ? `${Math.round(stats.data.avgMinutes)} phút` : "—"} sub="từ lúc đề xuất" />
       </div>
 
+      <AutoApprove onChanged={() => { list.reload(); stats.reload(); }} />
+
       <Tabs tabs={TYPES.map((t) => ({ value: t.value, label: t.label }))} value={type} onChange={(v) => { setType(v); setParams({}); }} />
 
-      <div className="mt-4 grid gap-6 xl:grid-cols-[400px_1fr]">
+      <div className="mt-4 grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)]">
         <div className="space-y-3">
           {list.loading ? <Loading /> : !list.data?.length ? <Empty>Không có mục nào chờ duyệt. 🎉</Empty> : list.data.map((a) => {
             const r = RISK[a.risk as keyof typeof RISK] ?? RISK.low;
             return (
-              <button key={a.id} onClick={() => setParams({ id: a.id })} className={cx("w-full rounded-2xl border bg-card p-4 text-left transition hover:border-blue-300", a.id === selectedId ? "border-blue-500 ring-2 ring-blue-500/15" : "border-line")}>
+              <button key={a.id} onClick={() => setParams({ id: a.id })} className={cx("w-full rounded-2xl border bg-card p-3.5 text-left transition-colors hover:border-blue-300", a.id === selectedId ? "border-blue-500 ring-2 ring-blue-500/15" : "border-line")}>
                 <div className="flex items-start justify-between gap-2">
                   <span className="flex items-center gap-2 text-xs text-muted">{a.preview?.channel && <PlatformIcon p={a.preview.channel} size={16} />}{TYPES.find((t) => t.value === a.subject_type)?.label}</span>
                   <Badge tone={r.tone}>{r.label}</Badge>
                 </div>
-                <p className="mt-2 font-semibold leading-snug">{a.title}</p>
+                <p className="mt-1.5 line-clamp-2 text-sm font-semibold leading-snug">{a.title}</p>
                 <p className="mt-1 text-xs text-muted">Do {AGENT_LABEL[a.agent_key] ?? a.agent_key} đề xuất · {timeAgo(a.created_at)}{a.review_total != null && <> · Review {Math.round(a.review_total)}/100</>}</p>
                 {a.preview?.notPassed && <p className="mt-2 flex items-center gap-1 text-xs text-amber-600"><ShieldAlert className="h-3.5 w-3.5" />Chưa đạt review sau số vòng sửa tối đa</p>}
               </button>
@@ -86,36 +96,61 @@ export function Approvals() {
           {!selectedId ? null : !d ? <Loading /> : (
             <Card>
               <div className="flex flex-col gap-3 border-b border-line pb-4 md:flex-row md:items-start md:justify-between">
-                <div>
+                <div className="min-w-0">
                   <p className="flex items-center gap-2 text-sm text-muted">{d.preview?.channel && <PlatformIcon p={d.preview.channel} />}{TYPES.find((t) => t.value === d.subject_type)?.label}</p>
-                  <h2 className="mt-1 text-xl font-bold">{d.title}</h2>
+                  <h2 className="mt-1 text-lg font-bold leading-snug">{d.title}</h2>
                   <p className="text-sm text-muted">Do {AGENT_LABEL[d.agent_key] ?? d.agent_key} đề xuất · {timeAgo(d.created_at)}{d.expires_at && <> · hết hạn {timeAgo(d.expires_at)}</>}</p>
                 </div>
-                <div className="flex gap-2"><Badge tone={(RISK[d.risk as keyof typeof RISK] ?? RISK.low).tone}>{(RISK[d.risk as keyof typeof RISK] ?? RISK.low).label}</Badge><Badge tone={d.status === "pending" ? "amber" : "green"}>{d.status === "pending" ? "Đang chờ duyệt" : d.status}</Badge></div>
+                <div className="flex shrink-0 flex-wrap gap-2"><Badge tone={(RISK[d.risk as keyof typeof RISK] ?? RISK.low).tone}>{(RISK[d.risk as keyof typeof RISK] ?? RISK.low).label}</Badge><Badge tone={d.status === "pending" ? "amber" : "green"}>{d.status === "pending" ? "Đang chờ duyệt" : d.status}</Badge></div>
               </div>
 
-              <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_340px]">
+              <div className="mt-4 grid gap-6 2xl:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="min-w-0 space-y-4">
-                  <SubjectView d={d} />
+                  {d.subject_type === "order_draft" && d.status === "pending" ? (
+                    <OrderDraftPanel approval={d} onDone={() => {
+                      const next = list.data?.find((a) => a.id !== selectedId);
+                      setParams(next ? { id: next.id } : {});
+                      list.reload(); stats.reload(); detail.reload();
+                    }} />
+                  ) : <SubjectView d={d} onChange={detail.reload} />}
+                  {d.status === "pending" && d.channelBlocked && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+                      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /><p>{d.channelNote} Vẫn duyệt được — hệ thống không đăng giả: bài chờ ở trang Đăng bài cho tới khi kênh sẵn sàng.</p>
+                    </div>
+                  )}
+                  {d.status === "pending" && d.subject?.linkComment && (
+                    <div className="rounded-xl border border-line bg-soft p-3 text-xs text-muted">
+                      <p className="font-medium text-ink">Sau khi đăng, hệ thống tự bình luận link sản phẩm ({d.subject.linkComment.product.name}) dưới bài trên {d.subject.linkComment.channel}:</p>
+                      <p className="mt-1 whitespace-pre-line text-ink">{d.subject.linkComment.text}</p>
+                      <p className="mt-1">Link thật được thêm UTM / mã đo. Tắt ở trang Đăng bài → "Link sản phẩm dưới bình luận".</p>
+                    </div>
+                  )}
+                  {/* Lượt đăng / đăng nháp lỗi của nội dung này: vì sao bài chưa lên kênh. */}
+                  {(d.subject?.publishErrors ?? []).map((x: any) => (
+                    <div key={x.id} className="rounded-xl bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300">
+                      <p className="flex items-center gap-1.5 font-medium"><PlatformIcon p={x.platform} size={14} />{x.mode === "draft" ? "Đăng nháp" : "Đăng bài"} lên {x.name} {x.status === "needs_check" ? "cần kiểm tra" : x.status === "needs_setup" ? "chờ kết nối kênh" : "bị lỗi"}</p>
+                      <p className="mt-1 whitespace-pre-line">{x.error}</p>
+                    </div>
+                  ))}
                   {d.history?.length > 0 && (
-                    <div>
-                      <p className="mb-2 text-sm font-semibold">Lịch sử</p>
-                      <ol className="space-y-2 border-l border-line pl-4">
+                    <details>
+                      <summary className="text-sm font-semibold">Lịch sử xử lý ({Math.min(8, d.history.length)})</summary>
+                      <ol className="mt-2 space-y-2 border-l border-line pl-4">
                         {d.history.slice(-8).map((h: any, i: number) => (
-                          <li key={i} className="text-xs"><span className="font-medium">{h.actor}</span> · {EVENT_VI[h.event] ?? h.event}{h.data?.to ? ` → ${h.data.to}` : ""} <span className="text-muted">· {timeAgo(h.at)}</span></li>
+                          <li key={i} className="text-xs"><span className="font-medium">{h.actor}</span> · {EVENT_VI[h.event] ?? h.event}{h.data?.to ? ` → ${h.data.to}` : ""}{h.event === "approval.auto_approved" && h.data?.score != null ? ` (điểm ${h.data.score} ≥ ${h.data.minScore})` : ""}{h.event === "approval.auto_skipped" && h.data?.reason ? `: ${h.data.reason}` : ""} <span className="text-muted">· {timeAgo(h.at)}</span></li>
                         ))}
                       </ol>
-                    </div>
+                    </details>
                   )}
                 </div>
                 <div className="space-y-4">{review ? <ReviewPanel review={review} source={d.jevJudgment?.source} /> : d.subject_type === "ad_candidate" ? <CommentsPanel comments={d.subject?.comments ?? []} /> : null}</div>
               </div>
 
-              {d.status === "pending" && (
+              {d.status === "pending" && d.subject_type !== "order_draft" && (
                 <div className="mt-6 space-y-3 border-t border-line pt-4">
                   {mode && (
                     <div className="space-y-2">
-                      {mode === "edit" && d.subject_type === "follow_up" && <textarea className={cx(inputCls, "min-h-28")} value={edited} onChange={(e) => setEdited(e.target.value)} />}
+                      {mode === "edit" && (d.subject_type === "follow_up" || d.subject_type === "nurture_send") && <textarea className={cx(inputCls, "min-h-28")} value={edited} onChange={(e) => setEdited(e.target.value)} />}
                       {mode === "edit" && content && <textarea className={cx(inputCls, "min-h-48 font-mono text-xs")} value={edited} onChange={(e) => setEdited(e.target.value)} />}
                       {mode === "edit" && d.subject_type === "ad_candidate" && <input className={inputCls} value={edited} onChange={(e) => setEdited(e.target.value)} placeholder="Ngân sách/ngày mới (VND), ví dụ 1500000" />}
                       <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder={mode === "reject" ? "Lý do từ chối (bắt buộc) — ví dụ: văn phong chưa đúng giọng DOTAKA" : "Ghi chú cho agent (không bắt buộc)"} />
@@ -124,7 +159,7 @@ export function Approvals() {
                   <div className="flex flex-wrap justify-end gap-2">
                     {mode ? <Button variant="ghost" onClick={() => setMode(null)}>Hủy</Button> : (
                       <>
-                        {(content || d.subject_type === "ad_candidate" || d.subject_type === "follow_up") && <Button icon={Pencil} onClick={() => { setMode("edit"); setEdited(d.subject_type === "follow_up" ? String(d.preview?.text ?? "") : content?.body ?? String(d.subject?.candidate?.daily_budget ?? "")); }}>Chỉnh sửa</Button>}
+                        {(content || d.subject_type === "ad_candidate" || d.subject_type === "follow_up" || (d.subject_type === "nurture_send" && d.preview?.dmText)) && <Button icon={Pencil} onClick={() => { setMode("edit"); setEdited(d.subject_type === "follow_up" || d.subject_type === "nurture_send" ? String(d.preview?.text ?? "") : content?.body ?? String(d.subject?.candidate?.daily_budget ?? "")); }}>Chỉnh sửa</Button>}
                         <Button variant="danger" icon={X} onClick={() => setMode("reject")}>Từ chối</Button>
                       </>
                     )}
@@ -147,19 +182,35 @@ function approveHint(d: any) {
   if (d.subject_type === "ad_candidate") return `Phê duyệt sẽ tạo quảng cáo thật từ bài với ${vnd(d.subject?.candidate?.daily_budget)}/ngày (qua trần ngân sách & kill switch).`;
   if (d.subject_type === "action") return "Phê duyệt sẽ đưa thay đổi vào hàng đợi thực thi; có thể hoàn tác ở trang Quảng cáo.";
   if (d.subject_type === "follow_up") return `Phê duyệt sẽ gửi tin này qua ZL-CRM bằng nick ${d.preview?.nick ?? "đang giữ hội thoại"}. Nếu khách nhắn lại trước đó, tin sẽ không gửi.`;
+  if (d.subject_type === "nurture_send") return "Phê duyệt sẽ trả lời công khai dưới bình luận + nhắn inbox cho khách (Chỉnh sửa = sửa tin inbox). Từ chối = không nhắn khách này.";
   if (d.subject_type === "creative_job") return `Phê duyệt sẽ tải video lên ${(d.preview?.channels ?? []).join(", ")} dưới dạng BẢN NHÁP (chưa công khai).`;
   if (d.subject?.task?.agent_key === "strategy") return "Phê duyệt chiến lược sẽ kích hoạt các agent viết nội dung theo kế hoạch.";
   if (d.subject?.content?.channel) return "Phê duyệt sẽ lên lịch đăng bài theo khung giờ hiệu quả (dừng được bằng kill switch).";
   return "";
 }
 
-function SubjectView({ d }: { d: any }) {
+function SubjectView({ d, onChange }: { d: any; onChange?: () => void }) {
   const s = d.subject ?? {};
   if (d.subject_type === "follow_up") return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap gap-2"><Badge tone="blue">Zalo · {d.preview?.nick ?? "nick ?"}</Badge><Badge tone={d.preview?.grade === "hot" ? "red" : d.preview?.grade === "warm" ? "amber" : "gray"}>Lead {d.preview?.grade ?? "?"}</Badge><Badge>Lần {d.preview?.step}</Badge></div>
       <div><p className="mb-1 font-semibold">Hội thoại gần nhất</p><div className="space-y-1 rounded-xl bg-soft p-3 text-xs">{(d.preview?.recent ?? []).map((l: string, i: number) => <p key={i} className={l.startsWith("Khách") ? "text-ink" : "text-muted"}>{l}</p>)}</div></div>
       <div><p className="mb-1 font-semibold">Tin follow-up sẽ gửi</p><div className="whitespace-pre-wrap rounded-xl border border-blue-500/40 bg-blue-500/5 p-4 leading-relaxed text-ink">{d.preview?.text}</div></div>
+      {d.preview?.conversationId && <a href={`/chat?id=${d.preview.conversationId}`} className="text-xs text-blue-600 underline">Mở hội thoại</a>}
+    </div>
+  );
+  if (d.subject_type === "nurture_send") return (
+    <div className="space-y-3 text-sm">
+      <div className="flex flex-wrap gap-2"><Badge tone="blue">{d.preview?.channel === "instagram" ? "Instagram" : "Facebook"} · bình luận</Badge>{d.preview?.reviewFirst ? <Badge>Chế độ duyệt trước · khách {d.preview.reviewNo}/{d.preview.reviewFirst}</Badge> : null}{d.preview?.deadline && <Badge tone="amber">Hạn nhắn inbox: {new Date(d.preview.deadline).toLocaleString("vi-VN")}</Badge>}</div>
+      <div><p className="mb-1 font-semibold">Bình luận của {d.preview?.author}{d.preview?.postTitle ? ` dưới “${d.preview.postTitle}”` : ""}</p><div className="whitespace-pre-wrap rounded-xl bg-soft p-3 text-ink">{d.preview?.comment}</div>{d.preview?.permalink && <a href={d.preview.permalink} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline">Mở bài ↗</a>}</div>
+      {d.preview?.replyText && <div><p className="mb-1 font-semibold">Trả lời công khai dưới bình luận</p><div className="whitespace-pre-wrap rounded-xl border border-line p-3 leading-relaxed text-ink">{d.preview.replyText}</div></div>}
+      {d.preview?.dmText && <div><p className="mb-1 font-semibold">Tin inbox gửi riêng cho khách</p><div className="whitespace-pre-wrap rounded-xl border border-blue-500/40 bg-blue-500/5 p-4 leading-relaxed text-ink">{d.preview.dmText}</div></div>}
+    </div>
+  );
+  if (d.subject_type === "order_draft") return (
+    <div className="space-y-2 text-sm">
+      <div className="flex flex-wrap gap-2"><Badge tone="violet">{d.preview?.product}</Badge>{d.preview?.total > 0 && <Badge tone="blue">{vnd(d.preview.total)}</Badge>}{d.preview?.phoneMasked && <Badge>SĐT {d.preview.phoneMasked}</Badge>}</div>
+      <p className="text-xs text-muted">Đơn nháp do bot chốt từ hội thoại với {d.preview?.customerName}. Đơn thật (nếu đã duyệt) hiện ở khối "Đơn hàng" trong trang Chat.</p>
       {d.preview?.conversationId && <a href={`/chat?id=${d.preview.conversationId}`} className="text-xs text-blue-600 underline">Mở hội thoại</a>}
     </div>
   );
@@ -173,9 +224,17 @@ function SubjectView({ d }: { d: any }) {
     </div>
   );
   if (s.content) return (
-    <div>
-      <p className="mb-2 text-sm font-semibold">Nội dung đề xuất</p>
-      <div className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-soft p-4 text-sm leading-relaxed scroll-thin">{s.content.body}</div>
+    <div className="space-y-3">
+      <div>
+        <p className="mb-2 text-sm font-semibold">Nội dung đề xuất</p>
+        {s.content.kind === "seo_article"
+          ? <div className="max-h-[560px] overflow-auto rounded-xl border border-line bg-soft p-4 scroll-thin"><ArticleMarkdown body={s.content.body} /></div>
+          : <div className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-soft p-4 text-sm leading-relaxed scroll-thin">{s.content.body}</div>}
+      </div>
+      {/* Bài SEO: 4 ảnh / 1000 chữ nằm trong thân bài; thiếu ảnh thì bấm "Tạo ảnh còn thiếu" trước khi duyệt. */}
+      <SeoImages contentId={s.content.id} info={s.seoImages} error={d.status === "pending" ? d.preview?.imageError : null} onChange={onChange ?? (() => {})} />
+      {/* Ảnh đăng kèm bài: Sếp duyệt cả chữ lẫn ảnh; tạo lại / đổi ảnh ngay tại đây trước khi bấm Duyệt. */}
+      <PostImage contentId={s.content.id} image={s.image} error={d.status === "pending" ? d.preview?.imageError : null} onChange={onChange ?? (() => {})} />
     </div>
   );
   if (s.task?.agent_key === "strategy" && s.task.output) {
@@ -238,7 +297,7 @@ function ReviewPanel({ review, source }: { review: any; source?: string }) {
         {review.deterministic.map((c: any) => (
           <li key={c.check} className="flex items-start gap-2 text-xs">
             {c.passed ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" /> : <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-500" />}
-            <span>{c.check}{c.detail && <span className="text-muted"> — {c.detail}</span>}</span>
+            <div className="min-w-0 flex-1"><span>{c.check}</span>{c.detail && <ExpandableText lines={2} textClass="!text-xs text-muted">{c.detail}</ExpandableText>}</div>
           </li>
         ))}
       </ul>

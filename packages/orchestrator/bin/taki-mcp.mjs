@@ -15,7 +15,7 @@ const MAX = 14_000;
 async function call(method, path, body) {
   const r = await fetch(`${API}${path}`, {
     method,
-    headers: { "x-taki-actor": encodeURIComponent(ACTOR), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+    headers: { "x-taki-actor": encodeURIComponent(ACTOR), ...(process.env.TAKI_BIZ ? { "x-biz-id": process.env.TAKI_BIZ } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(60_000),
   });
@@ -126,8 +126,10 @@ tool("giao_viec_rieng", "Giao 1 việc RIÊNG cho đúng 1 agent, làm xong bư�
 tool("tao_chien_dich", "Tạo mục tiêu → chuỗi agent tự chạy: brief → (nghiên cứu thị trường) → chiến lược (Sếp duyệt) → nội dung từng kênh. launch_campaign = ra mắt/chiến dịch có nghiên cứu; weekly_content = lịch nội dung tuần.", {
   tieu_de: z.string().min(3), mo_ta: z.string().min(5), loai: z.enum(["launch_campaign", "weekly_content"]), ngan_sach_ads: z.number().int().min(0).optional(), han: z.string().optional().describe("YYYY-MM-DD"),
   dung_sau: z.enum(["brief", "market_research", "strategy"]).optional().describe("Chạy chuỗi đến bước này thì dừng (Sếp bấm Triển khai tiếp ở Kế hoạch khi muốn)"),
+  so_luong: z.number().int().min(1).max(30).optional().describe("Số bài / kịch bản cần làm (vd 10). Bỏ trống: hệ thống đọc từ tiêu đề + mô tả, không có thì mặc định 4-5"),
+  loai_noi_dung: z.enum(["mixed", "seo", "video"]).optional().describe("mixed = đa kênh · seo = toàn bài SEO website · video = toàn kịch bản video. Bỏ trống: tự đọc từ yêu cầu"),
 }, async (a) => {
-  const g = await call("POST", "/v1/goals", { title: a.tieu_de, description: a.mo_ta, template: a.loai, budgetAds: a.ngan_sach_ads ?? 0, dueDate: a.han, stopAfter: a.dung_sau });
+  const g = await call("POST", "/v1/goals", { title: a.tieu_de, description: a.mo_ta, template: a.loai, budgetAds: a.ngan_sach_ads ?? 0, dueDate: a.han, stopAfter: a.dung_sau, contentCount: a.so_luong, contentKind: a.loai_noi_dung });
   await dispatched(a.loai, "goal", g.id, a.tieu_de);
   return { goalId: g.id, status: g.status, ghiChu: "Brief Agent bắt đầu ngay; Chiến lược sẽ chờ Sếp duyệt rồi mới sinh nội dung." };
 });

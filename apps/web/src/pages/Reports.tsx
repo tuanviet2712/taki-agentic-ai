@@ -62,14 +62,14 @@ export function Reports() {
 
       {!s && loading ? <Loading /> : !s ? <Empty>Không tải được báo cáo.</Empty> : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             <Stat icon={Eye} tone="violet" label="Lượt tiếp cận" value={num(t.reach)} sub="Bài tự nhiên + quảng cáo" />
             <Stat icon={Heart} tone="pink" label="Tương tác" value={num(t.engaged)} sub={`${num(t.conversations)} hội thoại mới`} />
             <Stat icon={ShoppingBag} tone="green" label="Khách hàng mới (đơn)" value={num(t.orders)} sub={t.costPerOrder ? `Chi phí/đơn ${vnd(t.costPerOrder)}` : undefined} />
             <Stat icon={Wallet} tone="amber" label="Chi phí quảng cáo" value={vnd(t.spend)} sub={t.cpa ? `CPA ${vnd(t.cpa)} · ${num(t.results)} kết quả` : undefined} />
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
+          <div className="grid gap-6 lg:grid-cols-2">
             <Card title={`Xu hướng quảng cáo ${days} ngày`}>
               {!met ? <Loading /> : (
                 <div className="h-72">
@@ -97,14 +97,14 @@ export function Reports() {
                   const w = first && f.value > 0 ? 28 + 72 * (Math.log10(f.value) / Math.log10(Math.max(first, 10))) : 28;
                   const prev = i > 0 ? s.funnel[i - 1].value : null;
                   return (
-                    <div key={f.stage}>
-                      <div className="mx-auto flex h-11 items-center justify-center rounded-lg px-2 text-white shadow-sm transition-all" style={{ width: `${Math.min(100, w)}%`, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length] }}>
-                        <span className="truncate text-sm font-semibold">{num(f.value)}</span>
+                    <div key={f.stage} className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)] items-center gap-x-3 gap-y-0.5 sm:grid-cols-[minmax(0,8.5rem)_minmax(0,1fr)_minmax(0,11rem)]">
+                      <span className="truncate text-[13px] font-medium text-ink" title={f.stage}>{f.stage}</span>
+                      <div className="h-8 rounded-lg bg-soft">
+                        <div className="flex h-full min-w-10 items-center justify-end rounded-lg px-2.5 text-white transition-[width]" style={{ width: `${Math.min(100, w)}%`, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length] }}>
+                          <span className="text-[13px] font-semibold tabular-nums">{num(f.value)}</span>
+                        </div>
                       </div>
-                      <div className="mt-0.5 flex justify-between px-1 text-xs text-muted">
-                        <span className="text-ink">{f.stage}</span>
-                        <span>{i === 0 ? "100%" : `${pct(ratio, ratio < 0.01 ? 3 : 1)} từ đầu phễu`}{prev ? ` · ${pct(f.value / prev, 1)} bước trước` : ""}</span>
-                      </div>
+                      <span className="col-span-2 text-[11px] leading-tight text-muted sm:col-span-1 sm:text-right">{i === 0 ? "100% · đầu phễu" : `${pct(ratio, ratio < 0.01 ? 3 : 1)} từ đầu phễu`}{prev ? ` · ${pct(f.value / prev, 1)} bước trước` : ""}</span>
                     </div>
                   );
                 })}

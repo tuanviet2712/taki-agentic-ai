@@ -65,7 +65,7 @@ export function AdsReports() {
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             <Stat icon={Wallet} tone="blue" label="Chi tiêu" value={vnd(t.spend)} delta={delta(t.spend, p.spend)} suffix={sfx} />
             <Stat icon={Target} tone="green" label="Kết quả" value={num(t.results)} delta={delta(t.results, p.results)} suffix={sfx} />
             <Stat icon={Coins} tone="amber" label="Chi phí / kết quả (CPA)" value={money(t.cpa)} delta={delta(t.cpa, p.cpa)} invert suffix={sfx} />
@@ -76,7 +76,7 @@ export function AdsReports() {
             <Stat icon={Coins} tone="gray" label="CPM (chi phí / 1.000 hiển thị)" value={money(t.cpm)} delta={delta(t.cpm, p.cpm)} invert suffix={sfx} />
           </div>
 
-          <div className={cx("grid gap-6", !single && "xl:grid-cols-[1fr_380px]")}>
+          <div className={cx("grid gap-6", !single && "wide:grid-cols-[minmax(0,1fr)_380px]")}>
             <Card title="Chi tiêu & kết quả theo ngày">
               <div className="h-72">
                 <ResponsiveContainer>
@@ -140,7 +140,7 @@ export function AdsReports() {
             </Card>
           )}
 
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2">
             <Card title={`Chiến dịch (${d.campaigns.length})`}>
               {d.campaigns.length === 0 ? <Empty>Chưa có chiến dịch nào có số liệu trong kỳ.</Empty> : (
                 <MetricTable rows={d.campaigns} first="Chiến dịch" name={(c: any) => c.name} showPlatform={!single} />

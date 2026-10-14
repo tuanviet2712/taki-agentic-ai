@@ -11,7 +11,13 @@ export interface Dna {
   mission: string;
   audience: { name: string; pains: string[]; goals: string[] }[];
   /** price: VND; 0 = miễn phí; null = chưa xác nhận ("liên hệ"). `verified` false = mục ⚠️ trong DNA. */
-  products: { key: string; name: string; aliases?: string[]; summary: string; format: string; price: number | null; audience?: string; link?: string; verified?: boolean; sample?: boolean }[];
+  products: { key: string; name: string; aliases?: string[]; summary: string; format: string; price: number | null; audience?: string; link?: string; verified?: boolean; sample?: boolean;
+    /** "ship" = hàng cần giao tận nơi (xin địa chỉ); "none" = khoá học / dịch vụ / phần mềm; "" = tự nhận biết. */
+    delivery?: "ship" | "none" | "";
+    /** Link gắn dưới bình luận nếu khác link sản phẩm (vd link affiliate rút gọn) + câu bình luận riêng (dùng {link}). */
+    shortLink?: string; commentText?: string;
+    /** Mẫu mã Pancake POS đã ghép (do hệ thống ghép, AI không điền). */
+    pancake?: { variationId: string; productId?: string | null; variationName?: string | null; price?: number | null; shopId?: string } | null }[];
   offers: string[];
   voice: { style: string[]; do: string[]; dont: string[]; sample: string };
   differentiators: string[];
@@ -67,10 +73,16 @@ export function systemPrefix(dna: Dna, def: AgentDefinition): string {
     `NHIỆM VỤ CỦA BẠN: ${def.instructions}`,
     "",
     "DANH MỤC SẢN PHẨM (DNA):",
-    ...dna.products.map((p) => `- [dna:products.${p.key}] ${p.name}: ${p.summary}. ${p.format}. Học phí: ${priceText(p.price)}${p.verified === false ? " (⚠️ chưa xác nhận)" : ""}${p.link ? `. Link: ${p.link}` : ""}`),
+    ...dna.products.map((p) => `- [dna:products.${p.key}] ${p.name}: ${p.summary}. ${p.format}. ${priceLabel(p)}: ${priceText(p.price)}${p.verified === false ? " (⚠️ chưa xác nhận)" : ""}${p.link ? `. Link: ${p.link}` : ""}`),
     `ƯU ĐÃI ĐANG CÔNG BỐ [dna:offers]: ${dna.offers.join("; ")}`,
     `LỢI THẾ KHÁC BIỆT: ${dna.differentiators.join("; ")}`,
   ].join("\n");
+}
+
+/** "Học phí" chỉ cho khoá học/chương trình đào tạo; sản phẩm thường (affiliate, COD…) ghi "Giá". */
+export function priceLabel(p: { name?: string; format?: string | null; summary?: string | null }): string {
+  if (/^(offline|online)\b/i.test(String(p.format ?? "").trim())) return "Học phí";
+  return /kho[áa] h[ọo]c|h[ọo]c vi[êe]n|l[ớo]p h[ọo]c|bu[ổo]i h[ọo]c|đào tạo|course|workshop|coaching/i.test(`${p.name ?? ""} ${p.format ?? ""} ${p.summary ?? ""}`) ? "Học phí" : "Giá";
 }
 
 function contextBlock(ctx: RunContext): string {
@@ -149,10 +161,17 @@ export const researchAgent: AgentDefinition<Research> = {
 export const strategyAgent: AgentDefinition<Strategy> = {
   key: "strategy", label: "Strategy Agent", output: Strategy, tier: "large", rubricKey: "strategy", maxRevisions: 1,
   instructions: "Đề xuất chiến lược marketing: định vị, thông điệp lõi, phễu TOFU-MOFU-BOFU, phân bổ kênh và ngân sách (tổng khớp brief), 2-3 phương án, thử nghiệm, phương án dự phòng, và kế hoạch nội dung cụ thể (contentPlan).",
-  buildUser: (_i, ctx) => `${contextBlock(ctx)}\n\nHãy tạo Strategy.`,
+  buildUser: (i, ctx) => {
+    // Số bài khách yêu cầu phải tới được model — không chỉ bản mô phỏng.
+    const req: string[] = [];
+    if (i?.contentCount) req.push(`- contentPlan đúng ${i.contentCount} mục (không ít hơn, không nhiều hơn), mỗi mục một chủ đề khác nhau, không lặp ý.`);
+    if (i?.contentKind === "seo") req.push("- Mọi mục của contentPlan là MỘT BÀI SEO cho website: channel = website, format = article, topic = từ khoá / chủ đề chính của bài; các từ khoá khác nhau về ý định tìm kiếm.");
+    if (i?.contentKind === "video") req.push("- Mọi mục của contentPlan là MỘT KỊCH BẢN VIDEO ngắn: format = reel hoặc video; mỗi kịch bản một góc khai thác khác nhau.");
+    return `${contextBlock(ctx)}${req.length ? `\n\nYÊU CẦU KẾ HOẠCH:\n${req.join("\n")}` : ""}\n\nHãy tạo Strategy.`;
+  },
   sandbox: (i, ctx) => {
     const budget = ctx.goal?.budget_ads ?? 0;
-    const n = Math.max(3, Math.min(6, i?.contentCount ?? 4));
+    const n = Math.max(1, Math.min(30, i?.contentCount ?? 4));
     const topics = [
       { channel: "facebook" as const, format: "text" as const, topic: "CEO làm việc như trâu mà doanh nghiệp vẫn đứng im", angle: "Chạm nỗi đau + nghịch lý", funnel: "tofu" as const },
       { channel: "tiktok" as const, format: "reel" as const, topic: "3 việc CEO nên giao cho AI ngay tuần này", angle: "Checklist làm được ngay", funnel: "tofu" as const },
@@ -186,7 +205,14 @@ export const strategyAgent: AgentDefinition<Strategy> = {
       ],
       experiments: [{ hypothesis: "Hook có con số > hook câu hỏi", variable: "hook", metric: "CTR" }],
       fallback: "Nếu CPL vượt ngưỡng sau 5 ngày: dồn ngân sách về bài organic điểm cao nhất và khóa AI Plus miễn phí.",
-      contentPlan: topics.slice(0, n),
+      // Đủ n mục (quay vòng chủ đề mẫu khi n > 6, kèm số thứ tự để mỗi mục khác nhau); loại nội dung theo yêu cầu.
+      contentPlan: Array.from({ length: n }, (_, k) => {
+        const t = topics[k % topics.length];
+        const topic = k < topics.length ? t.topic : `${t.topic} (góc ${Math.floor(k / topics.length) + 1})`;
+        return i?.contentKind === "seo" ? { ...t, topic, channel: "website" as const, format: "article" as const }
+          : i?.contentKind === "video" ? { ...t, topic, format: t.format === "video" || t.format === "reel" ? t.format : ("video" as const) }
+          : { ...t, topic };
+      }),
     };
   },
 };
@@ -237,9 +263,18 @@ export const contentAgent: AgentDefinition<ContentItem> = {
       openQuestions: [],
     };
   },
-  toContent: (o) => {
+  toContent: (o, input) => {
     const v = o.variants[0];
-    return { kind: o.format === "reel" || o.format === "video" ? "social_video" : "social_post", channel: o.channel, title: o.title, body: `${v.hook}\n\n${v.body}\n\n${v.cta}\n\n${v.hashtags.join(" ")}` };
+    // Kênh do Chiến lược GIAO (item.channel) là chuẩn — agent không tự đổi kênh.
+    const channel = input?.item?.channel ?? o.channel;
+    // Bài cho website = bài SEO (không phải bài mạng xã hội): có Meta + từ khoá, không hashtag → đi đúng quy tắc ảnh 4 ảnh / 1000 chữ,
+    // xuất bản / đăng WordPress như bài SEO. (Trước đây thành "social_post" nên chỉ có 1 ảnh.)
+    if (channel === "website" && o.format !== "reel" && o.format !== "video") {
+      const meta = `${v.hook} ${v.body}`.replace(/\s+/g, " ").trim().slice(0, 155);
+      const keyword = String(input?.keyword ?? input?.item?.topic ?? o.title).replace(/\s+/g, " ").trim().slice(0, 120);
+      return { kind: "seo_article", channel, title: o.title, body: `Meta: ${meta}\nTừ khóa: ${keyword}\n\n${v.hook}\n\n${v.body}\n\n${v.cta}` };
+    }
+    return { kind: o.format === "reel" || o.format === "video" ? "social_video" : "social_post", channel, title: o.title, body: `${v.hook}\n\n${v.body}\n\n${v.cta}\n\n${v.hashtags.join(" ")}` };
   },
 };
 
@@ -265,15 +300,17 @@ export const videoAgent: AgentDefinition<VideoScript> = {
       caption: `CEO không nên là người duyệt mọi thứ. ${tag(ctx.dna.company.brand)} #AIchoCEO`,
     };
   },
-  toContent: (o) => ({
-    kind: "video_script", channel: o.platform, title: o.title,
+  toContent: (o, input) => ({
+    kind: "video_script", channel: input?.item?.channel ?? o.platform, title: o.title,
     body: `HOOK: ${o.hooks.join(" | ")}\n\n${o.scenes.map((s) => `[${s.from}-${s.to}s] ${s.visual}\n  🎙 ${s.voiceover}\n  🅣 ${s.onScreenText}`).join("\n")}\n\nCTA: ${o.cta}\nCaption: ${o.caption}`,
   }),
 };
 
 export const seoAgent: AgentDefinition<SeoArticle> = {
   key: "seo_web", label: "SEO Agent", output: SeoArticle, tier: "medium", rubricKey: "seo_article", maxRevisions: 1,
-  instructions: "Viết bài blog chuẩn SEO cho website thương hiệu trong DNA: từ khóa, ý định tìm kiếm, tiêu đề ≤ 65 ký tự, meta 120-160 ký tự, dàn ý H2, thân bài markdown, liên kết nội bộ.",
+  instructions: "Viết bài blog chuẩn SEO cho website thương hiệu trong DNA: từ khóa, ý định tìm kiếm, tiêu đề ≤ 65 ký tự, meta 120-160 ký tự, dàn ý H2, thân bài markdown, liên kết nội bộ. "
+    + "Hệ thống TỰ tạo ảnh (4 ảnh mỗi 1000 chữ) và tự chèn vào thân bài ở vị trí tối ưu SEO — bạn KHÔNG viết ảnh / markdown ảnh / chỗ giữ chỗ ảnh. "
+    + "Để ảnh đặt đúng chỗ: mở bài bằng 1 đoạn dẫn nhập đầy đủ (≥ 40 từ, có từ khoá chính) trước mục H2 đầu tiên; mỗi mục H2 mở bằng 1 đoạn văn đầy đủ (≥ 40 từ) rồi mới đến danh sách / bảng; mỗi mục H2 có ít nhất 2 đoạn nội dung.",
   buildUser: (i, ctx) => `${contextBlock(ctx)}\n\nTỪ KHÓA/CHỦ ĐỀ: ${i.keyword ?? i.item?.topic}\n\nHãy tạo SeoArticle.`,
   sandbox: (i, ctx) => {
     const kw = i.keyword ?? "ứng dụng AI cho doanh nghiệp";
@@ -287,7 +324,8 @@ export const seoAgent: AgentDefinition<SeoArticle> = {
       internalLinks: ["/ai-business-system", "/ai-plus"],
     };
   },
-  toContent: (o) => ({ kind: "seo_article", channel: "website", title: o.title, body: `Meta: ${o.metaDescription}\nTừ khóa: ${o.keyword}\n\n${o.bodyMarkdown}` }),
+  // Ảnh do hệ thống tạo và chèn (seo-images.ts): bỏ mọi markdown ảnh agent lỡ viết (link ảnh ngoài / chỗ giữ chỗ) để không lẫn với ảnh thật.
+  toContent: (o) => ({ kind: "seo_article", channel: "website", title: o.title, body: `Meta: ${o.metaDescription}\nTừ khóa: ${o.keyword}\n\n${o.bodyMarkdown.replace(/^[ \t]*!\[[^\]]*\]\([^)]*\)[ \t]*$/gm, "").replace(/\n{3,}/g, "\n\n")}` }),
 };
 
 /** Weekly ads analysis by the Ads staff member (mkt-ads + facebook-ads-expert + toiuuquangcao). Advisory: its

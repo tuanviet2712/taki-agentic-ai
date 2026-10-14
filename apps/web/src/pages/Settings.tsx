@@ -45,7 +45,7 @@ function AgentConfig() {
     else void save(a.key, { autonomy: to }, `Đã hạ quyền tự chủ ${AGENT_LABEL[a.key] ?? a.label} xuống ${to}`);
   };
   return (
-    <Card title="Cấu hình AI Agent">
+    <Card title="Cấu hình AI Agent" collapsible="settings.agents" defaultOpen={false} summary={agents ? `${agents.filter((a) => !!a.config?.enabled).length}/${agents.length} agent đang bật · mức tự chủ & ngân sách token` : undefined}>
       {!agents ? <Loading /> : (
         <div className="overflow-x-auto scroll-thin">
           <table className="w-full min-w-[640px] text-sm">
@@ -116,7 +116,7 @@ export function Settings() {
     <div className="space-y-6">
       <PageHeader title="Cài đặt" subtitle="Chế độ AI, quyền tự chủ của Agent, trần an toàn và phân quyền cho TAKIKA." />
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <Card title="Thông tin doanh nghiệp">
           <dl className="space-y-2.5 text-sm">
             {[["Tên doanh nghiệp", data.biz?.name], ["Múi giờ", data.biz?.timezone], ["Tiền tệ", data.biz?.currency], ["Giờ yên lặng", s.quietHours ? `${s.quietHours[0]}h – ${s.quietHours[1]}h (không nhắn khách)` : "—"], ["Ngưỡng tin cậy ghi nhận nguồn", `${Math.round((s.attributionMinConfidence ?? 0) * 100)}%`], ["Khởi tạo", dt(data.biz?.created_at)]].map(([k, v]) => (
@@ -124,9 +124,9 @@ export function Settings() {
             ))}
           </dl>
         </Card>
-        <Card title="Chế độ AI" className="xl:col-span-2">
+        <Card title="Chế độ AI">
           {!sys ? <Loading /> : (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 rounded-xl border border-line p-4">
                 <div className="flex items-center justify-between"><p className="font-medium text-ink">Jev · System One</p><JevBadge source={sys.jev.enabled ? "jev" : "heuristic"} /></div>
                 <p className="text-sm text-muted">{sys.jev.enabled ? `Đang chạy thật · model ${sys.jev.model}` : "Chế độ heuristic (chưa có khóa)"}</p>
@@ -137,7 +137,7 @@ export function Settings() {
                 <p className="text-sm text-muted">{sys.llm.provider !== "claude_cli" ? "Sandbox — chưa gọi AI" : sys.llm.loggedIn === false ? "Tài khoản Claude đã hết phiên đăng nhập — mọi agent sẽ lỗi cho tới khi đăng nhập lại." : sys.llm.loggedIn === null ? "Chưa xác minh được tài khoản Claude (mạng chậm hoặc Claude không phản hồi)." : "Qua tài khoản Claude đã đăng nhập (Claude Code CLI)"}</p>
                 {sys.llm.loggedIn === false && <p className="text-xs text-ink">Mở Terminal trên máy chạy hệ thống, gõ <code className="rounded bg-soft px-1">claude</code> rồi <code className="rounded bg-soft px-1">/login</code> và đăng nhập lại.</p>}
                 {sys.llm.authError && <p className="text-xs text-muted">{sys.llm.authError}</p>}
-                <p className="text-xs text-muted">Chọn nhà cung cấp và model ở thẻ "Model Claude" bên dưới.</p>
+                <p className="text-xs text-muted">Chọn tài khoản, nhà cung cấp và model ở thẻ "Kết nối AI" bên dưới.</p>
               </div>
               <p className="text-xs text-muted md:col-span-2">Đặt khóa trong file <code className="rounded bg-soft px-1">.env</code> ở thư mục dự án rồi khởi động lại API. Giao diện không bao giờ hiển thị giá trị khóa.</p>
             </div>
@@ -145,7 +145,7 @@ export function Settings() {
         </Card>
       </div>
 
-      <Card title="Model Claude — nhà cung cấp & model theo tầng"><LlmPanel /></Card>
+      <Card title="Kết nối AI — tài khoản & model theo tầng"><LlmPanel /></Card>
 
       <div className="grid gap-4 md:grid-cols-3">
         {[["/ads/integrations", Link2, "Trung tâm tích hợp", "Facebook, TikTok, Google Sheets, Telegram, Pancake, Nhanh.vn, whitelist"], ["/ads/ai-gateway", MonitorCog, "Cổng AI (MCP)", "Key phân quyền cho Claude Desktop, Cursor, n8n"], ["/ads/logs", FileClock, "Lịch sử hoạt động", "Mọi thay đổi của Sếp, Agent, rule, MCP"]].map(([to, Icon, t, d]: any) => (
@@ -158,7 +158,7 @@ export function Settings() {
 
       <AgentConfig />
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
+      <div className="grid gap-6 wide:grid-cols-[minmax(0,1fr)_380px]">
         <Card title="Trần & chính sách" action={<Button size="sm" variant="primary" icon={Save} loading={saving} onClick={saveCaps}>Lưu</Button>}>
           <div className="grid gap-4 sm:grid-cols-2">
             {num2("maxTotalDailyAdBudget", "Tổng ngân sách quảng cáo tối đa/ngày (VND)", vndFull(Number(f.maxTotalDailyAdBudget)), { step: 1000000 })}
@@ -167,6 +167,17 @@ export function Settings() {
             {num2("postScoreThreshold", "Ngưỡng điểm bài viết (0–100)", "Bài dưới ngưỡng bị chặn hoặc trả về sửa", { min: 0, max: 100 })}
             {num2("explorationPct", "Tỷ lệ thử nghiệm (%)", "Phần ngân sách/nội dung dành cho thử ý tưởng mới", { min: 0, max: 100 })}
             {num2("approvalExpiryHours", "Hạn duyệt (giờ)", "Quá hạn, yêu cầu duyệt tự hết hiệu lực")}
+            {/* Tự tạo ảnh đi kèm mỗi bài viết trước khi vào hộp Duyệt — lưu ngay khi gạt (không cần bấm Lưu). */}
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-line p-3 sm:col-span-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">Tự tạo ảnh cho bài viết</p>
+                <p className="text-xs text-muted">Mỗi bài viết có 1 ảnh đi kèm (bài SEO: 4 ảnh / 1000 chữ), vào hộp Duyệt cùng bài và được đăng kèm khi duyệt. Chọn công cụ tạo ảnh ngay bên dưới.</p>
+              </div>
+              <Toggle checked={s.content?.autoImage !== false} onChange={async (v) => {
+                try { const next = await api.put("settings", { content: { autoImage: v } }); setData({ ...data, settings: next }); toast(v ? "Đã bật tự tạo ảnh cho bài viết" : "Đã tắt tự tạo ảnh — bài mới chỉ có chữ"); } catch (e: any) { toast(e.message, "err"); }
+              }} />
+            </div>
+            <div className="sm:col-span-2"><ImageEngineSettings /></div>
             <div className="sm:col-span-2"><Field label="Người duyệt dự phòng" hint="Nhận yêu cầu duyệt khi Sếp vắng mặt"><input className={inputCls} value={f.backupPerson} onChange={(e) => setF({ ...f, backupPerson: e.target.value })} placeholder="VD: ads@dotaka.vn" /></Field></div>
           </div>
         </Card>
@@ -212,6 +223,74 @@ export function Settings() {
 type UserRow = { id: string; name: string; email: string; role: string; status: string; last_active_at: string | null };
 
 /** Người dùng & phân quyền của doanh nghiệp đang xem: thêm / sửa / tạm khoá / xoá. */
+const IMAGE_ENGINES: { id: string; label: string; desc: string }[] = [
+  { id: "auto", label: "Tự động", desc: "Theo kết nối AI đang chọn: Claude thiết kế, ChatGPT vẽ ảnh." },
+  { id: "claude", label: "Claude thiết kế", desc: "Ảnh đồ hoạ có tiêu đề tiếng Việt chuẩn dấu (AI viết bài thiết kế bằng mã, Chrome dựng ảnh). Nhanh, không tốn lượt ảnh." },
+  { id: "chatgpt", label: "ChatGPT vẽ ảnh", desc: "Ảnh minh hoạ AI (không chữ) bằng công cụ vẽ ảnh của ChatGPT. Bài vẫn do Claude viết. Cần 1 hồ sơ ChatGPT đã đăng nhập." },
+  { id: "gemini_flow", label: "Gemini trên Google Flow", desc: "Ảnh minh hoạ Nano Banana (không chữ) tạo trong 1 dự án Flow riêng qua Chrome Flow, tải bản gốc về. ~40 giây/ảnh." },
+];
+
+/** Cài đặt → Tạo ảnh bằng: Claude thiết kế / ChatGPT vẽ / Gemini trên Flow, độc lập với model viết bài; có dự phòng. */
+function ImageEngineSettings() {
+  const { data, reload } = useApi<any>("image-engine", ["settings."]);
+  const toast = useToast();
+  if (!data) return null;
+  const save = async (content: Record<string, unknown>, msg: string) => {
+    try { await api.put("settings", { content }); toast(msg); reload(); } catch (e: any) { toast(e.message, "err"); }
+  };
+  const ready = (id: string) => (id === "auto" ? null : data.engines?.[id]);
+  return (
+    <div className="space-y-3 rounded-xl border border-line p-3">
+      <p className="text-sm font-medium text-ink">Tạo ảnh bằng</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {IMAGE_ENGINES.map((e) => {
+          const on = data.setting === e.id;
+          const r = ready(e.id);
+          return (
+            <button key={e.id} type="button" aria-pressed={on} onClick={() => !on && save({ imageEngine: e.id }, `Ảnh bài viết: ${e.label}`)}
+              className={cx("flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition", on ? "border-blue-500 bg-blue-500/5 ring-2 ring-blue-500/15" : "border-line hover:bg-soft")}>
+              <span className="flex w-full items-center gap-2">
+                <span className="text-[13px] font-semibold text-ink">{e.label}</span>
+                {r && <Badge tone={r.ready ? "green" : "amber"}>{r.ready ? "sẵn sàng" : "chưa sẵn sàng"}</Badge>}
+              </span>
+              <span className="text-[11px] leading-snug text-muted">{e.desc}</span>
+              {r && !r.ready && <span className="text-[11px] text-amber-700 dark:text-amber-300">{r.reason}</span>}
+            </button>
+          );
+        })}
+      </div>
+      {data.setting === "chatgpt" && (
+        <Field label="Hồ sơ ChatGPT dùng để vẽ ảnh" hint="Tạo / đăng nhập hồ sơ ở mục Kết nối AI phía trên (không cần chuyển đội AI sang ChatGPT)">
+          <select className={inputCls} value={data.codexAccountId ?? ""} onChange={(ev) => save({ imageCodexAccountId: ev.target.value || null }, "Đã chọn hồ sơ ChatGPT cho ảnh")}>
+            <option value="">— Hồ sơ đang chọn ở Kết nối AI —</option>
+            {(data.accounts ?? []).map((a: any) => <option key={a.id} value={a.id}>{a.name}{a.email ? ` · ${a.email}` : ""}{a.loggedIn ? "" : " (chưa đăng nhập)"}</option>)}
+          </select>
+        </Field>
+      )}
+      {data.setting === "gemini_flow" && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Model Gemini" hint="Nano Banana Pro đẹp nhất; 2 Lite nhanh nhất">
+            <select className={inputCls} value={data.flowModel ?? data.flowModels?.[0] ?? ""} onChange={(ev) => save({ flowImageModel: ev.target.value }, `Model ảnh: ${ev.target.value}`)}>
+              {(data.flowModels ?? []).map((m: string) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Field>
+          <div className="text-xs text-muted">
+            <p className="font-medium text-ink">Dự án Flow chứa ảnh</p>
+            {data.flowProject ? <a href={data.flowProject} target="_blank" rel="noreferrer" className="break-all text-blue-600 hover:underline">{data.flowProject}</a> : <p>Tự tạo ở ảnh đầu tiên.</p>}
+            <p className="mt-1">Đang dựng video trên Flow thì ảnh tạm dùng công cụ dự phòng (không chen vào Chrome Flow).</p>
+          </div>
+        </div>
+      )}
+      <label className="flex items-start gap-2 text-xs text-muted">
+        <input type="checkbox" className="mt-0.5" checked={data.fallback !== false} onChange={(ev) => save({ imageFallback: ev.target.checked }, ev.target.checked ? "Đã bật dự phòng: lỗi thì Claude thiết kế ảnh" : "Đã tắt dự phòng: lỗi thì bài vào hộp Duyệt không ảnh")} />
+        <span><b className="text-ink">Dự phòng:</b> công cụ đã chọn chưa sẵn sàng hoặc tạo lỗi thì tự để Claude thiết kế ảnh (mục duyệt ghi rõ lý do). Tắt: bài vào hộp Duyệt không ảnh kèm lý do.</span>
+      </label>
+      {data.engine && data.engine !== data.chosen && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">Hiện đang dùng dự phòng: {data.reason}</p>}
+      {!data.engine && <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">Chưa tạo được ảnh: {data.reason}</p>}
+    </div>
+  );
+}
+
 function UsersCard({ users, onChange }: { users: UserRow[]; onChange: () => void }) {
   const toast = useToast();
   const [edit, setEdit] = useState<null | { id?: string; name: string; email: string; role: string; status: string }>(null);

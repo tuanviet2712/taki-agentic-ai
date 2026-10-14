@@ -137,7 +137,7 @@ export function Autopilot() {
           </div>
         </div>
         {data.settings.platforms.length > 0 && (
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-3">
             {data.settings.platforms.map((p) => {
               const c = data.coverage[p.platform];
               if (!c) return null;
@@ -182,7 +182,7 @@ export function Autopilot() {
         </ol>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         {/* Vì sao chọn khóa học */}
         <Card title="Khóa học nào được nhiều bài" action={<span className="text-xs text-muted">Theo {METRIC_LABEL[data.allocation.metric]} · {data.allocation.window} ngày</span>}>
           <div>
@@ -270,7 +270,7 @@ export function Autopilot() {
           <div className="space-y-6">
             <fieldset>
               <legend className="text-sm font-medium text-ink">Đăng lên đâu, mỗi ngày mấy bài</legend>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 {data.platforms.map((p) => {
                   const cur = form.platforms.find((x) => x.platform === p);
                   return (

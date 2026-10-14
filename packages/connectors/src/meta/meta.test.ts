@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectorError } from "../errors.ts";
 import { countConversions, CONVERSION_ACTIONS, mapObjective } from "./conversions.ts";
-import { createBoost, type BoostSpec } from "./create.ts";
+import { createBoost, createCampaignStructure, type BoostSpec } from "./create.ts";
 import { graphPost } from "./graph.ts";
 import { missingRequirement, promotedObject } from "./objectives.ts";
 import { assessPosts, externalLinkOf } from "./posts.ts";
@@ -78,6 +78,24 @@ describe("Graph transport + boost chain (mocked fetch)", () => {
     expect(err.message).toMatch(/System User/);
   });
 
+  it("a write that gets no answer is 'outcome unknown' (never auto-resent); a refused connection is 'not sent' (safe to retry)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); }));
+    const timedOut = await graphPost("t", "PAGE/messages", { message: "x" }).catch((e) => e);
+    expect(timedOut).toBeInstanceOf(ConnectorError);
+    expect(timedOut.kind).toBe("InvalidRequest"); // kind unchanged: the queue still does not auto-retry writes
+    expect(timedOut.outcomeUnknown).toBe(true);
+    expect(timedOut.requestNotSent).toBeUndefined();
+    vi.stubGlobal("fetch", vi.fn(async () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } }); }));
+    const refused = await graphPost("t", "PAGE/messages", { message: "x" }).catch((e) => e);
+    expect(refused.requestNotSent).toBe(true);
+    expect(refused.outcomeUnknown).toBeUndefined();
+    // A real answer (HTTP error) is neither
+    vi.stubGlobal("fetch", vi.fn(async () => reply({ error: { message: "(#10) Permission", code: 10 } }, 403)));
+    const denied = await graphPost("t", "PAGE/messages", { message: "x" }).catch((e) => e);
+    expect(denied.outcomeUnknown).toBeUndefined();
+    expect(denied.requestNotSent).toBeUndefined();
+  });
+
   it("sends the token in the Authorization header, never in the URL", async () => {
     const f = vi.fn(async () => reply({ id: "1" }));
     vi.stubGlobal("fetch", f);
@@ -118,6 +136,42 @@ describe("Graph transport + boost chain (mocked fetch)", () => {
     const err: any = await createBoost("t", { ...spec, objective: "engagement" }).catch((e) => e);
     expect(err.step).toBe("creative");
     expect(err.created).toEqual({ campaignId: "1", adsetId: "2" });
+  });
+
+  it("1:3:3 structure: 1 campaign, 3 creatives (one per post, shared), 3 adsets each with 3 ads — all PAUSED", async () => {
+    const calls: { edge: string; body: URLSearchParams }[] = [];
+    let n = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ edge: String(url).split("/").pop()!, body: init.body as URLSearchParams });
+      return reply({ id: String(++n) });
+    }));
+    const audience = templateTargeting({});
+    const c = await createCampaignStructure("t", {
+      adAccountId: "act_9", pageId: "100", campaignName: "Test", minorFactor: 1, objective: "messages",
+      postIds: ["100_1", "100_2", "100_3"], adsets: [0, 1, 2].map(() => ({ dailyBudget: 300_000, targeting: audience })),
+    });
+    const count = (edge: string) => calls.filter((x) => x.edge === edge).length;
+    expect([count("campaigns"), count("adcreatives"), count("adsets"), count("ads")]).toEqual([1, 3, 3, 9]);
+    expect(c.creativeIds).toHaveLength(3);
+    expect(c.adsets.map((a) => a.ads.length)).toEqual([3, 3, 3]);
+    // every adset reuses the same 3 creatives, in post order
+    expect(c.adsets.every((a) => a.ads.map((ad) => ad.creativeId).join() === c.creativeIds.join())).toBe(true);
+    expect(calls.filter((x) => x.edge === "adsets").every((x) => x.body.get("daily_budget") === "300000" && x.body.get("status") === "PAUSED")).toBe(true);
+    expect(calls.filter((x) => x.edge === "ads").every((x) => x.body.get("status") === "PAUSED")).toBe(true);
+  });
+
+  it("structure: a failing adset reports the campaign + every creative so all of it is cleaned up", async () => {
+    let n = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).endsWith("/adsets")) return reply({ error: { message: "bad", code: 100 } }, 400);
+      return reply({ id: String(++n) });
+    }));
+    const err: any = await createCampaignStructure("t", {
+      adAccountId: "act_9", pageId: "100", campaignName: "Test", minorFactor: 1, objective: "messages",
+      postIds: ["100_1", "100_2"], adsets: [{ dailyBudget: 100_000, targeting: templateTargeting({}) }],
+    }).catch((e) => e);
+    expect(err.step).toBe("adset");
+    expect(err.created).toEqual({ campaignId: "1", creativeIds: ["2", "3"] });
   });
 
   it("blocks a Chuyển đổi template without pixel BEFORE calling Facebook", async () => {

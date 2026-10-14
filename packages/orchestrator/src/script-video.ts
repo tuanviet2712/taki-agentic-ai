@@ -64,7 +64,7 @@ export type VideoPlan = {
 };
 
 /** Chọn skill + dựng đầu vào cho 1 kịch bản. Không chạy gì. */
-export function planVideoFromScript(bizId: string, contentId: string): VideoPlan {
+export function planVideoFromScript(bizId: string, contentId: string, opts: { footage?: boolean } = {}): VideoPlan {
   const ci = byId<Row>("content_item", contentId);
   if (!ci || ci.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy nội dung", 404);
   if (ci.kind !== "video_script") throw new AppError("NOT_SCRIPT", "Nội dung này không phải kịch bản video");
@@ -110,18 +110,11 @@ export function planVideoFromScript(bizId: string, contentId: string): VideoPlan
     tool = "auto-video";
     reason = "Kịch bản dạng minh hoạ (không cần người thật trước camera) → Video tự động: cảnh + giọng đọc + phụ đề, không tốn tín dụng Flow.";
     const st = videoAiStatus().moneyprinter;
-    if (!st.pexels.length && !st.pixabay.length) missing.push("Khóa Pexels/Pixabay (miễn phí) hoặc clip của Sếp");
-    input = { ...base, tool: "auto-video", product: "", voice: "", brief: voiceAll.slice(0, 6000), images: [], video: { source: "pexels", scriptReady: true, aspect: "9:16", voiceName: "vi-VN-NamMinhNeural-Male", bgm: "random" } } as CreativeInput;
+    // Có video thô của Sếp (tải lên) thì dựng từ chính video đó, không cần kho Pexels/Pixabay.
+    if (!opts.footage && !st.pexels.length && !st.pixabay.length) missing.push("Video thô của Sếp (tải lên để AI dựng) hoặc khóa Pexels/Pixabay (miễn phí)");
+    input = { ...base, tool: "auto-video", product: "", voice: "", brief: voiceAll.slice(0, 6000), images: [], video: { source: !st.pexels.length && st.pixabay.length ? "pixabay" : "pexels", scriptReady: true, aspect: "9:16", voiceName: "vi-VN-NamMinhNeural-Male", bgm: "random" } } as CreativeInput;
   }
-  // Kịch bản chưa hợp làm video ngắn → nói rõ, không chạy (Flow tốn tín dụng).
-  if (realSec > 120) missing.unshift(`Kịch bản dài ${realSec} giây (quá 2 phút của video ngắn) — rút gọn kịch bản trước`);
-  const pending = String(ci.body).match(/[^.\n]{0,60}⚠️[^.\n]{0,40}|ghi chú nội bộ[^)\n]{0,80}/gi);
-  // Số liệu công bố (số doanh nghiệp / học viên / năm) khi DNA còn ghi "Bộ số liệu công bố" chờ chốt → không đưa vào video.
-  const statsPending = ((activeDna(bizId)?.data?.pendingConfirmations ?? []) as unknown[]).some((x) => /số liệu công bố/i.test(String(x)));
-  const spoken = s.scenes.map((x) => `${x.voice} ${x.onScreen}`).join(" ");
-  const stat = statsPending ? /\d[\d.,]*\s*(k|nghìn|ngàn)?\s*\+?\s*(doanh nghiệp|học viên|năm kinh nghiệm)/i.exec(spoken) : null;
-  if (stat) missing.push(`Kịch bản dùng số liệu công bố đang chờ chốt trong DNA ("${stat[0].trim()}") — xác nhận số hoặc bỏ câu đó trước khi làm video`);
-  if (pending) missing.push(`Kịch bản còn ý đang chờ xác nhận (${pending[0].replace(/\s+/g, " ").trim().slice(0, 90)}) — xác nhận hoặc bỏ ý đó trước khi làm video`);
+  missing.push(...scriptBlockers(bizId, ci, s));
   const job = q.get<Row>("SELECT id, status, step FROM creative_job WHERE biz_id = ? AND source_content_id = ? AND status NOT IN ('cancelled','failed','blocked') ORDER BY created_at DESC LIMIT 1", bizId, ci.id);
   const def = FLOW_TOOLS[tool];
   return {
@@ -131,6 +124,22 @@ export function planVideoFromScript(bizId: string, contentId: string): VideoPlan
   };
 }
 
+/** Lý do NỘI DUNG khiến kịch bản chưa được làm video (áp cho mọi cách làm video, kể cả làm thủ công trên Flow). */
+export function scriptBlockers(bizId: string, ci: Row, s: ParsedScript): string[] {
+  const out: string[] = [];
+  const realSec = s.scenes.at(-1)!.to;
+  // Kịch bản chưa hợp làm video ngắn → nói rõ, không chạy (Flow tốn tín dụng).
+  if (realSec > 120) out.push(`Kịch bản dài ${realSec} giây (quá 2 phút của video ngắn) — rút gọn kịch bản trước`);
+  const pending = String(ci.body).match(/[^.\n]{0,60}⚠️[^.\n]{0,40}|ghi chú nội bộ[^)\n]{0,80}/gi);
+  // Số liệu công bố (số doanh nghiệp / học viên / năm) khi DNA còn ghi "Bộ số liệu công bố" chờ chốt → không đưa vào video.
+  const statsPending = ((activeDna(bizId)?.data?.pendingConfirmations ?? []) as unknown[]).some((x) => /số liệu công bố/i.test(String(x)));
+  const spoken = s.scenes.map((x) => `${x.voice} ${x.onScreen}`).join(" ");
+  const stat = statsPending ? /\d[\d.,]*\s*(k|nghìn|ngàn)?\s*\+?\s*(doanh nghiệp|học viên|năm kinh nghiệm)/i.exec(spoken) : null;
+  if (stat) out.push(`Kịch bản dùng số liệu công bố đang chờ chốt trong DNA ("${stat[0].trim()}") — xác nhận số hoặc bỏ câu đó trước khi làm video`);
+  if (pending) out.push(`Kịch bản còn ý đang chờ xác nhận (${pending[0].replace(/\s+/g, " ").trim().slice(0, 90)}) — xác nhận hoặc bỏ ý đó trước khi làm video`);
+  return out;
+}
+
 /** Kịch bản đã duyệt (chưa thành video) + kế hoạch video cho từng cái. */
 export function scriptsAwaitingVideo(bizId: string) {
   return q.all<Row>("SELECT id FROM content_item WHERE biz_id = ? AND kind = 'video_script' AND status IN ('approved','manual_publish','scheduled') ORDER BY updated_at DESC", bizId)
@@ -138,10 +147,24 @@ export function scriptsAwaitingVideo(bizId: string) {
 }
 
 /** Sếp bấm "Tạo video": chạy đúng skill đã chọn (Flow tốn tín dụng → chỉ chạy khi Sếp bấm). Không chạy trùng. */
-export function makeVideoFromScript(bizId: string, contentId: string, actor: string, override?: Partial<CreativeInput>) {
-  const plan = planVideoFromScript(bizId, contentId);
+export function makeVideoFromScript(bizId: string, contentId: string, actor: string, override?: Partial<CreativeInput>, footage?: { materials: string[]; style?: "dynamic" | "smooth" | "clean"; music?: "auto" | "none" }) {
+  const plan = planVideoFromScript(bizId, contentId, { footage: Boolean(footage?.materials.length) });
+  const callerOverride = override; // chỉ lời gọi tường minh mới được bỏ qua kiểm tra thiếu gì; video thô vẫn phải qua kiểm tra số liệu chờ xác nhận
+  if (footage?.materials.length) {
+    // Kịch bản "minh hoạ" không làm được bằng Flow: dựng từ video thô Sếp tải lên (AI chọn đoạn, cắt cảnh, chuyển cảnh, zoom, chữ động, hiệu ứng âm thanh).
+    if (plan.tool !== "auto-video") throw new AppError("NOT_FOOTAGE_SCRIPT", "Kịch bản này có tool riêng (người thật / review sản phẩm) — chỉ kịch bản minh hoạ mới dựng từ video thô");
+    const ci = byId<Row>("content_item", contentId)!;
+    const parsed = parseVideoScript(ci.body)!;
+    override = {
+      ...(override ?? {}), tool: "edit-source",
+      hookTitle: (parsed.hooks[0] ?? plan.input.hookTitle ?? "").slice(0, 120), // câu mở đầu của kịch bản (chữ cảnh 1 đã hiện ở tiêu đề cảnh, tránh lặp)
+      script: { scenes: parsed.scenes.map((x) => ({ from: x.from, to: x.to, voice: x.voice, visual: x.visual, onScreen: x.onScreen })) },
+      video: { source: "local", materials: footage.materials, aspect: "9:16", style: footage.style ?? "dynamic", music: footage.music ?? "auto", scriptReady: true },
+    };
+    plan.missing = plan.missing.filter((m) => !/Pexels|Pixabay|video thô/i.test(m));
+  }
   if (plan.job && ["queued", "running", "done"].includes(plan.job.status)) return { already: true, jobId: plan.job.id, status: plan.job.status };
-  if (plan.missing.length && !override) throw new AppError("MISSING_INPUT", `Chưa đủ để tạo video: ${plan.missing.join(", ")} — mở trang Sản xuất video để bổ sung`);
+  if (plan.missing.length && !callerOverride) throw new AppError("MISSING_INPUT", `Chưa đủ để tạo video: ${plan.missing.join(", ")} — mở trang Sản xuất video để bổ sung`);
   const job = startVideoJob(bizId, { ...plan.input, ...(override ?? {}), sourceContentId: contentId }, actor) as Row;
   return { already: false, jobId: job.id, status: job.status, tool: plan.toolLabel };
 }

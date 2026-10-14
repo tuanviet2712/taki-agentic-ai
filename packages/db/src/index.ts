@@ -11,6 +11,7 @@ const JSON_COLS = new Set([
   "payload", "metrics", "components", "reasons", "definition", "skipped", "summary", "params", "before", "after",
   "meta", "analysis", "evidence", "applies_when", "diff", "lesson_ids", "report", "permissions", "result",
   "state", "questions", "answers", "decision", "refs", "skills", "log", "history", "decode",
+  "platform_state",
 ]);
 
 let _db: DatabaseSync | null = null;
@@ -26,10 +27,14 @@ export function openDb(path = process.env.DB_PATH ?? "data/dotaka.db"): Database
 }
 /** Forward-only column additions for databases created by an earlier version (expand, never contract). */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
+  ["assistant_thread", "ai_provider", "TEXT"],
+  ["assistant_thread", "ai_account_id", "TEXT"],
   ["task_run", "skills", "TEXT"],
   ["publish_job", "mode", "TEXT NOT NULL DEFAULT 'publish'"],
   ["publish_job", "asset_id", "TEXT"],
   ["publish_job", "draft_url", "TEXT"],
+  // Trạng thái nền tảng của lượt đăng (mã thật đã nhận, số lần thử lại khi bị giới hạn tần suất…) — xoá khi "Đăng lại".
+  ["publish_job", "platform_state", "TEXT NOT NULL DEFAULT '{}'"],
   ["content_item", "asset_id", "TEXT"],
   // Connections hub (live platform accounts, whitelist, automation configs)
   ["connection", "config", "TEXT NOT NULL DEFAULT '{}'"],
@@ -66,6 +71,11 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ["post", "meta", "TEXT NOT NULL DEFAULT '{}'"],
   // Lái tự động: khóa chống trùng + nền tảng/khóa học/ý tưởng Trinh sát của chiến dịch tự tạo
   ["goal", "params", "TEXT NOT NULL DEFAULT '{}'"],
+  // Đơn chốt từ chat: thông tin giao hàng (SĐT mã hoá) + trạng thái đẩy sang Pancake POS (meta.shipping / meta.pancake / meta.approvalId);
+  // external_id = "pancake:<mã đơn Pancake>"; product_key = key sản phẩm trong DNA
+  ["orders", "meta", "TEXT NOT NULL DEFAULT '{}'"],
+  ["orders", "external_id", "TEXT"],
+  ["orders", "product_key", "TEXT"],
 ];
 function migrate(d: DatabaseSync) {
   for (const [table, column, ddl] of MIGRATIONS) {
@@ -78,6 +88,8 @@ function migrate(d: DatabaseSync) {
     }
   }
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS post_comment_external ON post_comment (post_id, external_id) WHERE external_id IS NOT NULL");
+  // Một đơn Pancake chỉ ứng với một đơn nội bộ (NULL không bao giờ coi là trùng).
+  d.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_pancake_external ON orders (biz_id, external_id) WHERE external_id IS NOT NULL");
 }
 
 export function db(): DatabaseSync {
@@ -210,6 +222,15 @@ export interface BizSettings {
   postScoreThreshold: number;
   attributionMinConfidence: number;
   backupPerson?: string;
+  /** Bot chat: vision = bot xem ảnh khách gửi (mặc định bật; tắt → ảnh chỉ lưu cho nhân viên). Cần thêm bot Messenger đang bật. */
+  /** Bài viết: autoImage = tự tạo ảnh đi kèm mỗi bài (mặc định bật; ảnh do kết nối AI đang chọn tạo: Claude thiết kế / ChatGPT tạo ảnh). */
+  content?: { autoImage?: boolean };
+  chat?: { vision?: boolean; /** Bot tự chốt đơn: khách rõ ý mua + có SĐT -> đơn nháp [ĐỎ] chờ Sếp duyệt (mặc định bật; false = chuyển người như cũ). */ closeOrders?: boolean };
+  /**
+   * Tự động phê duyệt (trang Duyệt & Phê duyệt): Sếp bật tay; bài / kịch bản / bài SEO / video mới vào hộp Duyệt mà review "Đạt" và điểm ≥ minScore
+   * thì được duyệt luôn và đi xuống phần đăng bài. Mặc định TẮT. Không bao giờ áp cho ads / ngân sách / tin gửi khách / đơn hàng / đề xuất học.
+   */
+  autoApprove?: { enabled: boolean; minScore: number };
 }
 export const DEFAULT_SETTINGS: BizSettings = {
   killSwitch: { publish: false, ads: false, chat: false, all: false },

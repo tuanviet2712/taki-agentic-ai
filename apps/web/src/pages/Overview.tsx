@@ -3,7 +3,7 @@ import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis
 import { ArrowRight, BarChart3, Eye, MessageSquareText, MousePointerClick, ShieldCheck, Sparkles } from "lucide-react";
 import { api, useApi } from "../lib/api";
 import { AGENT_LABEL, CONV_STATE, LEAD, TASK_STATUS, num, timeAgo, vnd } from "../lib/format";
-import { Avatar, Badge, Button, Card, Empty, Loading, PlatformIcon, Progress, Stat, platformName, useToast } from "../components/ui";
+import { Avatar, Badge, cx, Button, Card, Empty, Loading, PlatformIcon, Progress, Stat, platformName, useToast } from "../components/ui";
 
 const STAGE_COLORS = ["#60a5fa", "#3b82f6", "#22c55e", "#f59e0b", "#f97316", "#f43f5e", "#a78bfa", "#6366f1", "#8b5cf6"];
 const SOURCE_COLORS: Record<string, string> = { facebook: "#2563eb", tiktok: "#f43f5e", zalo: "#10b981", google_search: "#f59e0b", friend_referral: "#8b5cf6", event_or_seminar: "#06b6d4", khác: "#cbd5e1" };
@@ -26,12 +26,12 @@ export function Overview() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Xin chào, {sys?.operator ?? "CEO"}! 👋</h1>
-          <p className="mt-1 text-muted">Đội AI Agent đang vận hành marketing và bán hàng cho {sys?.biz?.name ?? "doanh nghiệp"} hôm nay.</p>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between md:gap-6">
+        <div className="min-w-0">
+          <h1 className="text-[26px] font-bold leading-tight tracking-tight">Xin chào, {sys?.operator ?? "CEO"}! 👋</h1>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted">Đội AI Agent đang vận hành marketing và bán hàng cho {sys?.biz?.name ?? "doanh nghiệp"} hôm nay.</p>
         </div>
-        <Card className="md:w-[420px]" bodyClass="p-4">
+        <Card className="shrink-0 md:w-[400px]" bodyClass="p-4">
           {d.goal.yearTarget ? (
             <>
               <div className="mb-2 flex items-center justify-between text-sm"><span className="font-medium">Tiến độ mục tiêu năm</span><span className="text-muted">run-rate {vnd(d.goal.runRate)} / {vnd(d.goal.yearTarget)}</span></div>
@@ -47,26 +47,37 @@ export function Overview() {
         </Card>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat icon={BarChart3} tone="blue" label="Tổng doanh thu (7 ngày)" value={vnd(d.kpis.revenue.value)} delta={d.kpis.revenue.delta} />
         <Stat icon={MessageSquareText} tone="green" label="Khách hàng mới" value={num(d.kpis.newCustomers.value)} delta={d.kpis.newCustomers.delta} />
         <Stat icon={Eye} tone="violet" label="Lượt tiếp cận" value={num(d.kpis.reach.value)} delta={d.kpis.reach.delta} />
         <Stat icon={MousePointerClick} tone="amber" label="Chi phí quảng cáo" value={vnd(d.kpis.adSpend.value)} delta={d.kpis.adSpend.delta} invert />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+      <div className="grid gap-6 wide:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           <Card title="Quy trình 9 khâu đang chạy" action={<Link to="/agents" className="flex items-center gap-1 text-sm text-blue-600">Xem chi tiết <ArrowRight className="h-4 w-4" /></Link>}>
-            <div className="grid grid-cols-3 gap-y-5 sm:grid-cols-5 lg:grid-cols-9">
-              {d.stages.map((s: any, i: number) => (
-                <div key={s.key} className="relative flex flex-col items-center text-center">
-                  {i < d.stages.length - 1 && <div className="absolute left-1/2 top-4 hidden h-0.5 w-full lg:block" style={{ background: `linear-gradient(90deg, ${STAGE_COLORS[i]}, ${STAGE_COLORS[i + 1]})`, opacity: 0.4 }} />}
-                  <span className="relative z-10 grid h-8 w-8 place-items-center rounded-full text-sm font-semibold text-white ring-4 ring-card" style={{ background: STAGE_COLORS[i] }}>{s.n}</span>
-                  <p className="mt-2 px-1 text-xs font-medium leading-tight" style={{ color: STAGE_COLORS[i] }}>{s.label}</p>
-                  <p className="mt-1 text-[11px] text-muted">{s.count} tác vụ</p>
-                </div>
-              ))}
-            </div>
+            {(() => {
+              const max = Math.max(1, ...d.stages.map((x: any) => Number(x.count) || 0));
+              return (
+                <ol className="grid gap-2 sm:grid-cols-3">
+                  {d.stages.map((s: any, i: number) => {
+                    const c = STAGE_COLORS[i % STAGE_COLORS.length];
+                    const n = Number(s.count) || 0;
+                    return (
+                      <li key={s.key} className={cx("relative overflow-hidden rounded-xl border border-line bg-card px-2.5 pb-3 pt-2.5 transition-colors hover:bg-soft", n === 0 && "opacity-70")}>
+                        <div className="flex items-center gap-2">
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white" style={{ background: c }}>{s.n}</span>
+                          <p className="line-clamp-2 min-w-0 flex-1 text-[12px] font-medium leading-[1.25] text-ink" title={s.label}>{s.label}</p>
+                          <p className="shrink-0 text-right leading-none"><span className="block text-lg font-bold tabular-nums text-ink">{n}</span><span className="mt-0.5 block text-[9px] text-muted">tác vụ</span></p>
+                        </div>
+                        <span className="absolute inset-x-0 bottom-0 h-[3px] bg-soft" aria-hidden><span className="block h-full rounded-r-full" style={{ width: `${(n / max) * 100}%`, background: c }} /></span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              );
+            })()}
           </Card>
 
           <Card title="Tác vụ đang chạy" action={<Link to="/agents" className="flex items-center gap-1 text-sm text-blue-600">Xem tất cả <ArrowRight className="h-4 w-4" /></Link>}>
@@ -75,9 +86,8 @@ export function Overview() {
                 {d.runningTasks.map((t: any) => {
                   const st = TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const };
                   return (
-                    <div key={t.id} className="grid grid-cols-[1fr_auto] items-center gap-3 py-3 md:grid-cols-[1fr_140px_120px_160px]">
+                    <div key={t.id} className="grid grid-cols-[1fr_auto] items-center gap-3 py-3 md:grid-cols-[minmax(0,1fr)_auto_150px]">
                       <div className="min-w-0"><p className="truncate text-sm font-medium">{t.title}</p><p className="text-xs text-muted">{AGENT_LABEL[t.agent_key]}</p></div>
-                      <p className="hidden text-sm text-muted md:block">{AGENT_LABEL[t.agent_key]}</p>
                       <Badge tone={st.tone}>{st.label}</Badge>
                       <div className="hidden items-center gap-2 md:flex"><Progress value={(t.progress ?? 0) * 100} /><span className="w-10 text-right text-xs text-muted">{Math.round((t.progress ?? 0) * 100)}%</span></div>
                     </div>

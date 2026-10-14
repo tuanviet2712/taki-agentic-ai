@@ -1,0 +1,8 @@
+interface:
+  display_name: "Viral Video Editor"
+  short_description: "Dựng video ngắn cuốn hút từ footage và lời thoại"
+  brand_color: "#EC4899"
+  default_prompt: "Use $viral-video-editor to turn my footage into a polished short-form video with a strong hook, purposeful effects, readable captions, and sound design."
+
+policy:
+  allow_implicit_invocation: true

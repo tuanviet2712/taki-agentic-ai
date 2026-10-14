@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:BVP;src:url('FONT_MEDIUM') format('truetype');font-weight:500}
+@font-face{font-family:BVP;src:url('FONT_SEMIBOLD') format('truetype');font-weight:600}
+@font-face{font-family:BVP;src:url('FONT_BOLD') format('truetype');font-weight:700}
+@font-face{font-family:BVP;src:url('FONT_EXTRABOLD') format('truetype');font-weight:800}
+
+:root{
+  --gold:#F7D33B; --gold-bright:#FFF160; --gold-dim:#C9A93A;
+  --ink:#0F0E0C; --card:#1F1C13; --line:rgba(255,241,150,.14);
+  --white:#F4F2E5; --danger:#FF4D3D;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:720px;height:1280px;background:transparent;overflow:hidden}
+body{font-family:BVP,sans-serif;-webkit-font-smoothing:antialiased}
+#stage{position:absolute;inset:0}
+.el{position:absolute;opacity:0;will-change:transform,opacity}
+
+/* ---------- TAG PILL ---------- */
+.tag{display:inline-flex;align-items:center;gap:9px;padding:9px 20px;border:1.5px solid var(--gold);
+  border-radius:999px;background:rgba(247,211,59,.07);color:var(--gold-bright);
+  font-weight:800;font-size:18px;letter-spacing:.13em;text-transform:uppercase;white-space:nowrap;
+  box-shadow:0 0 26px rgba(247,211,59,.16)}
+.tag i{width:8px;height:8px;border-radius:50%;background:var(--gold);display:block}
+
+/* ---------- CHIP ---------- */
+.chiprow{display:flex;gap:10px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:14px;
+  background:var(--card);border:1px solid var(--line);color:var(--white);
+  font-weight:600;font-size:20px;white-space:nowrap}
+.chip.q{padding-right:12px}
+.chip .qm{color:var(--gold);font-weight:800;margin-left:6px}
+
+/* ---------- CARD ROWS ---------- */
+.rows{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;gap:14px;height:62px;padding:0 18px;border-radius:18px;
+  background:var(--card);border:1px solid var(--line);color:var(--white);
+  font-weight:600;font-size:26px}
+.row .ic{width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,.06);
+  display:flex;align-items:center;justify-content:center;flex:0 0 38px}
+.row .ic svg{width:20px;height:20px;stroke:var(--gold);fill:none;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+.row.active{background:var(--gold);border-color:var(--gold);color:#0B0A08;
+  box-shadow:0 0 34px rgba(247,211,59,.34)}
+.row.active .ic{background:rgba(0,0,0,.16)}
+.row.active .ic svg{stroke:#0B0A08}
+.row .tail{margin-left:auto;display:flex;align-items:center;gap:10px}
+.row .bar{width:96px;height:4px;border-radius:2px;background:rgba(0,0,0,.35)}
+
+/* ---------- GOLD PILL ---------- */
+.gpill{display:inline-flex;align-items:center;gap:10px;padding:11px 22px;border-radius:999px;
+  background:var(--gold);color:#0B0A08;font-weight:800;font-size:22px;white-space:nowrap;
+  box-shadow:0 0 34px rgba(247,211,59,.34)}
+.gpill.ghost{background:rgba(247,211,59,.1);color:var(--gold-bright);border:1.5px solid var(--gold);box-shadow:none}
+.gpill small{display:block;font-weight:500;font-size:13px;opacity:.7;letter-spacing:.04em}
+
+/* ---------- BIG TYPE ---------- */
+.bigtype{text-align:center;width:100%}
+.bigtype .kick{color:var(--gold);font-weight:800;font-size:19px;letter-spacing:.24em;text-transform:uppercase;margin-bottom:4px}
+.bigtype .huge{color:var(--gold);font-weight:800;font-size:96px;line-height:1;letter-spacing:-.02em;
+  text-shadow:0 0 42px rgba(247,211,59,.45)}
+.bigtype .sub{color:var(--white);font-weight:600;font-size:26px;margin-top:8px;opacity:.92}
+
+/* ---------- TITLE LOCKUP ---------- */
+.lockup{text-align:center;width:100%}
+.lockup .l1{color:var(--gold);font-weight:800;font-size:20px;letter-spacing:.3em;text-transform:uppercase}
+.lockup .l2{color:var(--white);font-weight:800;font-size:56px;letter-spacing:.02em;line-height:1.1;margin-top:6px}
+.lockup .l3{color:var(--gold);font-weight:800;font-size:62px;line-height:1.05;letter-spacing:.01em;
+  text-shadow:0 0 44px rgba(247,211,59,.5)}
+.lockup .rule{height:5px;border-radius:3px;background:var(--gold);margin:10px auto 0;box-shadow:0 0 26px rgba(247,211,59,.6)}
+
+/* ---------- STEPS ---------- */
+.steps{display:flex;align-items:flex-start;justify-content:space-between;width:100%;position:relative}
+.steps .track{position:absolute;top:19px;left:12%;right:12%;height:2px;background:rgba(247,211,59,.3)}
+.steps .st{display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2;flex:1}
+.steps .num{width:38px;height:38px;border-radius:50%;background:var(--gold);color:#0B0A08;
+  font-weight:800;font-size:21px;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 24px rgba(247,211,59,.42)}
+.steps .lb{color:var(--white);font-weight:600;font-size:17px;opacity:.85;text-align:center}
+
+/* ---------- CHART ---------- */
+.chart{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:16px 18px}
+.chart .cl{color:var(--white);font-weight:600;font-size:22px;margin-bottom:6px}
+.chart .ck{color:var(--gold);font-weight:800;font-size:15px;letter-spacing:.18em;text-transform:uppercase;margin-bottom:2px}
+.chart svg{display:block;width:100%}
+.chart path{fill:none;stroke:var(--gold);stroke-width:3.4;stroke-linecap:round;stroke-linejoin:round;
+  filter:drop-shadow(0 0 10px rgba(247,211,59,.55))}
+
+/* ---------- GRID FILL ---------- */
+.gridfill{display:flex;align-items:center;gap:16px}
+.gridfill .cnt{color:var(--white);font-weight:800;font-size:40px;line-height:1;min-width:150px}
+.gridfill .cnt em{display:block;font-style:normal;color:var(--gold);font-weight:800;font-size:14px;
+  letter-spacing:.2em;text-transform:uppercase;margin-bottom:4px}
+.gridfill .cells{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;flex:1}
+.gridfill .cell{aspect-ratio:1;border-radius:6px;background:rgba(255,255,255,.06);transition:none}
+.gridfill .cell.on{background:var(--gold);box-shadow:0 0 12px rgba(247,211,59,.5)}
+
+/* ---------- MYTH / STRIKE ---------- */
+.myth{position:relative;display:inline-block;padding:12px 20px;border-radius:16px;
+  background:var(--card);border:1px solid var(--line);color:var(--white);font-weight:600;font-size:24px;white-space:nowrap}
+.myth .strike{position:absolute;left:16px;top:50%;height:3px;width:0;background:var(--danger);
+  border-radius:2px;box-shadow:0 0 14px rgba(255,77,61,.8)}
+.myth.dead{color:rgba(244,242,229,.42)}
+
+/* ---------- CTA ---------- */
+.cta{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%}
+.cta .btn{display:inline-flex;align-items:center;gap:12px;padding:16px 40px;border-radius:999px;
+  background:var(--gold);color:#0B0A08;font-weight:800;font-size:31px;letter-spacing:.02em;
+  box-shadow:0 0 48px rgba(247,211,59,.42)}
+.cta .btn svg{width:24px;height:24px;stroke:#0B0A08;fill:none;stroke-width:2.2;stroke-linecap:round}
+.cta .sub{color:var(--gold-bright);font-weight:500;font-size:18px;opacity:.85}
+
+/* ---------- NOTE ---------- */
+.note{color:var(--white);font-weight:600;font-size:22px;opacity:.85;text-align:center;width:100%}
+
+/* ---------- FLOW ---------- */
+.flow{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
+.flow .ar{width:22px;height:2px;background:rgba(247,211,59,.5);position:relative;flex:0 0 22px}
+.flow .ar:after{content:"";position:absolute;right:0;top:-3px;border-left:6px solid rgba(247,211,59,.7);
+  border-top:4px solid transparent;border-bottom:4px solid transparent}
+
+/* ---------- CAPTION ---------- */
+#cap{position:absolute;left:0;right:0;bottom:190px;display:flex;justify-content:center;opacity:0}
+#cap .plate{max-width:610px;padding:12px 26px;border-radius:16px;background:rgba(9,9,12,.60);
+  color:var(--white);font-weight:700;font-size:44px;line-height:1.24;text-align:center;
+  text-shadow:0 2px 12px rgba(0,0,0,.6)}
+#cap b{color:var(--gold);font-weight:700}
+</style></head>
+<body><div id="stage"></div><div id="cap"><div class="plate"></div></div>
+<script>
+const S = window.STORY || {els:[], caps:[]};
+const stage = document.getElementById('stage');
+const capBox = document.getElementById('cap'), capPlate = capBox.firstElementChild;
+
+const ICONS = {
+ doc:'M6 3h8l4 4v14H6z M14 3v4h4', img:'M3 5h18v14H3z M3 16l5-5 4 4 3-3 6 6',
+ vid:'M3 6h13v12H3z M16 10l5-3v10l-5-3', chart:'M4 19h16 M6 15l4-5 3 3 5-7',
+ clock:'M12 3a9 9 0 100 18 9 9 0 000-18 M12 7v5l3 2', bolt:'M13 2L4 14h6l-1 8 9-12h-6z',
+ user:'M12 12a4 4 0 100-8 4 4 0 000 8 M4 21c0-4 4-6 8-6s8 2 8 6',
+ shop:'M4 8h16l-1 12H5z M8 8V6a4 4 0 018 0v2', link:'M9 15l6-6 M10 6h5a4 4 0 010 8h-2 M14 18H9a4 4 0 010-8h2',
+ check:'M4 12l5 5L20 6', folder:'M3 7h6l2 3h10v10H3z', phone:'M8 2h8v20H8z M11 19h2',
+ laptop:'M4 5h16v11H4z M2 19h20', spark:'M12 3v6 M12 15v6 M3 12h6 M15 12h6 M6 6l3 3 M15 15l3 3 M18 6l-3 3 M9 15l-3 3',
+ gear:'M12 9a3 3 0 100 6 3 3 0 000-6 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M19 5l-2 2 M7 17l-2 2'
+};
+const svg = k => `<svg viewBox="0 0 24 24"><path d="${ICONS[k]||ICONS.doc}"/></svg>`;
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+// |word| -> gold
+const hl = s => esc(s).replace(/\|([^|]+)\|/g,'<b>$1</b>');
+
+function box(e){
+  const d = document.createElement('div');
+  d.className = 'el';
+  const w = (e.w===undefined) ? 584 : e.w;
+  d.style.width = (w==='auto') ? 'auto' : w+'px';
+  d.style.top = (e.y||0)+'px';
+  if(e.x==='center'||e.x===undefined){ d.style.left='50%'; d._cx=true; }
+  else { d.style.left = e.x+'px'; }
+  d.style.textAlign = e.align||'left';
+  return d;
+}
+
+function build(e,i){
+  const d = box(e); const p = e; let h='';
+  switch(e.module){
+   case 'tag':   h = `<span class="tag"><i></i>${esc(p.text)}</span>`; break;
+   case 'note':  h = `<div class="note">${hl(p.text)}</div>`; break;
+   case 'chips': h = `<div class="chiprow">${p.items.map(t=>`<span class="chip stg">${esc(t)}</span>`).join('')}</div>`; break;
+   case 'qchips':h = `<div class="chiprow">${p.items.map(t=>`<span class="chip q stg">${esc(t)}<span class="qm">?</span></span>`).join('')}</div>`; break;
+   case 'iconrow':h= `<div class="chiprow">${p.items.map(k=>`<span class="chip stg" style="padding:9px">${svg(k)}</span>`).join('')}</div>`; break;
+   case 'rows':  h = `<div class="rows">${p.items.map((it,j)=>{
+        const o = (typeof it==='string')?{text:it}:it;
+        const act = (p.active===j)?' active':'';
+        const tail = act?`<span class="tail"><span class="bar"></span>${svg('chart')}</span>`:'';
+        return `<div class="row stg${act}"><span class="ic">${svg(o.icon||'doc')}</span>${esc(o.text)}${tail}</div>`;
+      }).join('')}</div>`; break;
+   case 'pill':  h = `<span class="gpill${p.ghost?' ghost':''}">${esc(p.text)}${p.sub?`<small>${esc(p.sub)}</small>`:''}</span>`; break;
+   case 'flow':  h = `<div class="flow">${p.items.map(t=>`<span class="gpill ghost stg">${esc(t)}</span>`).join('<span class="ar stg"></span>')}</div>`; break;
+   case 'bigtype':h= `<div class="bigtype">${p.kicker?`<div class="kick">${esc(p.kicker)}</div>`:''}<div class="huge">${esc(p.big)}</div>${p.sub?`<div class="sub">${hl(p.sub)}</div>`:''}</div>`; break;
+   case 'lockup':h = `<div class="lockup"><div class="l1">${esc(p.l1||'')}</div><div class="l2">${esc(p.l2||'')}</div><div class="l3">${esc(p.l3||'')}</div><div class="rule" style="width:${p.rule||210}px"></div></div>`; break;
+   case 'steps': h = `<div class="steps"><span class="track"></span>${p.items.map((t,j)=>`<span class="st stg"><span class="num">${j+1}</span><span class="lb">${esc(t)}</span></span>`).join('')}</div>`; break;
+   case 'chart': h = `<div class="chart"><div class="ck">${esc(p.kicker||'')}</div><div class="cl">${esc(p.label||'')}</div>
+        <svg viewBox="0 0 300 90" preserveAspectRatio="none" style="height:${p.h||90}px"><path d="${p.path||'M6 82 C60 78 90 62 130 56 C175 49 210 30 292 8'}"/></svg></div>`; break;
+   case 'gridfill': h = `<div class="gridfill"><div class="cnt"><em>${esc(p.kicker||'')}</em><span class="num">0</span> ${esc(p.unit||'')}</div>
+        <div class="cells">${Array.from({length:p.total||18},()=>'<span class="cell"></span>').join('')}</div></div>`; break;
+   case 'cardframe':
+        d.style.height = p.h+'px'; d.style.borderRadius = (p.r||40)+'px';
+        d.style.border = '1px solid rgba(255,241,150,.16)';
+        d.style.boxShadow = '0 0 70px rgba(247,211,59,.10), 0 18px 60px rgba(0,0,0,.55)';
+        d.style.pointerEvents='none'; h=''; break;
+   case 'myth':  h = `<span class="myth">${esc(p.text)}<span class="strike"></span></span>`; break;
+   case 'cta':   h = `<div class="cta"><span class="btn">${svg('link')}${esc(p.text||'ĐĂNG KÝ NGAY')}</span>${p.sub?`<span class="sub">${esc(p.sub)}</span>`:''}</div>`; break;
+   default:      h = `<div class="note">${hl(p.text||'')}</div>`;
+  }
+  d.innerHTML = h;
+  d._e = e; d._stg = d.querySelectorAll('.stg');
+  stage.appendChild(d);
+  return d;
+}
+
+const els = S.els.map(build);
+// caption nodes prepared as html strings
+const caps = (S.caps||[]).map(c=>({t:c.t, e:c.t+(c.d||1.0), html:hl(c.text)}));
+
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const easeOut = x => 1-Math.pow(1-x,3);
+
+function anim(node, t){
+  const e = node._e;
+  const tin = e.t, tout = (e.out===undefined? 1e9 : e.out);
+  const IN = e.dur_in===undefined?0.30:e.dur_in, OUT=0.22;
+  if(t < tin-0.001 || t > tout+OUT){ node.style.opacity=0; return; }
+  let a=1, dy=0;
+  if(t < tin+IN){ const k=easeOut(clamp((t-tin)/IN,0,1)); a=k; dy=(1-k)*16; }
+  else if(t > tout){ const k=clamp((t-tout)/OUT,0,1); a=1-k; dy=-k*8; }
+  node.style.opacity = a;
+  node.style.transform = (node._cx?'translateX(-50%) ':'')+`translateY(${dy.toFixed(2)}px)`;
+
+  // staggered children
+  const stg = node._stg, sg = e.stagger===undefined?0.55:e.stagger;
+  if(stg.length){
+    for(let i=0;i<stg.length;i++){
+      const st = tin + i*sg, k = easeOut(clamp((t-st)/0.26,0,1));
+      stg[i].style.opacity = k;
+      stg[i].style.transform = `translateY(${((1-k)*12).toFixed(2)}px) scale(${(0.94+0.06*k).toFixed(3)})`;
+    }
+  }
+  // module-specific continuous animation
+  if(e.module==='chart'){
+    const path = node.querySelector('path'), L = path.getTotalLength();
+    const k = easeOut(clamp((t-tin-0.15)/(e.draw||1.4),0,1));
+    path.style.strokeDasharray = L; path.style.strokeDashoffset = L*(1-k);
+  }
+  if(e.module==='gridfill'){
+    const k = clamp((t-tin-0.2)/(e.draw||1.6),0,1);
+    const cells = node.querySelectorAll('.cell'), n = Math.round(k*(e.total||18));
+    for(let i=0;i<cells.length;i++) cells[i].classList.toggle('on', i<n);
+    node.querySelector('.num').textContent = Math.round(k*(e.count||e.total||18));
+  }
+  if(e.module==='myth'){
+    const sa = e.strike_at===undefined? tin+1.2 : e.strike_at;
+    const k = easeOut(clamp((t-sa)/0.45,0,1));
+    const m = node.querySelector('.myth'), s = node.querySelector('.strike');
+    s.style.width = (k*(m.offsetWidth-32))+'px';
+    m.classList.toggle('dead', k>0.9);
+  }
+}
+
+window.setT = function(t){
+  for(const n of els) anim(n,t);
+  let cur=null;
+  for(const c of caps) if(t>=c.t && t<c.e) cur=c;
+  if(cur){ if(capPlate._h!==cur.html){ capPlate.innerHTML=cur.html; capPlate._h=cur.html; }
+    capBox.style.opacity = clamp((t-cur.t)/0.09,0,1); }
+  else capBox.style.opacity = 0;
+};
+window.setT(0);
+document.body.dataset.ready="1";
+</script></body></html>

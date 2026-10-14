@@ -69,6 +69,7 @@ export function AdsLayout({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => setMenu(null), [loc.pathname, loc.search]);
   const isActive = (it: Item) => (it.match ? it.match(loc.pathname, loc.search) : loc.pathname === it.to.split("?")[0]);
+  const activeGroup = ADS_NAV.find((g) => g.items.some(isActive)) ?? ADS_NAV[0];
   const hideBanner = () => { setBanner(false); try { localStorage.setItem("ads.banner", "off"); } catch { /* ignore */ } };
 
   return (
@@ -104,20 +105,27 @@ export function AdsLayout({ children }: { children: ReactNode }) {
           <AccountMenu profile={sys?.profile} canLogout={false} onLogout={() => {}}
             extra={(close) => <Link to="/" onClick={close} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-soft"><ArrowLeft className="h-4 w-4" />Về hệ thống Agentic AI</Link>} />
         </div>
-        <nav className="flex gap-0 overflow-x-auto px-2 pb-2 scroll-thin md:px-6">
-          {ADS_NAV.map((g, gi) => (
-            <div key={g.title} className={cx("shrink-0 px-1", gi > 0 && "ml-1 border-l border-line pl-2")}>
-              <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{g.title}</p>
-              <div className="flex gap-1">
-                {g.items.map((it) => (
-                  <NavLink key={it.to} to={it.to} className={() => cx("flex items-center gap-1.5 rounded-xl px-2 py-2 text-[13.5px] leading-tight transition",
-                    isActive(it) ? "bg-blue-500/10 font-semibold text-blue-700 dark:text-blue-300" : "text-ink/85 hover:bg-soft")}>
-                    <it.icon className="h-5 w-5 shrink-0" /><span className="max-w-[88px]">{it.label}</span>
-                  </NavLink>
-                ))}
-              </div>
-            </div>
-          ))}
+        {/* Two tiers: groups on top, the items of the current group underneath — every page stays one click away. */}
+        <nav aria-label="Điều hướng AI Agent Ads" className="px-3 md:px-8">
+          <div role="tablist" className="no-scrollbar flex gap-1 overflow-x-auto border-b border-line">
+            {ADS_NAV.map((g) => {
+              const on = g === activeGroup;
+              return (
+                <NavLink key={g.title} to={g.items[0].to} role="tab" aria-selected={on}
+                  className={cx("-mb-px whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors", on ? "border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300" : "border-transparent text-muted hover:text-ink")}>
+                  {g.title}
+                </NavLink>
+              );
+            })}
+          </div>
+          <div className="no-scrollbar flex gap-1.5 overflow-x-auto py-2.5">
+            {activeGroup.items.map((it) => (
+              <NavLink key={it.to} to={it.to} className={() => cx("flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[13px] transition-colors",
+                isActive(it) ? "bg-blue-500/10 font-semibold text-blue-700 dark:text-blue-300" : "text-ink/80 hover:bg-soft")}>
+                <it.icon className="h-4 w-4 shrink-0" /><span>{it.label}</span>
+              </NavLink>
+            ))}
+          </div>
         </nav>
       </header>
 
@@ -130,7 +138,7 @@ export function AdsLayout({ children }: { children: ReactNode }) {
             <button onClick={hideBanner} className="ml-auto rounded-lg p-1 text-muted hover:bg-white/50" aria-label="Ẩn thông báo"><X className="h-4 w-4" /></button>
           </div>
         )}
-        <div className="mx-auto max-w-[1480px] p-4 md:p-8">{children}</div>
+        <div className="mx-auto max-w-[1280px] p-4 pb-24 md:px-8 md:pb-24 md:pt-6">{children}</div>
       </main>
 
       <footer className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-t border-line bg-card px-4 py-3 text-sm md:px-8">

@@ -1,0 +1,97 @@
+{
+  "config": {
+    "width": 1080,
+    "height": 1350,
+    "scale": 2,
+    "theme": "ntk",
+    "brand_name": "NGUYEN TAT KIEM.COM",
+    "brand_tagline": "SCALE MENTOR"
+  },
+  "slides": [
+    {
+      "type": "cover",
+      "font_size": 58,
+      "lines": [
+        {
+          "text": "📄 Họp xong là có biên bản ngay,",
+          "accent": false
+        },
+        {
+          "text": "KHÔNG CẦN GHI CHÉP TAY.",
+          "accent": true
+        },
+        {
+          "text": "Gemini nghe – hiểu – tổng hợp nội dung cuộc họp rõ ràng, mạch lạc, còn chuẩn hơn cả thư ký.",
+          "accent": false,
+          "small": true
+        },
+        {
+          "text": "5 PROMPTS GIÚP GHI NHỚ, TÓM TẮT VÀ TỔNG HỢP HỌP TRONG VÀI PHÚT 👇👇👇",
+          "accent": true
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "number": "01",
+      "title": "GHI BIÊN BẢN HỌP CHUẨN CHỈNH",
+      "intro": "Hãy lắng nghe/đọc nội dung cuộc họp này và viết lại biên bản họp đầy đủ, gồm:",
+      "bullets": [
+        "Mục tiêu cuộc họp",
+        "Nội dung chính theo từng ý",
+        "Quyết định đã thống nhất",
+        "Việc cần làm tiếp theo"
+      ],
+      "outro": "Viết ngắn gọn, rõ ràng, dùng được để gửi cho sếp/đối tác."
+    },
+    {
+      "type": "card",
+      "number": "02",
+      "title": "TÓM TẮT HỌP CHO NGƯỜI KHÔNG THAM GIA",
+      "intro": "Từ nội dung cuộc họp này, hãy tóm tắt trong 1 trang để người không tham dự vẫn nắm được:",
+      "bullets": [
+        "Vấn đề chính",
+        "Các ý kiến quan trọng",
+        "Kết luận cuối cùng"
+      ],
+      "outro": "Trình bày dễ đọc, không lan man."
+    },
+    {
+      "type": "card",
+      "number": "03",
+      "title": "CHUYỂN NỘI DUNG HỌP THÀNH CHECKLIST HÀNH ĐỘNG",
+      "intro": "Hãy chuyển toàn bộ nội dung cuộc họp thành checklist công việc, mỗi việc gồm:",
+      "bullets": [
+        "Việc cần làm",
+        "Người phụ trách",
+        "Deadline",
+        "Mức độ ưu tiên"
+      ],
+      "outro": "Sắp xếp theo thứ tự quan trọng giảm dần."
+    },
+    {
+      "type": "card",
+      "number": "04",
+      "title": "RÚT RA QUYẾT ĐỊNH & RỦI RO SAU CUỘC HỌP",
+      "intro": "Từ cuộc họp này, hãy chỉ ra:",
+      "bullets": [
+        "Những quyết định đã được đưa ra",
+        "Những điểm còn chưa thống nhất",
+        "Rủi ro hoặc vấn đề có thể phát sinh",
+        "Gợi ý bước tiếp theo để tránh trì hoãn"
+      ]
+    },
+    {
+      "type": "card",
+      "number": "05",
+      "title": "TẠO BẢN GHI NHỚ HỌP CỰC NGẮN (MEETING RECAP)",
+      "intro": "Hãy viết bản ghi nhớ họp trong 5–7 dòng, tập trung vào:",
+      "bullets": [
+        "Cuộc họp bàn về vấn đề gì",
+        "Kết quả quan trọng nhất",
+        "Việc cần ưu tiên làm ngay sau họp"
+      ],
+      "outro": "Dùng để gửi nhanh qua email hoặc chat nội bộ."
+    }
+  ]
+}

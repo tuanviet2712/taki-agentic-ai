@@ -33,7 +33,7 @@ export function AdsSetup() {
   return (
     <div className="space-y-6">
       <PageHeader title="Thiết lập" subtitle="Giới hạn an toàn, mức tự chủ của Ads Agent, dừng khẩn cấp và kênh cảnh báo cho toàn bộ luồng quảng cáo." />
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card title={<span className="flex items-center gap-2"><Wallet className="h-4 w-4 text-blue-600" />Giới hạn an toàn</span>}
           action={<Button size="sm" variant="primary" icon={Save} loading={busy === "caps"} onClick={() => run("caps", () => api.put("settings", { caps: { maxTotalDailyAdBudget: Number(caps.maxTotalDailyAdBudget), maxAdsCreatedPerDay: Number(caps.maxAdsCreatedPerDay) } }), "Đã lưu giới hạn")}>Lưu</Button>}>
           <div className="grid gap-4 sm:grid-cols-2">

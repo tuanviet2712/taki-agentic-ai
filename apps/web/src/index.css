@@ -2,23 +2,97 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+  /* The sidebar eats viewport width, so multi-column page layouts engage later than Tailwind's defaults. */
+  --breakpoint-wide: 75rem;
+  --breakpoint-xl: 90rem;
+  --breakpoint-2xl: 106rem;
   --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+
+  /* Surfaces & text (values live in :root / .dark below so one class works in both themes) */
   --color-page: var(--page);
   --color-card: var(--card);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-soft: var(--soft);
+
+  /* Semantic colours: solid (icons, bars) / ink (text on page or tint) / soft (tinted background). */
+  --color-ok: var(--ok); --color-ok-ink: var(--ok-ink); --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn); --color-warn-ink: var(--warn-ink); --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger); --color-danger-ink: var(--danger-ink); --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info); --color-info-ink: var(--info-ink); --color-info-soft: var(--info-soft);
+
+  /* Elevation */
+  --shadow-card: var(--sh-card);
+  --shadow-pop: var(--sh-pop);
+  --shadow-sheet: var(--sh-sheet);
+
+  /* Type scale: comfortable line-heights (Vietnamese diacritics need air). 1rem = 16px. */
+  --text-xs: 0.75rem;   --text-xs--line-height: 1.5;
+  --text-sm: 0.875rem;  --text-sm--line-height: 1.6;
+  --text-base: 1rem;    --text-base--line-height: 1.6;
+  --text-lg: 1.125rem;  --text-lg--line-height: 1.5;
+  --text-xl: 1.25rem;   --text-xl--line-height: 1.4;
+  --text-2xl: 1.5rem;   --text-2xl--line-height: 1.3;
+  --text-3xl: 1.875rem; --text-3xl--line-height: 1.25;
+
+  --animate-sheet-in: sheet-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-pop-in: pop-in 0.16s ease-out;
+  @keyframes sheet-in { from { opacity: 0; transform: translateY(1.5rem); } to { opacity: 1; transform: none; } }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 }
-:root { --page: #f5f7fb; --card: #ffffff; --line: #e8ecf3; --ink: #0f172a; --muted: #64748b; --soft: #f1f5f9; color-scheme: light; }
-.dark { --page: #0b1020; --card: #121a2b; --line: #22304a; --ink: #e6ebf5; --muted: #93a1b8; --soft: #1a2438; color-scheme: dark; }
+
+/*
+ * Design tokens. Accent = Tailwind blue (the ads workspace re-maps --color-blue-* to violet via .ads-theme).
+ * Text/background pairs below are >= 4.5:1 (WCAG AA) in both themes.
+ */
+:root {
+  --page: #f6f8fc; --card: #ffffff; --soft: #f0f3f9;
+  --line: #e7ebf3; --line-strong: #d3dae6;
+  --ink: #0f172a; --muted: #566379;
+  --ok: #059669; --ok-ink: #047857; --ok-soft: rgb(16 185 129 / 0.12);
+  --warn: #d97706; --warn-ink: #92400e; --warn-soft: rgb(245 158 11 / 0.15);
+  --danger: #e11d48; --danger-ink: #be123c; --danger-soft: rgb(244 63 94 / 0.1);
+  --info: #2563eb; --info-ink: #1d4ed8; --info-soft: rgb(59 130 246 / 0.1);
+  --sh-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 14px -6px rgb(15 23 42 / 0.06);
+  --sh-pop: 0 10px 28px -6px rgb(15 23 42 / 0.16), 0 2px 6px rgb(15 23 42 / 0.06);
+  --sh-sheet: 0 24px 64px rgb(15 23 42 / 0.28);
+  --bottom-nav-h: 0px;
+  color-scheme: light;
+}
+.dark {
+  --page: #0a0f1d; --card: #121a2b; --soft: #1a2438;
+  --line: #243049; --line-strong: #34435f;
+  --ink: #e8edf7; --muted: #9aa8bf;
+  --ok: #34d399; --ok-ink: #6ee7b7; --ok-soft: rgb(16 185 129 / 0.16);
+  --warn: #fbbf24; --warn-ink: #fcd34d; --warn-soft: rgb(245 158 11 / 0.16);
+  --danger: #fb7185; --danger-ink: #fda4af; --danger-soft: rgb(244 63 94 / 0.16);
+  --info: #60a5fa; --info-ink: #93c5fd; --info-soft: rgb(59 130 246 / 0.18);
+  --sh-card: 0 1px 2px rgb(0 0 0 / 0.35);
+  --sh-pop: 0 8px 28px rgb(0 0 0 / 0.5);
+  --sh-sheet: 0 24px 64px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+}
+@media (max-width: 767.98px) { :root { --bottom-nav-h: 4rem; } }
+
+/* Base: 16px root, readable body copy. */
+/* 15px root: laptop screens at 125-150% scaling get ~6% more room without touching any component. */
+html { font-size: 15px; -webkit-text-size-adjust: 100%; }
 html, body, #root { height: 100%; }
-/* Ngân Nguyệt docked on the right (wide screens): the page makes room instead of being covered. */
-#root { transition: padding-right 0.2s ease; }
-.assistant-docked #root { padding-right: 420px; }
-body { background: var(--page); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
-.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
-.scroll-thin::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+body { background: var(--page); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; line-height: 1.6; overflow-x: hidden; }
+::selection { background: color-mix(in oklab, var(--color-blue-500) 28%, transparent); }
+::placeholder { color: var(--muted); opacity: 0.75; }
+.scroll-thin { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; border: 2px solid transparent; background-clip: content-box; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Page rhythm: every page body is a vertical stack with the same gap, so blocks never drift between pages. */
+.page-stack { display: flex; flex-direction: column; gap: 1.5rem; }
 
 /* AI Agent Ads workspace: same components, violet accent (Tailwind v4 utilities read --color-blue-*). */
 .ads-theme {
@@ -47,3 +121,45 @@ body { background: var(--page); color: var(--ink); font-family: var(--font-sans)
 .brain-md th { background: var(--soft); font-weight: 600; }
 .brain-md hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
 .brain-md strong { font-weight: 650; }
+
+/* Global polish: consistent focus ring, text that stays inside its box, calm motion */
+/* In the base layer so Tailwind utilities (truncate, transition-*, text-*) always win over these defaults. */
+@layer base {
+  :where(button, a, select, input, textarea, [role="switch"], [role="tab"], [role="button"], summary, [tabindex]):focus-visible { outline: 2px solid var(--color-blue-500); outline-offset: 2px; }
+  :where(input, textarea, select):focus-visible { outline-offset: 0; outline-color: color-mix(in oklab, var(--color-blue-500) 55%, transparent); }
+  h1, h2, h3 { text-wrap-style: balance; }
+  p, li { text-wrap-style: pretty; }
+  main, [role="dialog"] { overflow-wrap: break-word; }
+  main img, main video { max-width: 100%; }
+  main pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  main code { overflow-wrap: anywhere; }
+  button:not(:disabled), [role="button"], select, summary { cursor: pointer; }
+  button:not(:disabled):active { transform: scale(0.98); }
+  button { transition-property: background-color, border-color, color, box-shadow, opacity, transform; transition-duration: 150ms; transition-timing-function: ease-out; }
+  .tabular-nums, table td { font-variant-numeric: tabular-nums; }
+  /* Grid items default to min-width:auto, so one long unbroken title can widen the whole page. Let them shrink; utilities (min-w-*) still win. */
+  main .grid > *, [role="dialog"] .grid > * { min-width: 0; }
+  /* Free-text helper: long URLs / unbroken tokens wrap instead of widening the layout. */
+  .break-anywhere { overflow-wrap: anywhere; word-break: break-word; }
+  /* Safe-area padding for the mobile bottom bar / sheets */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* Collapsible sections (see Collapse in components/ui.tsx): animate height without measuring */
+.collapse-grid { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.22s ease-out; }
+.collapse-grid[data-open="true"] { grid-template-rows: 1fr; }
+.collapse-grid > div { min-height: 0; overflow: hidden; }
+.collapse-grid[data-settled="true"] > div { overflow: visible; }
+
+/* Native <details>: tidy marker + spacing so logs and long notes stay tucked away until asked for */
+@layer base {
+  details > summary { list-style: none; display: inline-flex; align-items: center; gap: 0.35rem; border-radius: 0.5rem; padding: 0.15rem 0.4rem; margin-left: -0.4rem; color: var(--muted); user-select: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: ""; width: 0.4rem; height: 0.4rem; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s ease-out; margin-right: 0.15rem; }
+  details[open] > summary::before { transform: rotate(45deg); }
+  details > summary:hover { background: var(--soft); color: var(--ink); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

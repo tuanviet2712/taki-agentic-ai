@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { chromium, type Browser } from "playwright-core";
 import { AppError, logger } from "@dotaka/shared";
 import { chromeChannel, listChromeProfiles } from "./chrome-profiles.ts";
@@ -46,6 +46,14 @@ async function ensureFlowWindow() {
 
 /** Pid of the Chrome Flow process (only a Chrome started on OUR data dir, never the CEO's own Chrome). */
 function flowChromePid(): number | null {
+  if (process.platform === "win32") {
+    try {
+      const ps = `$c = Get-NetTCPConnection -LocalPort ${FLOW_CDP_PORT} -State Listen -ErrorAction Stop | Select-Object -First 1; (Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)").CommandLine; $c.OwningProcess`;
+      const lines = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8", windowsHide: true }).trim().split(/\r?\n/);
+      const pid = Number(lines.at(-1));
+      return pid && lines.slice(0, -1).join(" ").includes(`--user-data-dir=${FLOW_CHROME_DIR}`) ? pid : null;
+    } catch { return null; }
+  }
   try {
     const pid = Number(execFileSync("lsof", ["-tnP", `-iTCP:${FLOW_CDP_PORT}`, "-sTCP:LISTEN"], { encoding: "utf8" }).trim().split("\n")[0]);
     if (!pid) return null;
@@ -54,8 +62,18 @@ function flowChromePid(): number | null {
   } catch { return null; }
 }
 
+/**
+ * Windows: the DevTools port closes before Chrome has exited, and Chrome keeps the profile folder locked (`lockfile`)
+ * until then — deleting the folder or starting a new Chrome on it too early fails / hands off to the dying process.
+ */
+async function waitProfileUnlocked() {
+  if (process.platform !== "win32") return;
+  const lock = join(FLOW_CHROME_DIR, "lockfile");
+  for (let i = 0; i < 40 && existsSync(lock); i++) await new Promise((r) => setTimeout(r, 500));
+}
+
 export async function closeFlowBrowser() {
-  if (!(await flowBrowserUp())) return;
+  if (!(await flowBrowserUp())) { await waitProfileUnlocked(); return; }
   await ensureFlowWindow();
   await withBrowser(async (b) => { const s = await b.newBrowserCDPSession(); await s.send("Browser.close").catch(() => {}); }).catch((e) => logger.warn("flow.chrome_close_cdp_failed", { error: String(e).slice(0, 200) }));
   for (let i = 0; i < 20 && (await flowBrowserUp()); i++) await new Promise((r) => setTimeout(r, 500));
@@ -69,6 +87,41 @@ export async function closeFlowBrowser() {
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
+  await waitProfileUnlocked();
+}
+
+/**
+ * Copy a Chrome profile folder minus SKIP. A running Chrome keeps some files (Cookies, Login Data) open: on Windows
+ * `copyFile` is refused for those but a plain read is allowed (libuv opens with full share flags), so fall back to it;
+ * a file that still cannot be read is skipped and reported instead of aborting the whole copy.
+ */
+function copyProfile(src: string, dst: string): string[] {
+  const skipped: string[] = [];
+  const walk = (s: string, d: string, top: boolean) => {
+    mkdirSync(d, { recursive: true });
+    for (const e of readdirSync(s, { withFileTypes: true })) {
+      if (top && SKIP.has(e.name)) continue;
+      const sp = join(s, e.name), dp = join(d, e.name);
+      try {
+        if (e.isDirectory()) walk(sp, dp, false);
+        else if (e.isFile()) {
+          try { copyFileSync(sp, dp); } catch { writeFileSync(dp, readFileSync(sp)); }
+        }
+      } catch { skipped.push(sp); }
+    }
+  };
+  walk(src, dst, true);
+  return skipped;
+}
+
+/**
+ * Chrome trên Windows mã hoá cookie gắn với CHÍNH thư mục dữ liệu của nó (app-bound encryption, khoá `os_crypt.app_bound_encrypted_key`):
+ * cookie chép sang thư mục khác không giải mã được → đăng nhập KHÔNG theo qua được. Trường hợp đó Chrome Flow chỉ có thể dựa vào
+ * lần đăng nhập tay của Sếp (lưu bền trong data/flow-chrome), nên tuyệt đối không được xoá thư mục đó.
+ */
+export function copyCarriesLogin(localStatePath: string): boolean {
+  if (process.platform !== "win32") return true;
+  try { return !JSON.parse(readFileSync(localStatePath, "utf8"))?.os_crypt?.app_bound_encrypted_key; } catch { return true; }
 }
 
 /** Copy the chosen everyday profile (cookies = Google login) into the Chrome Flow folder. */
@@ -76,11 +129,20 @@ export async function syncFlowProfile(channel: string, dir: string) {
   const ch = chromeChannel(channel);
   const prof = listChromeProfiles().find((p) => p.channel === channel && p.dir === dir);
   if (!ch || !prof) throw new AppError("NO_PROFILE", "Không thấy profile Chrome này");
+  // Windows + cookie gắn với Chrome gốc: chép không mang được đăng nhập. Đã có Chrome Flow (Sếp từng đăng nhập tay) → GIỮ NGUYÊN,
+  // chỉ ghi nhớ profile nguồn; xoá đi là mất đăng nhập và bắt đăng nhập lại mỗi lần chạy.
+  if (!copyCarriesLogin(join(ch.dir, "Local State")) && existsSync(join(FLOW_CHROME_DIR, "Default"))) {
+    const source: FlowSource = { channel, dir, name: prof.name, email: prof.email, syncedAt: new Date().toISOString() };
+    writeFileSync(SOURCE_FILE, JSON.stringify(source, null, 2));
+    logger.info("flow.profile_kept", { channel, dir, reason: "app_bound_cookies" });
+    return source;
+  }
   await closeFlowBrowser();
   rmSync(FLOW_CHROME_DIR, { recursive: true, force: true });
   mkdirSync(FLOW_CHROME_DIR, { recursive: true });
   const src = join(ch.dir, dir);
-  cpSync(src, join(FLOW_CHROME_DIR, "Default"), { recursive: true, filter: (p) => !SKIP.has(p.slice(src.length + 1).split("/")[0]) || p === src });
+  const skipped = copyProfile(src, join(FLOW_CHROME_DIR, "Default"));
+  if (skipped.length) logger.warn("flow.profile_copy_skipped", { files: skipped.slice(0, 10), count: skipped.length });
   const state = JSON.parse(readFileSync(join(ch.dir, "Local State"), "utf8"));
   const entry = state.profile?.info_cache?.[dir] ?? {};
   state.profile = { ...state.profile, info_cache: { Default: { ...entry, name: "TAKI Flow" } }, last_used: "Default", last_active_profiles: ["Default"] };
@@ -96,14 +158,15 @@ export async function ensureFlowBrowser(opts: { channel?: string | null; dir?: s
   if (!(await flowBrowserUp())) {
     if (!existsSync(join(FLOW_CHROME_DIR, "Default")) && opts.channel && opts.dir) await syncFlowProfile(opts.channel, opts.dir);
     const ch = chromeChannel(flowSource()?.channel ?? opts.channel ?? "chrome");
-    if (!ch?.exe || (ch.exe.startsWith("/") && !existsSync(ch.exe))) throw new AppError("NO_BROWSER", "Không thấy Google Chrome trên máy");
+    if (!ch?.exe || (isAbsolute(ch.exe) && !existsSync(ch.exe))) throw new AppError("NO_BROWSER", "Không thấy Google Chrome trên máy");
     mkdirSync(FLOW_CHROME_DIR, { recursive: true });
+    await waitProfileUnlocked();
     const p = spawn(ch.exe, [
       `--user-data-dir=${FLOW_CHROME_DIR}`, `--remote-debugging-port=${FLOW_CDP_PORT}`, "--remote-debugging-address=127.0.0.1",
       "--no-first-run", "--no-default-browser-check", "--window-size=1440,1000",
       "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
       "about:blank",
-    ], { detached: true, stdio: "ignore" });
+    ], { detached: true, stdio: "ignore", windowsHide: false });
     p.on("error", (e) => logger.warn("flow.chrome_spawn_failed", { error: e.message }));
     p.unref();
     let up = false;

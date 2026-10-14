@@ -3,7 +3,7 @@ import { z } from "zod";
 import { derived } from "@dotaka/contracts";
 import { audit, bizSettings, byId, q, update, type Row } from "@dotaka/db";
 import { latestDaily, proposeManualAction, revertAction, runRule, startAdsReport, sumMetrics, syncAdMetrics, today } from "@dotaka/orchestrator";
-import { publishRoute } from "@dotaka/orchestrator";
+import { clicksForPost, hidePost, linkCommentStatus, publishRoute } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
 import { routes } from "../http.ts";
 
@@ -15,12 +15,16 @@ export function growthRoutes(app: FastifyInstance) {
   // ---------------- Channels & posts ----------------
   // publishLive: whether "Đăng" on this channel reaches the real page (API token or Chrome Flow ready) — see Kênh đăng.
   r.get("/v1/channels", ({ bizId }) => q.all<Row>("SELECT * FROM channel WHERE biz_id = ? AND enabled = 1", bizId).map((c) => ({ ...c, secret_ciphertext: undefined, publishLive: publishRoute(c) !== "none", publishVia: publishRoute(c) })));
-  r.get("/v1/posts", ({ bizId }) => q.all<Row>(`SELECT p.*, c.platform channel, c.name channel_name FROM post p JOIN channel c ON c.id = p.channel_id WHERE p.biz_id = ? ORDER BY p.published_at DESC LIMIT 60`, bizId).map((p) => ({
+  r.get("/v1/posts", ({ bizId }) => q.all<Row>(`SELECT p.*, c.platform channel, c.name channel_name FROM post p JOIN channel c ON c.id = p.channel_id WHERE p.biz_id = ? AND COALESCE(json_extract(p.meta, '$.hidden'), 0) = 0 ORDER BY p.published_at DESC LIMIT 60`, bizId).map((p) => ({
     ...p,
     score: q.get("SELECT score, low_data, components, reasons, computed_at FROM post_score WHERE post_id = ? ORDER BY computed_at DESC LIMIT 1", p.id),
     metrics: q.get<Row>("SELECT mark, metrics FROM post_metric_snapshot WHERE post_id = ? ORDER BY captured_at DESC LIMIT 1", p.id),
-    comments: q.all("SELECT label, COUNT(*) n FROM post_comment WHERE post_id = ? AND label IS NOT NULL GROUP BY label", p.id),
+    // Bình luận do hệ thống đăng (link sản phẩm: label_source = 'system') không phải bình luận của khách → không đếm vào nhãn.
+    comments: q.all("SELECT label, COUNT(*) n FROM post_comment WHERE post_id = ? AND label IS NOT NULL AND COALESCE(label_source, '') != 'system' GROUP BY label", p.id),
+    link: linkCommentStatus(p), // trạng thái "gắn link dưới bình luận"
   })));
+  // "Xóa" bài khỏi bảng Bài đã đăng công khai = ẨN khỏi danh sách (không xóa bài thật trên kênh, giữ số liệu/truy vết).
+  r.del("/v1/posts/:id", ({ bizId, params, actor }) => hidePost(bizId, params.id, actor));
   r.get("/v1/posts/:id", ({ bizId, params }) => {
     const p = byId<Row>("post", params.id);
     if (!p || p.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy bài", 404);
@@ -28,6 +32,7 @@ export function growthRoutes(app: FastifyInstance) {
       ...p, channel_name: byId<Row>("channel", p.channel_id)?.name ?? null, scores: q.all("SELECT * FROM post_score WHERE post_id = ? ORDER BY computed_at", p.id),
       snapshots: q.all("SELECT mark, metrics, captured_at FROM post_metric_snapshot WHERE post_id = ? ORDER BY captured_at", p.id),
       comments: q.all("SELECT * FROM post_comment WHERE post_id = ? ORDER BY created_at", p.id),
+      link: linkCommentStatus(p), clicks: clicksForPost(p),
       ads: q.all("SELECT a.* FROM ad a JOIN post_ad_link l ON l.ad_id = a.id WHERE l.post_id = ?", p.id),
     };
   });

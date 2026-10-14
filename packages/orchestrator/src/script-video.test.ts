@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cleanNote, parseVideoScript } from "./script-video.ts";
+import { pickStockSource } from "./video-ai.ts";
 
 const body = `HOOK: Bạn vừa thuê thêm 3 người? | Bạn làm việc như trâu.
 
@@ -31,5 +32,18 @@ describe("parseVideoScript", () => {
   });
   it("rejects text that is not a scene script", () => {
     expect(parseVideoScript("Bài viết thường, không có cảnh")).toBeNull();
+  });
+});
+
+describe("pickStockSource — chỉ cần 1 trong 2 khóa Pexels / Pixabay", () => {
+  it("chỉ có khóa Pixabay → dùng Pixabay dù nguồn mặc định là Pexels", () => {
+    expect(pickStockSource("pexels", { pexels: 0, pixabay: 1 })).toBe("pixabay");
+  });
+  it("chỉ có khóa Pexels → dùng Pexels dù đã chọn Pixabay", () => {
+    expect(pickStockSource("pixabay", { pexels: 2, pixabay: 0 })).toBe("pexels");
+  });
+  it("có cả hai thì giữ đúng nguồn đã chọn; không có khóa nào thì giữ nguồn chọn (để báo thiếu khóa)", () => {
+    expect(pickStockSource("pixabay", { pexels: 1, pixabay: 1 })).toBe("pixabay");
+    expect(pickStockSource("pexels", { pexels: 0, pixabay: 0 })).toBe("pexels");
   });
 });

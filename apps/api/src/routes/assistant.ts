@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { byId, type Row } from "@dotaka/db";
-import { MODEL_CATALOG, cliInfo, effectiveProvider, modelFor } from "@dotaka/llm-gateway";
+import { cliInfo, effectiveProvider, modelCatalog, modelFor } from "@dotaka/llm-gateway";
 import {
   createTelegramPairCode, removeTelegramChat, telegramAssistantStatus,
   ASSISTANT, assistantBusy, assistantFindings, assistantSettings, checkActionPath, createAction, createThread, deleteThread, dispatchAgentTask,
@@ -34,8 +34,8 @@ export function assistantRoutes(app: FastifyInstance) {
 
   r.get("/v1/assistant", ({ bizId }) => ({
     name: ASSISTANT.name, settings: assistantSettings(bizId), defaultModel: modelFor(bizId, ASSISTANT.key, "medium"),
-    models: MODEL_CATALOG, ready: effectiveProvider(bizId).provider === "claude_cli" && cliInfo().available && cliInfo().loggedIn !== false,
-    authError: cliInfo().loggedIn === false ? (cliInfo().authError ?? "Claude CLI chưa đăng nhập") : undefined,
+    models: modelCatalog(bizId), ready: effectiveProvider(bizId).provider === "codex_cli" ? effectiveProvider(bizId).ready === true : effectiveProvider(bizId).provider === "claude_cli" && cliInfo().available && cliInfo().loggedIn !== false,
+    authError: effectiveProvider(bizId).provider === "codex_cli" ? effectiveProvider(bizId).reason : cliInfo().loggedIn === false ? (cliInfo().authError ?? "Claude CLI chưa đăng nhập") : undefined,
     suggestions: [
       "Hôm nay hệ thống có gì cần em để ý không?",
       "Báo cáo nhanh tình hình quảng cáo 7 ngày qua",

@@ -119,7 +119,7 @@ export function McpNewKey() {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[440px_1fr]">
+      <div className="grid gap-6 wide:grid-cols-[400px_minmax(0,1fr)]">
         <section className="h-fit rounded-2xl border border-line bg-card p-6 shadow-sm">
           <h2 className="flex items-center gap-3 text-xl font-bold text-ink"><KeyRound className="h-6 w-6 text-blue-600" />Thông tin khóa</h2>
           <p className="ml-9 mt-1 text-sm text-muted">Đặt tên và thiết lập thời hạn hiệu lực cho khóa kết nối.</p>

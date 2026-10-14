@@ -28,3 +28,7 @@ __pycache__/
 
 # Video AI tools (cloned + weights by scripts/install-video-ai.mjs; patches live in services/video-ai-patches)
 services/video-ai/
+
+# Gói cài Windows: PostgreSQL đóng gói sẵn + nhật ký cài đặt (sinh ra khi đóng gói/cài, không đưa lên Git)
+runtime/
+install.log

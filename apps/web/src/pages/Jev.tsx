@@ -240,7 +240,7 @@ export function Jev() {
           : <p className="text-sm text-ink"><Badge tone="amber">Heuristic</Badge> <span className="ml-1">Chưa có khóa TypeSafe — hệ thống dùng luật heuristic trả về cùng định dạng. Đặt <code className="rounded bg-soft px-1">TYPESAFE_API_KEY</code> trong file <code className="rounded bg-soft px-1">.env</code> rồi khởi động lại API để dùng Jev thật.</span></p>}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat icon={Activity} tone="violet" label="Tổng phán đoán" value={num(stats.total)} sub={`${Object.keys(purposes).length} mục đích sử dụng`} />
         <Stat icon={Timer} tone="blue" label="Độ trễ trung bình" value={`${Math.round(avgLatency)} ms`} sub="mỗi lần hỏi một bộ câu hỏi" />
         <Stat icon={CircleDollarSign} tone="green" label="Tổng chi phí Jev" value={usd(totalCost)} sub={`${num(rows.reduce((s, r) => s + (r.tokens ?? 0), 0))} token đầu vào`} />
@@ -248,7 +248,7 @@ export function Jev() {
           sub={<span>{o.handoffs} chuyển người · {o.injections} chặn injection · {o.guardBlocked} chặn câu trả lời · {o.reviewBlocked} chặn bài · {o.hotLeads} lead nóng</span>} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
+      <div className="grid gap-6 wide:grid-cols-[minmax(0,1fr)_380px]">
         <Card title="Theo mục đích sử dụng">
           {rows.length === 0 ? <Empty>Chưa có phán đoán nào.</Empty> : (
             <div className="divide-y divide-line">

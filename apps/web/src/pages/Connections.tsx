@@ -4,13 +4,15 @@ import { Bot, CheckCircle2, CircleHelp, Download, LayoutGrid, Link2, Plug, Plus,
 import { api, useApi } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, Toggle, cx, inputCls, useToast } from "../components/ui";
+import { PancakeMapPanel } from "../components/PancakeOrders";
+import { LlmPanel } from "../components/LlmPanel";
 
 type Platform = { key: string; name: string; status: "live" | "soon"; color: string; description: string; capabilities: string[]; fields: any[]; guide?: string[]; count: number; ai?: { claude: string; jev: boolean } };
 
 /** Brand tile icon (letters on brand color — no external logos). */
 const GLYPH: Record<string, string> = {
   meta: "f", zlcrm: "Z", tiktok: "♪", sheets: "▦", telegram: "✈", ai: "✦", pancake: "P", nhanh: "N", whitelist: "✓", bigquery: "BQ", postgres: "PG",
-  google_ads: "G", ga4: "GA", sapo: "S", haravan: "H", kiotviet: "K", bitrix24: "24", zalo: "Z",
+  google_ads: "G", ga4: "GA", sapo: "S", haravan: "H", kiotviet: "K", bitrix24: "24", zalo: "Z", tiktok_post: "♪",
 };
 export function PlatformTileIcon({ p, size = 40, round }: { p: Pick<Platform, "key" | "color">; size?: number; round?: boolean }) {
   const g = GLYPH[p.key] ?? "?";
@@ -50,7 +52,7 @@ export function Connections() {
       <div className="flex flex-wrap items-center gap-5">
         <span className="grid h-16 w-16 place-items-center rounded-2xl bg-blue-500/10 text-blue-600"><Link2 className="h-8 w-8" /></span>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight text-ink md:text-3xl">Trung tâm tích hợp</h1>
+          <h1 className="text-[26px] font-bold leading-tight tracking-tight text-ink">Trung tâm tích hợp</h1>
           <p className="mt-1 text-muted">Kết nối nền tảng, tập trung dữ liệu.</p>
         </div>
         <Button variant="primary" icon={Plus} className="h-12 px-6 text-base" onClick={() => setAdding(cur?.fields.length ? cur : "pick")}>Liên kết nền tảng</Button>
@@ -83,7 +85,7 @@ export function Connections() {
                     <p className="text-sm text-muted">Chọn “Liên kết nền tảng” để bắt đầu. Chưa liên kết thì các kênh chạy chế độ mô phỏng.</p>
                   </div>
                 ) : (
-                  <div className="grid gap-4 xl:grid-cols-2">
+                  <div className="grid gap-4 lg:grid-cols-2">
                     {shown.map((c) => {
                       const p = platforms?.find((x) => x.key === c.platform);
                       const st = STATUS[c.status] ?? { label: c.status, tone: "gray" };
@@ -97,9 +99,11 @@ export function Connections() {
                               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                                 <Badge tone={st.tone}>{st.label}</Badge>
                                 {c.mode === "live" ? <Badge tone="blue">Kết nối thật</Badge> : <Badge tone="amber">Mô phỏng</Badge>}
+                                {c.config?.oauth && <Badge tone="violet">Đăng nhập bằng nút</Badge>}
                                 <span className="text-xs text-muted">kiểm tra {timeAgo(c.last_health_at)}</span>
                               </div>
                               {c.last_error && <p className="mt-1.5 rounded-lg bg-rose-500/10 px-2 py-1 text-xs text-rose-600">{c.last_error}</p>}
+                              {c.config?.oauth && (c.status === "expired" || c.status === "error") && <p className="mt-1.5 text-xs"><Link to="/channels" className="font-medium text-blue-600 underline">Kết nối lại bằng nút đăng nhập</Link></p>}
                             </div>
                           </div>
                           {(c.assets.adAccounts.length > 0 || c.assets.pages.length > 0) && (
@@ -108,13 +112,14 @@ export function Connections() {
                                 <p key={a.id} className="flex items-center justify-between gap-2"><span className="truncate text-ink">💳 {a.name} <span className="text-xs text-muted">{a.external_id} · {a.currency}</span></span>{a.whitelisted ? <Badge tone="green">Whitelist</Badge> : <Badge tone="gray">Ngoài whitelist</Badge>}</p>
                               ))}
                               {c.assets.pages.map((pg: any) => (
-                                <p key={pg.id} className="flex items-center justify-between gap-2"><span className="truncate text-ink">📄 {pg.name}</span>{pg.whitelisted ? <Badge tone="green">Whitelist</Badge> : <Badge tone="gray">Ngoài whitelist</Badge>}</p>
+                                <p key={pg.id} className="flex items-center justify-between gap-2"><span className="truncate text-ink">{pg.platform === "instagram" ? "📷" : pg.platform === "tiktok" ? "🎵" : "📄"} {pg.name}</span>{pg.whitelisted ? <Badge tone="green">Whitelist</Badge> : <Badge tone="gray">Ngoài whitelist</Badge>}</p>
                               ))}
                               {canImport && <p className="text-xs text-muted">{c.ads} quảng cáo đã đồng bộ</p>}
                             </div>
                           )}
                           {c.platform === "telegram" && c.config?.chatTitle && <p className="mt-2 text-sm text-muted">Gửi về: <b className="text-ink">{c.config.chatTitle}</b></p>}
                           {c.platform === "sheets" && c.config?.spreadsheetTitle && <p className="mt-2 text-sm text-muted">Sheet mặc định: <b className="text-ink">{c.config.spreadsheetTitle}</b></p>}
+                          {c.platform === "pancake" && c.status !== "revoked" && <PancakeMapPanel defaultOpen={params.get("pancake") === "map"} />}
                           <div className="mt-3 flex flex-wrap gap-2">
                             <Button size="sm" icon={CheckCircle2} loading={busy === `t:${c.id}`} onClick={() => run(`t:${c.id}`, () => api.post(`connections/${c.id}/test`), (r) => (r.ok ? `✓ ${r.detail}` : `✗ ${r.detail}`))}>Kiểm tra</Button>
                             {canImport && <Button size="sm" variant="primary" icon={Download} loading={busy === `i:${c.id}`} onClick={() => run(`i:${c.id}`, () => api.post(`connections/${c.id}/import`), (r) => `Đồng bộ xong: ${r.ads} ad mới, ${r.campaigns} chiến dịch mới${r.errors?.length ? ` · lỗi: ${r.errors[0]}` : ""}`)}>Đồng bộ chiến dịch</Button>}
@@ -239,7 +244,7 @@ function WhitelistPanel({ onChange }: { onChange: () => void }) {
     try { await api.put("whitelist", { kind, id, on }); reload(); onChange(); toast(on ? "Đã thêm vào whitelist" : "Đã bỏ khỏi whitelist"); } catch (e: any) { toast(e.message, "err"); }
   };
   return (
-    <div className="grid gap-6 xl:grid-cols-2">
+    <div className="grid gap-6 lg:grid-cols-2">
       <Card title="Tài khoản quảng cáo">
         <p className="mb-3 text-sm text-muted">Chỉ tài khoản bật whitelist mới được rule/cấu hình tự động tắt ads, đổi ngân sách hay tạo quảng cáo.</p>
         {!data ? <Loading /> : data.adAccounts.length === 0 ? <Empty>Chưa có tài khoản — kết nối Facebook hoặc TikTok trước.</Empty> : (
@@ -273,16 +278,21 @@ function WhitelistPanel({ onChange }: { onChange: () => void }) {
 function AiPanel({ p }: { p?: Platform }) {
   return (
     <Card title="AI của hệ thống">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-xl border border-line p-4">
           <p className="flex items-center gap-2 font-medium text-ink"><Bot className="h-4 w-4 text-orange-500" />Claude</p>
-          <p className="mt-1 text-sm text-muted">{p?.ai?.claude === "claude_cli" ? "Qua tài khoản Claude đã đăng nhập (Claude Code CLI)" : "Chưa bật — đang chạy sandbox"}</p>
+          <p className="mt-1 text-sm text-muted">Kết nối bằng tài khoản đăng nhập Claude Code CLI trên máy.</p>
+        </div>
+        <div className="rounded-xl border border-line p-4">
+          <p className="flex items-center gap-2 font-medium text-ink"><Bot className="h-4 w-4 text-emerald-600" />ChatGPT · Codex CLI</p>
+          <p className="mt-1 text-sm text-muted">Thêm nhiều hồ sơ riêng và chọn tài khoản ChatGPT dùng cho đội AI.</p>
         </div>
         <div className="rounded-xl border border-line p-4">
           <p className="flex items-center gap-2 font-medium text-ink"><Sparkles className="h-4 w-4 text-violet-600" />Jev · System One</p>
           <p className="mt-1 text-sm text-muted">{p?.ai?.jev ? "Đang chạy thật" : "Chế độ heuristic (thiếu TYPESAFE_API_KEY)"}</p>
         </div>
       </div>
+      <div className="mt-4"><LlmPanel /></div>
       <Link to="/settings" className="mt-3 inline-block"><Button size="sm" icon={RefreshCw}>Đổi model trong Cài đặt chung</Button></Link>
     </Card>
   );

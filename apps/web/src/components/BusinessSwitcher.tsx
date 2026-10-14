@@ -74,7 +74,7 @@ export function BusinessSwitcher() {
   if (!data) return null;
   return (
     <div className="relative" ref={box}>
-      <button onClick={() => setOpen(!open)} className="flex w-full max-w-[110px] items-center gap-1 rounded-xl border border-line px-2 py-1.5 sm:max-w-[220px] sm:gap-2 sm:px-3 text-sm font-medium text-ink transition hover:bg-soft" aria-haspopup="menu" aria-expanded={open} title="Đổi doanh nghiệp">
+      <button onClick={() => setOpen(!open)} className="flex min-h-10 w-full max-w-[110px] items-center gap-1 rounded-xl border border-line px-2 py-1.5 sm:max-w-[220px] sm:gap-2 sm:px-3 text-sm font-medium text-ink transition hover:bg-soft" aria-haspopup="menu" aria-expanded={open} title="Đổi doanh nghiệp">
         <span aria-hidden className="hidden sm:inline">🏢</span>
         <span className="truncate">{current?.name ?? "Doanh nghiệp"}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted" />

@@ -1,3 +1,4 @@
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseFrontmatter, parseNote, safeName, safePath, stringifyFrontmatter } from "./brain.ts";
 import { isoWeek, toMd } from "./brain-auto.ts";
@@ -25,11 +26,15 @@ describe("Bộ não — parsing", () => {
 });
 
 describe("Bộ não — safety", () => {
-  const v = { path: "/tmp/vault" };
+  const root = resolve("/tmp/vault"); // "/tmp/vault" on POSIX, "<drive>:\tmp\vault" on Windows
+  const v = { path: root };
   it("keeps every path inside the vault", () => {
-    expect(safePath(v, "01 - Inbox/a.md")).toBe("/tmp/vault/01 - Inbox/a.md");
+    expect(safePath(v, "01 - Inbox/a.md")).toBe(join(root, "01 - Inbox", "a.md"));
     for (const bad of ["../x.md", "a/../../x.md", "", "a//b.md"]) expect(() => safePath(v, bad)).toThrow();
-    expect(safePath(v, "/etc/passwd")).toBe("/tmp/vault/etc/passwd"); // leading slash = vault root, never the disk root
+    expect(safePath(v, "/etc/passwd")).toBe(join(root, "etc", "passwd")); // leading slash = vault root, never the disk root
+  });
+  it("accepts a vault written with the other slash direction", () => {
+    expect(safePath({ path: root.replace(/\\/g, "/") }, "a/b.md")).toBe(join(root, "a", "b.md"));
   });
   it("makes file-system-safe names", () => {
     expect(safeName('Ý tưởng: "A/B" #1?')).toBe("Ý tưởng A B 1");

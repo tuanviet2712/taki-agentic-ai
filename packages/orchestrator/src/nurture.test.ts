@@ -27,6 +27,10 @@ describe("send outcome (no duplicate messages to real customers)", () => {
     expect(sendOutcome(new ConnectorError("Transient", "timeout"))).toBe("unknown");
     expect(sendOutcome(new Error("boom"))).toBe("unknown");
   });
+  it("a Graph write that got no answer (graphPost) is unknown even though its kind is InvalidRequest", () => {
+    expect(sendOutcome(Object.assign(new ConnectorError("InvalidRequest", "no answer"), { outcomeUnknown: true }))).toBe("unknown");
+    expect(sendOutcome(Object.assign(new ConnectorError("InvalidRequest", "refused"), { requestNotSent: true }))).toBe("not_sent");
+  });
   it("slows friend-accept checks over time", () => {
     expect(friendCheckInterval(60_000)).toBe(20 * 60_000);
     expect(friendCheckInterval(5 * 3600_000)).toBe(3600_000);

@@ -27,6 +27,9 @@ run("web", "pnpm", ["dev:web"]);
 const zl = resolve("services/zl-crm");
 if (existsSync(resolve(zl, "backend/.env")) && existsSync(resolve(zl, "backend/node_modules"))) {
   mkdirSync(resolve(zl, "data"), { recursive: true });
+  // PostgreSQL riêng của ZL-CRM (cổng 5433) — máy dùng PostgreSQL hệ thống thì bỏ qua (không có data/pgdata)
+  const pg = await (await import("./zlcrm-pg.mjs")).ensureZlcrmPostgres();
+  if (pg.skipped) console.log(`  ! ${pg.skipped}`);
   // PORT/HOST xoá khỏi env kế thừa để ZL-CRM đọc đúng cổng 3000 trong backend/.env
   const env = { PORT: "", HOST: "" };
   run("zl-crm", "npx", ["tsx", "--env-file=.env", "src/app.ts"], { cwd: resolve(zl, "backend"), log: resolve(zl, "data/backend.log"), optional: true, env: { ...env, PORT: "3000", HOST: "127.0.0.1" } });

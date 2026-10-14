@@ -14,12 +14,26 @@ export const CLAUDE_EXTENSION_URL = `https://chromewebstore.google.com/detail/${
 export const FLOW_URL = "https://flow.google.com"; // skills đều mở Flow qua địa chỉ này (chuyển tới labs.google/fx/tools/flow)
 
 type Channel = { key: string; name: string; dir: string; macApp: string; linuxBin: string };
+/** Windows: user-data dir under %LOCALAPPDATA%, executable in Program Files (or the per-user install). */
+function winExe(...rel: string[]) {
+  const roots = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(Boolean) as string[];
+  return roots.map((r) => join(r, ...rel)).find((p) => existsSync(p)) ?? join(roots[0] ?? "C:\\Program Files", ...rel);
+}
 function channels(): Channel[] {
   const h = homedir();
+  if (platform() === "win32") {
+    const la = process.env.LOCALAPPDATA ?? join(h, "AppData", "Local");
+    return [
+      { key: "chrome", name: "Google Chrome", dir: process.env.CHROME_USER_DATA_DIR || join(la, "Google", "Chrome", "User Data"), macApp: "", linuxBin: winExe("Google", "Chrome", "Application", "chrome.exe") },
+      { key: "chrome-beta", name: "Chrome Beta", dir: join(la, "Google", "Chrome Beta", "User Data"), macApp: "", linuxBin: winExe("Google", "Chrome Beta", "Application", "chrome.exe") },
+      { key: "chromium", name: "Chromium", dir: join(la, "Chromium", "User Data"), macApp: "", linuxBin: winExe("Chromium", "Application", "chrome.exe") },
+      { key: "edge", name: "Microsoft Edge", dir: join(la, "Microsoft", "Edge", "User Data"), macApp: "", linuxBin: winExe("Microsoft", "Edge", "Application", "msedge.exe") },
+    ];
+  }
   if (platform() === "darwin") {
     const as = join(h, "Library/Application Support");
     return [
-      { key: "chrome", name: "Google Chrome", dir: join(as, "Google/Chrome"), macApp: "Google Chrome", linuxBin: "" },
+      { key: "chrome", name: "Google Chrome", dir: process.env.CHROME_USER_DATA_DIR || join(as, "Google/Chrome"), macApp: "Google Chrome", linuxBin: "" },
       { key: "chrome-beta", name: "Chrome Beta", dir: join(as, "Google/Chrome Beta"), macApp: "Google Chrome Beta", linuxBin: "" },
       { key: "chrome-canary", name: "Chrome Canary", dir: join(as, "Google/Chrome Canary"), macApp: "Google Chrome Canary", linuxBin: "" },
       { key: "chromium", name: "Chromium", dir: join(as, "Chromium"), macApp: "Chromium", linuxBin: "" },
@@ -27,7 +41,7 @@ function channels(): Channel[] {
   }
   const cfg = join(h, ".config");
   return [
-    { key: "chrome", name: "Google Chrome", dir: join(cfg, "google-chrome"), macApp: "", linuxBin: "google-chrome" },
+    { key: "chrome", name: "Google Chrome", dir: process.env.CHROME_USER_DATA_DIR || join(cfg, "google-chrome"), macApp: "", linuxBin: "google-chrome" },
     { key: "chrome-beta", name: "Chrome Beta", dir: join(cfg, "google-chrome-beta"), macApp: "", linuxBin: "google-chrome-beta" },
     { key: "chromium", name: "Chromium", dir: join(cfg, "chromium"), macApp: "", linuxBin: "chromium" },
   ];

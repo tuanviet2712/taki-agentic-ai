@@ -44,7 +44,7 @@ export const AGENT_LABEL: Record<string, string> = {
   dna_intake: "DNA Agent", brief: "Brief Agent", market_research: "Research Agent", strategy: "Strategy Agent",
   content: "Content Agent", video_script: "Video Agent", seo_web: "SEO Agent", creative: "Creative Agent",
   publishing: "Publishing Agent", post_scanner: "Post Scanner", ads: "Ads Agent", analytics: "Analytics Agent",
-  chat: "Chat Agent", follow_up: "Follow-up Agent", feedback: "Feedback Agent", review: "Review Agent",
+  chat: "Chat Agent", chat_vision: "Chat · xem ảnh", follow_up: "Follow-up Agent", feedback: "Feedback Agent", review: "Review Agent",
 };
 
 export const TASK_STATUS: Record<string, { label: string; tone: Tone }> = {
@@ -59,6 +59,7 @@ export const CONTENT_STATUS: Record<string, { label: string; tone: Tone }> = {
   scheduled: { label: "Đã lên lịch", tone: "blue" }, published: { label: "Đã xuất bản", tone: "green" }, rejected: { label: "Bị từ chối", tone: "red" },
   blocked: { label: "Bị chặn", tone: "red" }, manual_publish: { label: "Đăng thủ công", tone: "gray" },
   video_made: { label: "Đã thành video", tone: "green" },
+  expired: { label: "Hết hạn duyệt", tone: "gray" }, cancelled: { label: "Đã hủy", tone: "gray" }, draft_on_channel: { label: "Nháp trên kênh", tone: "blue" },
 };
 export const CONV_STATE: Record<string, { label: string; tone: Tone }> = {
   new: { label: "Mới", tone: "blue" }, bot_active: { label: "Bot đang trả lời", tone: "violet" }, awaiting_customer: { label: "Chờ khách", tone: "gray" },

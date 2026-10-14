@@ -4,8 +4,8 @@ import { CATALOG, STAGES } from "@dotaka/agents";
 import { AgentConfigUpdate } from "@dotaka/contracts";
 import { activeDna, audit, bizSettings, bus, byId, emit, insert, ownerProfile, q, update, type Row } from "@dotaka/db";
 import { JEV_MODEL, jevEnabled } from "@dotaka/jev";
-import { DEFAULT_LLM, MODEL_CATALOG, cliInfo, effectiveProvider, llmSettings, modelFor, testModel, tokensUsedToday, type Tier } from "@dotaka/llm-gateway";
-import { latestDaily, sumMetrics, today } from "@dotaka/orchestrator";
+import { DEFAULT_LLM, DEFAULT_CODEX_MODELS, MODEL_CATALOG, cancelAiLogin, checkAiAccount, codexInfo, createAiAccount, disconnectAiAccount, listAiAccounts, mustAiAccount, removeAiAccount, selectedAiAccount, startAiLogin, cliInfo, effectiveProvider, llmSettings, modelCatalog, modelMatchesProvider, modelFor, testModel, tokensUsedToday, type Tier } from "@dotaka/llm-gateway";
+import { FLOW_IMAGE_MODELS, imageEngineStatus, latestDaily, sumMetrics, today } from "@dotaka/orchestrator";
 import { AppError, sha256 } from "@dotaka/shared";
 import { currentBizId, routes } from "../http.ts";
 import { publicProfile } from "./account.ts";
@@ -30,7 +30,7 @@ export function coreRoutes(app: FastifyInstance) {
     brand: activeDna(bizId)?.data?.company?.brand ?? null,
     pendingConfirmations: activeDna(bizId)?.data?.pendingConfirmations?.length ?? 0,
     jev: { enabled: jevEnabled(), model: JEV_MODEL },
-    llm: { enabled: effectiveProvider(bizId).provider !== "sandbox", ...effectiveProvider(bizId), chosen: llmSettings(bizId).provider, models: llmSettings(bizId).models, loggedIn: cliInfo().loggedIn, authError: cliInfo().authError },
+    llm: { enabled: effectiveProvider(bizId).provider !== "sandbox" && effectiveProvider(bizId).ready !== false, ...effectiveProvider(bizId), chosen: llmSettings(bizId).provider, models: llmSettings(bizId).models, loggedIn: llmSettings(bizId).provider === "codex_cli" ? !!selectedAiAccount(bizId)?.loggedIn : cliInfo().loggedIn, authError: llmSettings(bizId).provider === "codex_cli" ? effectiveProvider(bizId).reason : cliInfo().authError },
     connectorsMode: "sandbox",
     killSwitch: bizSettings(bizId).killSwitch,
     connections: {
@@ -122,18 +122,38 @@ export function coreRoutes(app: FastifyInstance) {
   });
 
   // ---------------- LLM provider & model selection ----------------
-  r.get("/v1/llm", ({ bizId }) => ({ settings: llmSettings(bizId), effective: effectiveProvider(bizId), cli: cliInfo(), catalog: MODEL_CATALOG, defaults: DEFAULT_LLM }));
+  r.get("/v1/llm", ({ bizId }) => ({ settings: llmSettings(bizId), effective: effectiveProvider(bizId), cli: cliInfo(), codex: codexInfo(), accounts: listAiAccounts(bizId, false), selectedAccount: selectedAiAccount(bizId), catalog: modelCatalog(bizId), defaults: DEFAULT_LLM }));
   r.put("/v1/llm", ({ bizId, body, actor }) => {
-    const ids = MODEL_CATALOG.map((m) => m.id) as [string, ...string[]];
-    const p = z.object({ provider: z.enum(["claude_cli", "sandbox"]).optional(), models: z.object({ small: z.enum(ids), medium: z.enum(ids), large: z.enum(ids) }).partial().optional(), effort: z.enum(["low", "medium", "high"]).optional() }).parse(body);
+    const model = z.string().min(3).max(100).regex(/^[a-z0-9._-]+$/i);
+    const p = z.object({ provider: z.enum(["claude_cli", "codex_cli", "sandbox"]).optional(), codexAccountId: z.string().nullable().optional(), models: z.object({ small: model, medium: model, large: model }).partial().optional(), effort: z.enum(["low", "medium", "high"]).optional() }).parse(body);
     const cur = llmSettings(bizId);
-    const next = { ...cur, ...p, models: { ...cur.models, ...(p.models ?? {}) } as Record<Tier, string> };
+    if (p.codexAccountId) mustAiAccount(bizId, p.codexAccountId);
+    const provider = p.provider ?? cur.provider;
+    const saved = { ...cur.providerModels, [cur.provider]: cur.models };
+    const baseModels = provider === cur.provider || provider === "sandbox" ? cur.models : saved[provider] ?? (provider === "codex_cli" ? DEFAULT_CODEX_MODELS : DEFAULT_LLM.models);
+    const models = { ...baseModels, ...(p.models ?? {}) } as Record<Tier, string>;
+    if (provider !== "sandbox" && Object.values(models).some((m) => !modelMatchesProvider(m, provider))) throw new AppError("BAD_MODEL", "Model không thuộc kết nối AI đã chọn", 400);
+    const next = { ...cur, ...p, models, providerModels: { ...saved, [provider]: models } };
     const s = bizSettings(bizId);
     update("biz", bizId, { settings: { ...s, llm: next } });
     audit(bizId, actor, "llm.settings_changed", { type: "biz", id: bizId }, { before: cur, after: next });
-    return { settings: next, effective: effectiveProvider(bizId) };
+    emit(bizId, "llm.updated", {});
+    return { settings: next, effective: effectiveProvider(bizId), catalog: modelCatalog(bizId), selectedAccount: selectedAiAccount(bizId) };
   });
   r.post("/v1/llm/test", ({ bizId, body }) => testModel(bizId, z.object({ model: z.string() }).parse(body).model));
+
+  // OAuth is performed by the installed CLI on the local machine; no shared default ChatGPT account.
+  const localAccountAction = (req: { ip: string; headers: Record<string, unknown> }) => {
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip)) throw new AppError("LOCAL_ONLY", "Quản lý đăng nhập ChatGPT trên máy chạy hệ thống", 403);
+    if (req.headers["x-taki-actor"]) throw new AppError("DIRECT_ONLY", "Người dùng tự quản lý đăng nhập ChatGPT trên giao diện", 403);
+  };
+  r.get("/v1/llm/accounts", ({ bizId, req }) => { localAccountAction(req); return listAiAccounts(bizId); });
+  r.post("/v1/llm/accounts", ({ bizId, body, actor, req }) => { localAccountAction(req); return createAiAccount(bizId, z.object({ name: z.string().trim().min(1).max(80) }).parse(body).name, actor); });
+  r.post("/v1/llm/accounts/:id/login", ({ bizId, params, body, actor, req }) => { localAccountAction(req); return startAiLogin(bizId, params.id, z.object({ method: z.enum(["browser", "device"]).default("browser") }).parse(body).method, actor); });
+  r.post("/v1/llm/accounts/:id/cancel", ({ bizId, params, req }) => { localAccountAction(req); return cancelAiLogin(bizId, params.id); });
+  r.post("/v1/llm/accounts/:id/check", ({ bizId, params, req }) => { localAccountAction(req); return checkAiAccount(bizId, params.id); });
+  r.post("/v1/llm/accounts/:id/disconnect", ({ bizId, params, actor, req }) => { localAccountAction(req); return disconnectAiAccount(bizId, params.id, actor); });
+  r.del("/v1/llm/accounts/:id", ({ bizId, params, actor, req }) => { localAccountAction(req); return removeAiAccount(bizId, params.id, actor); });
 
   r.get("/v1/schedules", ({ bizId }) => q.all("SELECT * FROM schedule WHERE biz_id = ? ORDER BY every_minutes", bizId));
   r.put("/v1/schedules/:id", ({ bizId, params, body, actor }) => {
@@ -159,14 +179,26 @@ export function coreRoutes(app: FastifyInstance) {
       explorationPct: z.number().min(0).max(100).optional(),
       approvalExpiryHours: z.number().int().positive().optional(),
       backupPerson: z.string().optional(),
+      // vision: bot xem ảnh khách gửi (mặc định bật; cần bot Messenger bật). closeOrders: bot chốt đơn -> đơn nháp [ĐỎ] chờ duyệt (mặc định bật).
+      chat: z.object({ vision: z.boolean(), closeOrders: z.boolean() }).partial().optional(),
+      // autoImage: tự tạo ảnh đi kèm mỗi bài viết trước khi vào hộp Duyệt (mặc định bật).
+      // imageEngine: công cụ tạo ảnh (auto = theo kết nối AI); imageFallback: lỗi thì AI viết bài thiết kế ảnh thay;
+      // imageCodexAccountId: hồ sơ ChatGPT dùng để vẽ ảnh; flowImageModel: model Gemini trên Flow.
+      content: z.object({
+        autoImage: z.boolean(), imageEngine: z.enum(["auto", "claude", "chatgpt", "gemini_flow"]), imageFallback: z.boolean(),
+        imageCodexAccountId: z.string().max(80).nullable(), flowImageModel: z.enum(FLOW_IMAGE_MODELS),
+      }).partial().optional(),
     });
     const p = Patch.parse(body);
+    if (p.content?.imageCodexAccountId) mustAiAccount(bizId, p.content.imageCodexAccountId);
     const cur = bizSettings(bizId);
-    const next = { ...cur, ...p, caps: { ...cur.caps, ...(p.caps ?? {}) } };
+    const next = { ...cur, ...p, caps: { ...cur.caps, ...(p.caps ?? {}) }, ...(p.chat ? { chat: { ...(cur.chat ?? {}), ...p.chat } } : {}), ...(p.content ? { content: { ...(cur.content ?? {}), ...p.content } } : {}) };
     update("biz", bizId, { settings: next });
     audit(bizId, actor, "settings.changed", { type: "biz", id: bizId }, { before: cur, after: next });
     return next;
   });
+  // Công cụ tạo ảnh: lựa chọn, công cụ thực dùng (có dự phòng) và độ sẵn sàng của Claude / ChatGPT / Gemini trên Flow.
+  r.get("/v1/image-engine", ({ bizId }) => ({ ...imageEngineStatus(bizId), flowModels: FLOW_IMAGE_MODELS, accounts: listAiAccounts(bizId, false).map((a) => ({ id: a.id, name: a.name, loggedIn: a.loggedIn, email: (a as { email?: string }).email ?? null })) }));
   r.post("/v1/kill-switch", ({ bizId, body, actor }) => {
     const p = z.object({ area: z.enum(["publish", "ads", "chat", "all"]), on: z.boolean() }).parse(body);
     const s = bizSettings(bizId);

@@ -249,20 +249,42 @@ export function Orchestra() {
             <Link to="/agents" className="mt-2 inline-block text-xs text-violet-600">Đổi mức tự chủ từng agent →</Link>
           </section>
 
-          <section className="rounded-2xl border border-line bg-card p-4 shadow-sm">
-            <h2 className="mb-2 flex items-center gap-2 font-bold text-ink"><ShieldCheck className="h-5 w-5 text-violet-600" />Giới hạn vận hành</h2>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-lg bg-soft/60 p-2"><p className="text-muted">Trần quảng cáo/ngày</p><p className="font-semibold text-ink">{data ? vnd(data.limits.maxDailyAdBudget) : "—"}</p></div>
-              <div className="rounded-lg bg-soft/60 p-2"><p className="text-muted">Token AI hôm nay</p><p className="font-semibold text-ink">{data ? `${num(data.limits.aiTokensToday)} / ${num(data.limits.aiTokenBudget)}` : "—"}</p></div>
+          {/* Chiếm trọn hàng (col-span-full): chỉ số bên trái, công tắc dừng khẩn cấp bên phải, nhật ký ở góc tiêu đề. */}
+          <section className="rounded-2xl border border-line bg-card p-4 shadow-sm md:col-span-full md:p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 font-bold text-ink"><ShieldCheck className="h-5 w-5 text-violet-600" />Giới hạn vận hành</h2>
+              <Link to="/ads/logs" className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-line px-3.5 py-1.5 text-sm font-medium text-ink transition hover:bg-soft"><FileClock className="h-4 w-4 text-muted" />Xem nhật ký<ChevronRight className="h-4 w-4 text-muted" /></Link>
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              {(["publish", "ads", "chat"] as const).map((k) => (
-                <button key={k} onClick={() => setKill(k, !ks[k])} className={cx("flex items-center justify-center gap-1 rounded-xl border px-2 py-2 text-[11px] font-semibold transition", ks[k] ? "border-rose-500 bg-rose-500 text-white" : "border-rose-300 bg-rose-500/5 text-rose-600 hover:bg-rose-500/10")}>
-                  <OctagonPause className="h-3.5 w-3.5" />{ks[k] ? "Mở lại" : "Dừng"} {KILL_LABEL[k]}
-                </button>
-              ))}
+            <div className="grid gap-x-8 gap-y-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+              {/* Hai chỉ số cùng khuôn: nhãn một dòng → số lớn → dòng phụ / thanh tiến độ, nên luôn thẳng hàng */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex min-w-0 flex-col justify-start gap-1 rounded-xl bg-soft/60 px-4 py-3.5">
+                  <p className="truncate text-xs text-muted">Trần quảng cáo/ngày</p>
+                  <p className="truncate text-xl font-bold leading-tight tabular-nums text-ink">{data ? vnd(data.limits.maxDailyAdBudget) : "—"}</p>
+                  <p className="truncate text-[11px] text-muted">Tối đa mỗi ngày</p>
+                </div>
+                <div className="flex min-w-0 flex-col justify-start gap-1 rounded-xl bg-soft/60 px-4 py-3.5">
+                  <p className="truncate text-xs text-muted">Token AI hôm nay</p>
+                  <p className="truncate text-xl font-bold leading-tight tabular-nums text-ink">{data ? num(data.limits.aiTokensToday) : "—"}<span className="text-xs font-medium text-muted"> / {data ? num(data.limits.aiTokenBudget) : "—"}</span></p>
+                  <div role="progressbar" aria-label="Token AI đã dùng hôm nay" aria-valuemin={0} aria-valuemax={100} aria-valuenow={data?.limits?.aiTokenBudget ? Math.min(100, Math.round((data.limits.aiTokensToday / data.limits.aiTokenBudget) * 100)) : 0} className="mt-[3px] h-1.5 overflow-hidden rounded-full bg-line">
+                    <div className="h-full rounded-full bg-violet-500 transition-all" style={{ width: `${data?.limits?.aiTokenBudget ? Math.min(100, (data.limits.aiTokensToday / data.limits.aiTokenBudget) * 100) : 0}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex min-w-0 flex-col">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Dừng khẩn cấp</p>
+                <div className="grid flex-1 grid-cols-3 gap-3">
+                  {(["publish", "ads", "chat"] as const).map((k) => (
+                    <button key={k} onClick={() => setKill(k, !ks[k])} aria-pressed={!!ks[k]}
+                      className={cx("flex min-h-[4.25rem] flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 text-center text-sm font-semibold leading-tight transition", ks[k] ? "border-rose-500 bg-rose-500 text-white hover:bg-rose-600" : "border-rose-300 bg-rose-500/5 text-rose-600 hover:bg-rose-500/10 dark:border-rose-500/40")}>
+                      <OctagonPause className="h-5 w-5" aria-hidden />
+                      <span>{ks[k] ? "Mở lại" : "Dừng"} {KILL_LABEL[k]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-            <Link to="/ads/logs" className="mt-3 flex items-center justify-between rounded-xl border border-line px-3 py-2 text-sm text-ink hover:bg-soft"><span className="flex items-center gap-2"><FileClock className="h-4 w-4" />Xem nhật ký</span><ChevronRight className="h-4 w-4 text-muted" /></Link>
           </section>
         </aside>
       </div>

@@ -5,29 +5,13 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { openDb, q } from "@dotaka/db";
 import { jevEnabled } from "@dotaka/jev";
-import { cliInfo, effectiveProvider, llmSettings, probeCliAuth } from "@dotaka/llm-gateway";
-import { startOrchestrator } from "@dotaka/orchestrator";
+import { cliInfo, codexInfo, effectiveProvider, llmSettings, probeCliAuth, selectedAiAccount } from "@dotaka/llm-gateway";
+import { reencryptLegacySecrets, startOrchestrator } from "@dotaka/orchestrator";
 import { logger } from "@dotaka/shared";
 import { errorHandler } from "./http.ts";
-import { chatRoutes } from "./routes/chat.ts";
-import { coreRoutes } from "./routes/core.ts";
-import { growthRoutes } from "./routes/growth.ts";
-import { jevRoutes } from "./routes/jev.ts";
-import { workRoutes } from "./routes/work.ts";
-import { skillRoutes } from "./routes/skills.ts";
-import { creativeRoutes } from "./routes/creative.ts";
-import { connectRoutes } from "./routes/connect.ts";
-import { zaloRoutes } from "./routes/zalo.ts";
-import { orchestraRoutes } from "./routes/orchestra.ts";
-import { assistantRoutes } from "./routes/assistant.ts";
-import { accountRoutes } from "./routes/account.ts";
-import { channelRoutes } from "./routes/channels.ts";
-import { messengerRoutes } from "./routes/messenger.ts";
-import { nurtureRoutes } from "./routes/nurture.ts";
-import { researchRoutes } from "./routes/research.ts";
-import { autopilotRoutes } from "./routes/autopilot.ts";
-import { businessRoutes } from "./routes/businesses.ts";
-import { brainRoutes } from "./routes/brain.ts";
+import { registerLocalGuard } from "./local-guard.ts";
+import { startPublicGateway } from "./public-gateway.ts";
+import { registerApiRoutes } from "./register-routes.ts";
 import { seed } from "./seed.ts";
 
 const PORT = Number(process.env.API_PORT ?? 8787);
@@ -40,29 +24,14 @@ async function main() {
     logger.info("seed.first_run");
     await seed({ blank: process.env.SEED_MODE === "blank" });
   }
+  // Đã đặt TOKEN_ENCRYPTION_KEY thật → chuyển mọi token/secret đang mã hóa bằng khóa dev công khai sang khóa mới (không mất kết nối).
+  try { reencryptLegacySecrets(); } catch (e) { logger.warn("secrets.migrate_failed", { error: e instanceof Error ? e.message : String(e) }); }
   const app = Fastify({ logger: false, genReqId: () => crypto.randomUUID() });
   await app.register(cors, { origin: [/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] });
   app.setErrorHandler(errorHandler);
+  registerLocalGuard(app); // Host lạ / ghi chéo trang → 421 / 403 (không phải đăng nhập)
 
-  coreRoutes(app);
-  workRoutes(app);
-  growthRoutes(app);
-  chatRoutes(app);
-  jevRoutes(app);
-  skillRoutes(app);
-  creativeRoutes(app);
-  connectRoutes(app);
-  zaloRoutes(app);
-  orchestraRoutes(app);
-  assistantRoutes(app);
-  brainRoutes(app);
-  accountRoutes(app);
-  channelRoutes(app);
-  messengerRoutes(app);
-  nurtureRoutes(app);
-  researchRoutes(app);
-  autopilotRoutes(app);
-  businessRoutes(app);
+  registerApiRoutes(app); // danh sách module route: apps/api/src/register-routes.ts (có test khởi động server-boot.test.ts)
 
   const dist = resolve(process.cwd(), "apps/web/dist");
   if (existsSync(dist)) {
@@ -73,6 +42,12 @@ async function main() {
   startOrchestrator();
   await app.listen({ port: PORT, host: HOST });
   console.log(`\n  TAKI Agentic AI · http://${HOST}:${PORT}`);
+  // Cổng công khai (chỉ /r/:code, /m/:token, callback OAuth, /healthz) — chỉ chạy khi đặt PUBLIC_PORT; mặc định KHÔNG có cổng nào.
+  const pub = await startPublicGateway(process.env, PORT);
+  if (pub) {
+    const pubPort = (pub.server.address() as { port: number }).port;
+    console.log(`  Cổng công khai: http://127.0.0.1:${pubPort} (chỉ /r, /m, callback OAuth) — tunnel CHỈ trỏ về cổng này${process.env.PUBLIC_BASE_URL ? ` · ${process.env.PUBLIC_BASE_URL}` : " · chưa đặt PUBLIC_BASE_URL"}`);
+  }
   console.log(`  Jev (TypeSafe): ${jevEnabled() ? "LIVE" : "chế độ heuristic (thiếu TYPESAFE_API_KEY)"}`);
   const bizId = q.get<{ id: string }>("SELECT id FROM biz LIMIT 1")!.id;
   const eff = effectiveProvider(bizId);
@@ -80,7 +55,8 @@ async function main() {
     const loggedIn = await probeCliAuth(); // `claude --version` still passes with an expired token — ask Claude itself
     const state = loggedIn === true ? "tài khoản đã đăng nhập" : loggedIn === false ? `⚠️  CHƯA ĐĂNG NHẬP — mở Terminal, gõ \`claude\` rồi \`/login\`${cliInfo().authError ? ` (${cliInfo().authError})` : ""}` : `⚠️  chưa xác minh được đăng nhập${cliInfo().authError ? ` (${cliInfo().authError})` : ""}`;
     console.log(`  Claude:         Claude Code CLI (${cliInfo().version}) — ${state}`);
-  } else console.log(`  Claude:         sandbox${eff.reason ? ` — ${eff.reason}` : ""}`);
+  } else if (eff.provider === "codex_cli") console.log(`  ChatGPT:        ${codexInfo().version ?? "Codex CLI chưa cài"} · ${selectedAiAccount(bizId)?.name ?? "chưa chọn hồ sơ"}${eff.reason ? ` — ${eff.reason}` : ""}`);
+  else console.log(`  Claude:         sandbox${eff.reason ? ` — ${eff.reason}` : ""}`);
   console.log(`  Model:          small=${llmSettings(bizId).models.small} · medium=${llmSettings(bizId).models.medium} · large=${llmSettings(bizId).models.large}`);
   const conns = q.all<{ platform: string; mode: string }>("SELECT platform, mode FROM connection WHERE status = 'active'");
   console.log(`  Nền tảng:       ${conns.length ? conns.map((c) => `${c.platform}${c.mode === "live" ? "" : " (mô phỏng)"}`).join(", ") : "chưa kết nối — kênh chạy mô phỏng"}\n`);

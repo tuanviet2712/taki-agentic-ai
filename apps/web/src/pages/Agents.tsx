@@ -4,7 +4,7 @@ import { api, useApi } from "../lib/api";
 import { TaskResult } from "../components/TaskResult";
 import { AssignWork, type AssignRequest } from "../components/AssignWork";
 import { AGENT_LABEL, TASK_STATUS, num, timeAgo } from "../lib/format";
-import { Badge, Button, Card, Empty, Loading, Modal, PageHeader, Progress, Stat, Toggle, cx, inputCls, useToast } from "../components/ui";
+import { Badge, Button, Card, Chevron, Collapse, Empty, Loading, Modal, PageHeader, Progress, Stat, Toggle, cx, inputCls, useOpen, useToast } from "../components/ui";
 
 const AUTONOMY: Record<string, { label: string; hint: string }> = {
   L0: { label: "L0 · Gợi ý", hint: "Agent chỉ đề xuất, Sếp tự làm" },
@@ -19,12 +19,76 @@ const usd = (micros: number | null | undefined) => `$${((micros ?? 0) / 1e6).toF
 // Agents that call Claude through the LLM Gateway (others are deterministic code and/or Jev).
 const LLM_AGENTS = new Set(["assistant", "brief", "market_research", "strategy", "content", "video_script", "seo_web", "chat", "ads", "review"]);
 
+/** One agent as a compact row (name, status, on/off); settings drop down only when the row is opened. */
+function AgentRow({ a, catalog, putConfig, changeAutonomy, onAssign }: { a: any; catalog: any[]; putConfig: (key: string, patch: any, msg: string) => void; changeAutonomy: (agent: any, autonomy: string) => void; onAssign: () => void }) {
+  const [open, toggleOpen] = useOpen(false);
+  const cfg = a.config ?? {};
+  const enabled = !!cfg.enabled;
+  const autonomy = cfg.autonomy ?? a.autonomy;
+  const budget = cfg.token_budget_day ?? a.tokenBudgetDay ?? 0;
+  const usedPct = budget ? (a.tokensToday / budget) * 100 : 0;
+  return (
+    <div className={cx("border-b border-line", !enabled && "opacity-60")}>
+      <div className="flex items-center gap-2 py-1">
+        <button type="button" onClick={() => toggleOpen()} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-soft">
+          <span className={cx("grid h-8 w-8 shrink-0 place-items-center rounded-lg", enabled ? "bg-blue-500/10 text-blue-600" : "bg-soft text-muted")}><Bot className="h-4 w-4" /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-ink">{a.label}</span>
+            <span className="block truncate text-[11px] text-muted">{a.stage === 0 ? "Tổng điều phối" : `Khâu ${a.stage}`} · {a.done}/{a.tasks} tác vụ xong</span>
+          </span>
+          <Badge tone="gray" className="hidden shrink-0 sm:inline-flex" >{autonomy}</Badge>
+          <Chevron open={open} />
+        </button>
+        <Toggle size="sm" checked={enabled} onChange={(v) => putConfig(a.key, { enabled: v }, `${a.label} đã ${v ? "bật" : "tắt"}`)} />
+      </div>
+      <Collapse open={open}>
+        <div className="space-y-3 pb-4 pl-[3.25rem] pr-2 pt-1">
+          <p className="text-xs leading-relaxed text-muted">{a.description}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="block space-y-1"><span className="text-[11px] font-medium text-muted">Mức tự chủ</span>
+              <select className={cx(inputCls, "py-1.5 text-xs")} value={autonomy} onChange={(e) => changeAutonomy(a, e.target.value)} title={AUTONOMY[autonomy]?.hint}>
+                {Object.entries(AUTONOMY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </label>
+            <div className="space-y-1"><span className="block text-[11px] font-medium text-muted">Model</span>
+              {LLM_AGENTS.has(a.key) ? (
+                <select className={cx(inputCls, "py-1.5 text-xs")} value={catalog.some((m: any) => m.id === a.modelOverride) ? a.modelOverride : ""} title={`Đang dùng: ${a.model}`}
+                  onChange={(e) => putConfig(a.key, { model: e.target.value || null }, `${a.label}: ${e.target.value ? `dùng ${e.target.value}` : "theo tầng mặc định"}`)}>
+                  <option value="">Model theo tầng ({a.model})</option>
+                  {catalog.map((m: any) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              ) : <p className="rounded-xl bg-soft px-3 py-1.5 text-xs text-muted">Chạy bằng mã tất định{a.usesJev?.length ? " + Jev" : ""}</p>}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between text-[11px] text-muted"><span>Token hôm nay</span><span className="tabular-nums">{num(a.tokensToday)} / {num(budget)}</span></div>
+            <Progress value={usedPct} tone={usedPct > 90 ? "red" : usedPct > 70 ? "amber" : "blue"} className="h-1.5" />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {a.key !== "assistant" && (
+              <Button size="sm" variant="soft" icon={Send} disabled={!enabled} title="Chạy riêng 1 việc ngoài luồng tự động — xong là dừng" onClick={onAssign}>Giao việc riêng</Button>
+            )}
+            {a.avgReview != null && <Badge tone={a.avgReview >= 80 ? "green" : a.avgReview >= 65 ? "amber" : "red"}>Review TB {a.avgReview}</Badge>}
+            {a.usesJev?.length > 0 && <span title={a.usesJev.join(", ")} className="inline-flex max-w-full items-center gap-1 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 px-2 py-0.5 text-[11px] font-semibold text-white"><Sparkles className="h-3 w-3 shrink-0" /><span className="truncate">Jev · {a.usesJev.join(", ")}</span></span>}
+          </div>
+        </div>
+      </Collapse>
+    </div>
+  );
+}
+
+/** Task errors are stored as text or as an object ({ message }); never print "[object Object]". */
+const errText = (e: unknown): string => (typeof e === "string" ? e : (e as any)?.message ?? (e as any)?.error ?? JSON.stringify(e));
+
+/** One column template for header + rows: fixed widths so every row lines up and nothing spills out of the card. Agent column joins at xl. */
+const TASK_COLS = "wide:grid-cols-[minmax(0,1fr)_104px_108px_92px_188px] xl:grid-cols-[minmax(0,1fr)_120px_104px_108px_92px_188px]";
+
 export function Agents() {
-  const agents = useApi<any[]>("agents", ["task.", "review."]);
+  const agents = useApi<any[]>("agents", ["task.", "review.", "llm."]);
   const tasks = useApi<any[]>("tasks", ["task.", "review."]);
   const usage = useApi<any>("usage", ["task.", "review."]);
   const schedules = useApi<any[]>("schedules");
-  const llm = useApi<any>("llm");
+  const llm = useApi<any>("llm", ["llm."]);
   const toast = useToast();
   const [pending, setPending] = useState<{ agent: any; autonomy: string } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -57,7 +121,7 @@ export function Agents() {
       <PageHeader title="Agent & Tác vụ" subtitle="Bật/tắt từng agent, đặt mức tự chủ và theo dõi mọi tác vụ đội AI đang làm cho doanh nghiệp. Các agent tự chạy theo luồng; khi cần, giao việc riêng cho 1 agent — làm xong là dừng."
         actions={<Button variant="primary" icon={Send} className="whitespace-nowrap" onClick={() => setAssign({ agent: "" })}>Giao việc riêng</Button>} />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 wide:grid-cols-5 sm:[&>*:last-child:nth-child(odd)]:col-span-2 wide:[&>*:last-child:nth-child(odd)]:col-span-1">
         <Stat icon={Cpu} tone="blue" label="Token (7 ngày)" value={num(tokens)} sub={`${(u?.byAgent ?? []).reduce((a: number, r: any) => a + r.calls, 0)} lượt gọi model`} />
         <Stat icon={Coins} tone="amber" label="Chi phí AI (7 ngày)" value={usd(cost)} sub="Model + Jev" />
         <Stat icon={CheckCircle2} tone="green" label="Tác vụ hoàn thành" value={num(u?.tasksDone ?? 0)} />
@@ -65,52 +129,19 @@ export function Agents() {
         <Stat icon={Sparkles} tone="pink" label="Lượt Jev phán đoán" value={num(u?.jev?.calls ?? 0)} sub={u?.jev?.latency != null ? `độ trễ TB ${Math.round(u.jev.latency)} ms` : undefined} />
       </div>
 
-      {!agents.data ? <Loading /> : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {agents.data.map((a) => {
-            const cfg = a.config ?? {};
-            const enabled = !!cfg.enabled;
-            const budget = cfg.token_budget_day ?? a.tokenBudgetDay ?? 0;
-            const usedPct = budget ? (a.tokensToday / budget) * 100 : 0;
-            return (
-              <div key={a.key} className={cx("flex flex-col gap-3 rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]", !enabled && "opacity-60")}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-xl", enabled ? "bg-blue-500/10 text-blue-600" : "bg-soft text-muted")}><Bot className="h-5 w-5" /></span>
-                    <div className="min-w-0"><p className="truncate font-semibold text-ink">{a.label}</p><p className="text-[11px] text-muted">{a.stage === 0 ? "Tổng điều phối" : `Khâu ${a.stage}`} · {a.done}/{a.tasks} tác vụ xong</p></div>
-                  </div>
-                  <Toggle checked={enabled} onChange={(v) => putConfig(a.key, { enabled: v }, `${a.label} đã ${v ? "bật" : "tắt"}`)} />
-                </div>
-                <p className="line-clamp-2 min-h-[2.5rem] text-xs text-muted">{a.description}</p>
-                <select className={cx(inputCls, "py-1.5 text-xs")} value={cfg.autonomy ?? a.autonomy} onChange={(e) => changeAutonomy(a, e.target.value)} title={AUTONOMY[cfg.autonomy ?? a.autonomy]?.hint}>
-                  {Object.entries(AUTONOMY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-                {LLM_AGENTS.has(a.key) ? (
-                  <select className={cx(inputCls, "py-1.5 text-xs")} value={a.modelOverride ?? ""} title={`Đang dùng: ${a.model}`}
-                    onChange={(e) => putConfig(a.key, { model: e.target.value || null }, `${a.label}: ${e.target.value ? `dùng ${e.target.value}` : "theo tầng mặc định"}`)}>
-                    <option value="">Model theo tầng ({a.model})</option>
-                    {(llm.data?.catalog ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.label}</option>)}
-                  </select>
-                ) : <p className="rounded-xl bg-soft px-3 py-1.5 text-[11px] text-muted">Không gọi Claude — chạy bằng mã tất định{a.usesJev?.length ? " + Jev" : ""}</p>}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] text-muted"><span>Token hôm nay</span><span className="tabular-nums">{num(a.tokensToday)} / {num(budget)}</span></div>
-                  <Progress value={usedPct} tone={usedPct > 90 ? "red" : usedPct > 70 ? "amber" : "blue"} className="h-1.5" />
-                </div>
-                {a.key !== "assistant" && (
-                  <Button size="sm" variant="ghost" icon={Send} disabled={!enabled} title="Chạy riêng 1 việc ngoài luồng tự động — xong là dừng" onClick={() => setAssign({ agent: a.key })}>Giao việc riêng</Button>
-                )}
-                <div className="mt-auto flex flex-wrap items-center gap-1.5">
-                  {a.avgReview != null && <Badge tone={a.avgReview >= 80 ? "green" : a.avgReview >= 65 ? "amber" : "red"}>Review TB {a.avgReview}</Badge>}
-                  {a.usesJev?.length > 0 && <span title={a.usesJev.join(", ")} className="inline-flex max-w-full items-center gap-1 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 px-2 py-0.5 text-[11px] font-semibold text-white"><Sparkles className="h-3 w-3 shrink-0" /><span className="truncate">Jev · {a.usesJev.join(", ")}</span></span>}
-                </div>
-              </div>);
-          })}
-        </div>
-      )}
+      <Card title="Đội agent" bodyClass="p-3 pt-1" action={agents.data && <span className="text-xs text-muted">{agents.data.filter((a) => a.config?.enabled).length}/{agents.data.length} đang bật · bấm vào agent để chỉnh</span>}>
+        {!agents.data ? <Loading /> : (
+          <div className="grid items-start gap-x-4 lg:grid-cols-2">
+            {agents.data.map((a) => (
+              <AgentRow key={a.key} a={a} catalog={llm.data?.catalog ?? []} putConfig={putConfig} changeAutonomy={changeAutonomy} onAssign={() => setAssign({ agent: a.key })} />
+            ))}
+          </div>
+        )}
+      </Card>
 
       <AssignWork request={assign} onRequest={setAssign} />
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card title="Tác vụ gần đây" action={
           <select className={cx(inputCls, "w-auto py-1.5 text-xs")} value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="">Tất cả trạng thái</option>
@@ -118,17 +149,18 @@ export function Agents() {
           </select>} bodyClass="px-0 pb-2">
           {!tasks.data ? <Loading /> : taskList.length === 0 ? <div className="px-5"><Empty>Không có tác vụ nào.</Empty></div> : (
             <div className="divide-y divide-line">
-              <div className="hidden grid-cols-[1fr_130px_120px_110px_90px_130px] gap-3 px-5 pb-2 text-xs font-medium text-muted lg:grid"><span>Tác vụ</span><span>Agent</span><span>Trạng thái</span><span>Tiến độ</span><span>Cập nhật</span><span className="text-right">Thao tác</span></div>
+              <div className={cx("hidden gap-3 px-5 pb-2 text-xs font-medium text-muted wide:grid", TASK_COLS)}><span>Tác vụ</span><span className="hidden xl:block">Agent</span><span>Trạng thái</span><span>Tiến độ</span><span>Cập nhật</span><span className="text-right">Thao tác</span></div>
               {taskList.map((t) => {
                 const st = TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const };
+                const lead: string = t.step ?? (t.error ? `Lỗi: ${errText(t.error)}` : "");
                 return (
-                  <div key={t.id} onClick={() => setDetailId(t.id)} className="grid cursor-pointer grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1.5 px-5 py-3 hover:bg-soft lg:grid-cols-[1fr_130px_120px_110px_90px_130px]">
-                    <div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{t.title}</p><p className="truncate text-xs text-muted">{t.step ?? (t.error ? `Lỗi: ${t.error}` : "")}<span className="lg:hidden"> · {AGENT_LABEL[t.agent_key] ?? t.agent_key}</span></p></div>
-                    <span className="hidden text-sm text-muted lg:block">{AGENT_LABEL[t.agent_key] ?? t.agent_key}</span>
+                  <div key={t.id} onClick={() => setDetailId(t.id)} className={cx("grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-5 py-3 hover:bg-soft", TASK_COLS)}>
+                    <div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{t.title}</p><p className="truncate text-xs text-muted">{lead}{lead && <span className="xl:hidden"> · </span>}<span className="xl:hidden">{AGENT_LABEL[t.agent_key] ?? t.agent_key}</span></p></div>
+                    <span className="hidden truncate text-sm text-muted xl:block" title={AGENT_LABEL[t.agent_key] ?? t.agent_key}>{AGENT_LABEL[t.agent_key] ?? t.agent_key}</span>
                     <span><Badge tone={st.tone}>{st.label}</Badge></span>
-                    <div className="flex items-center gap-2"><Progress value={(t.progress ?? 0) * 100} className="h-1.5" /><span className="w-8 text-right text-[11px] text-muted">{Math.round((t.progress ?? 0) * 100)}%</span></div>
-                    <span className="text-xs text-muted">{timeAgo(t.updated_at)}</span>
-                    <div className="col-span-2 flex justify-end gap-1.5 lg:col-span-1" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex min-w-0 items-center gap-2"><Progress value={(t.progress ?? 0) * 100} className="h-1.5" /><span className="w-9 shrink-0 text-right text-[11px] text-muted">{Math.round((t.progress ?? 0) * 100)}%</span></div>
+                    <span className="truncate text-xs text-muted" title={timeAgo(t.updated_at)}>{timeAgo(t.updated_at)}</span>
+                    <div className="col-span-2 flex min-w-0 justify-end gap-1.5 wide:col-span-1" onClick={(e) => e.stopPropagation()}>
                       {RETRYABLE.includes(t.status) && <Button size="sm" variant="soft" icon={RotateCcw} onClick={() => taskAction(t.id, "retry")}>Chạy lại</Button>}
                       {CANCELLABLE.includes(t.status) && <Button size="sm" variant="ghost" icon={XCircle} onClick={() => taskAction(t.id, "cancel")}>Hủy</Button>}
                     </div>

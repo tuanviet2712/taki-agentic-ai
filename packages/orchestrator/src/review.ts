@@ -37,14 +37,54 @@ export const RUBRICS: Record<string, { version: number; pass: number; block: num
 
 type Check = ReviewResult["deterministic"][number];
 
-function productPriceFails(text: string, dna: Dna): string[] {
+/** Mọi số tiền xuất hiện trong 1 đoạn chữ (ưu đãi / chính sách): "50.000đ", "1,2 triệu", "30k" → "50000", "1200000", "30000". */
+export function amountsIn(text: string): string[] {
+  const out: string[] = [];
+  for (const m of String(text ?? "").matchAll(/(\d+(?:[.,]\d+)*)\s*(k|nghìn|ngàn|tr|triệu)?/gi)) {
+    const unit = (m[2] ?? "").toLowerCase();
+    const raw = m[1];
+    // "1,2 triệu" = 1.2 triệu; "50.000" = 50000 (dấu phân cách nghìn).
+    const thousands = /^\d{1,3}([.,]\d{3})+$/.test(raw);
+    let n = thousands ? Number(raw.replace(/[.,]/g, "")) : Number(raw.replace(",", "."));
+    if (unit === "k" || unit === "nghìn" || unit === "ngàn") n *= 1000;
+    else if (unit === "tr" || unit === "triệu") n *= 1_000_000;
+    if (Number.isFinite(n) && n > 0) out.push(String(Math.round(n)));
+  }
+  return out;
+}
+
+/**
+ * Giá trong bài phải có thật: giá niêm yết DNA, HOẶC số tiền nằm trong ưu đãi/chính sách đang công bố
+ * (DNA offers, ưu đãi của sản phẩm, chính sách sản phẩm của chiến dịch — vd "giảm 50.000đ", "freeship đơn từ 300k").
+ */
+function productPriceFails(text: string, dna: Dna, allowedFacts: string[] = []): string[] {
   const fails: string[] = [];
   const known = new Set(dna.products.filter((p) => p.price != null).map((p) => String(p.price)));
+  const factTexts = [...(dna.offers ?? []), ...dna.products.map((p) => String((p as { offer?: unknown }).offer ?? "")), ...allowedFacts];
+  for (const t of factTexts) for (const a of amountsIn(t)) known.add(a);
   for (const m of text.matchAll(/(\d{1,3}(?:[.,]\d{3})+)\s*(đ|vnđ|vnd)/gi)) {
     const v = m[1].replace(/[.,]/g, "");
     if (!known.has(v)) fails.push(`Giá ${m[0]} không có trong DNA`);
   }
   return fails;
+}
+
+/**
+ * Only the copy a customer actually sees. Internal fields (facts, openQuestions, scene directions…) often
+ * restate DNA rules — "không hứa làm giàu nhanh" — and must not trip the forbidden-claim/price checks.
+ */
+export function customerText(rubricKey: string, output: any): string {
+  const o = output ?? {};
+  const parts: unknown[] = (() => {
+    switch (rubricKey) {
+      case "content_social": return [o.title, ...(o.variants ?? []).flatMap((v: any) => [v.hook, v.body, v.cta, ...(v.hashtags ?? [])])];
+      case "video_script": return [o.title, ...(o.hooks ?? []), ...(o.scenes ?? []).flatMap((s: any) => [s.voiceover, s.onScreenText]), o.cta, o.caption];
+      case "seo_article": return [o.title, o.metaDescription, ...(o.outline ?? []), o.bodyMarkdown];
+      case "video_final": return [o.caption, ...(o.script ?? []).map((s: any) => s.loi_thoai)];
+      default: return [JSON.stringify(o)];
+    }
+  })();
+  return parts.filter((x) => typeof x === "string" && x).join("\n");
 }
 
 /** Bản CEO tự sửa (trước khi duyệt): câu cấm, giá không có trong DNA, ký tự cấm — trả danh sách lỗi còn lại. */
@@ -58,10 +98,10 @@ export function editedTextIssues(text: string, dna: Dna): string[] {
   return out;
 }
 
-export function deterministicChecks(rubricKey: string, output: any, dna: Dna, existingTexts: string[], autoFixed = 0): Check[] {
+export function deterministicChecks(rubricKey: string, output: any, dna: Dna, existingTexts: string[], autoFixed = 0, allowedFacts: string[] = []): Check[] {
   const checks: Check[] = [];
   const add = (check: string, passed: boolean, severity: Check["severity"], detail?: string) => checks.push({ check, passed, severity, detail });
-  const text = JSON.stringify(output);
+  const text = customerText(rubricKey, output);
 
   const customerFacing = ["content_social", "video_script", "seo_article", "video_final"].includes(rubricKey);
   // Internal artefacts (brief, strategy) legitimately list forbidden claims as constraints.
@@ -73,7 +113,7 @@ export function deterministicChecks(rubricKey: string, output: any, dna: Dna, ex
   }
   if (["content_social", "video_script", "seo_article"].includes(rubricKey)) {
     // Customer-facing copy only: internal artefacts legitimately contain thresholds (e.g. "CPL > 250.000đ").
-    const priceFails = productPriceFails(text, dna);
+    const priceFails = productPriceFails(text, dna, allowedFacts);
     add("Giá khớp DNA", priceFails.length === 0, "fatal", priceFails.join("; ") || undefined);
   }
 
@@ -121,11 +161,13 @@ export async function reviewOutput(opts: {
   bizId: string; subjectType: string; subjectId: string; rubricKey: string; output: any; dna: Dna; autoFixed?: number;
   /** Checks computed by the caller (e.g. ffprobe results for a finished video). */
   extraChecks?: Check[];
+  /** Dữ kiện được phép ngoài DNA (ưu đãi/chính sách sản phẩm của chiến dịch) — số tiền trong đó coi là đúng. */
+  allowedFacts?: string[];
   contentView?: { title: string; hook: string; body: string; cta: string; channel: string | null };
-}): Promise<ReviewResult & { id: string; judgmentId?: string }> {
+}): Promise<ReviewResult & { id: string; judgmentId?: string; fixable: boolean }> {
   const rubric = RUBRICS[opts.rubricKey] ?? { version: 1, pass: 60, block: 30, jev: false };
   const existing = q.all<Row>("SELECT body FROM content_item WHERE biz_id = ? AND id != ? ORDER BY created_at DESC LIMIT 40", opts.bizId, opts.subjectId).map((r) => r.body);
-  const det = [...deterministicChecks(opts.rubricKey, opts.output, opts.dna, existing, opts.autoFixed ?? 0), ...(opts.extraChecks ?? [])];
+  const det = [...deterministicChecks(opts.rubricKey, opts.output, opts.dna, existing, opts.autoFixed ?? 0, opts.allowedFacts ?? []), ...(opts.extraChecks ?? [])];
 
   const criteria: ReviewResult["criteria"] = [];
   const fatal = det.filter((c) => !c.passed && c.severity === "fatal").map((c) => `${c.check}: ${c.detail ?? ""}`);
@@ -171,7 +213,7 @@ export async function reviewOutput(opts: {
   // only when a real model is configured, never blocks on its own failure.
   let mkt: z.infer<typeof MktJudge> | null = null;
   if (rubric.jev && opts.contentView && effectiveProvider(opts.bizId).provider !== "sandbox" && !fatal.length) {
-    mkt = await mktReview(opts.bizId, opts.rubricKey, opts.contentView);
+    mkt = await mktReview(opts.bizId, opts.rubricKey, opts.contentView, rubric.pass);
     if (mkt) {
       criteria.push({ key: "mkt_qa", label: "Kiểm duyệt phòng MKT (skill)", score: mkt.score / 100, confidence: null, evidence: [...mkt.issues, ...mkt.aiTraces.map((x) => `Dấu vết AI: ${x}`)], source: "llm", fix: mkt.verdict === "sua" ? mkt.fix : undefined });
       total = Math.round((total * 0.5 + mkt.score * 0.5) * 10) / 10;
@@ -179,8 +221,9 @@ export async function reviewOutput(opts: {
   }
 
   let verdict: ReviewResult["verdict"] = total >= rubric.pass ? "pass" : total < rubric.block ? "block" : "revise";
-  // Department rule: DNA guardrail violation => automatic revise; below 80 => revise.
-  if (mkt && (mkt.dnaViolations.length || mkt.score < 80) && verdict === "pass") verdict = "revise";
+  // Department rule: DNA guardrail violation => automatic revise; MKT score below the rubric's pass mark => revise
+  // (cùng ngưỡng với rubric — trước đây cứng 80 trong khi rubric đạt ở 70-72 → vòng sửa thừa, tốn model).
+  verdict = applyMktRule(verdict, mkt, rubric.pass);
   if (mkt?.dnaViolations.length) det.push({ check: "Soát DNA (Kiểm duyệt MKT)", passed: false, severity: "major", detail: mkt.dnaViolations.join("; ") });
   if (fatal.length) verdict = "block";
   else if (det.some((c) => !c.passed && c.severity === "major") && verdict === "pass") verdict = "revise";
@@ -195,7 +238,16 @@ export async function reviewOutput(opts: {
     rubric_version: rubric.version, total, verdict, result,
   });
   if (judgmentId) recordDecision(judgmentId, { total, verdict, fatal });
-  return { ...result, id: row.id, judgmentId };
+  // Lỗi nghiêm trọng "sửa được" = chỉ nằm ở CHỮ (giá lệch, câu cấm, hứa hẹn…) → agent viết lại được; lỗi kỹ thuật do
+  // người gọi đưa vào (file video hỏng…) thì không.
+  const extraFatal = (opts.extraChecks ?? []).some((c) => !c.passed && c.severity === "fatal");
+  return { ...result, id: row.id, judgmentId, fixable: fatal.length > 0 && !extraFatal };
+}
+
+/** Luật phòng MKT: vi phạm DNA hoặc điểm MKT dưới ngưỡng ĐẠT của rubric → "revise" (chỉ hạ bậc một bản đang "pass"). */
+export function applyMktRule(verdict: ReviewResult["verdict"], mkt: { score: number; dnaViolations: string[] } | null, passMark: number): ReviewResult["verdict"] {
+  if (mkt && verdict === "pass" && (mkt.dnaViolations.length || mkt.score < passMark)) return "revise";
+  return verdict;
 }
 
 /** Findings to send back to the producing agent on a revise verdict. */
@@ -207,14 +259,14 @@ export function findingsOf(r: ReviewResult): string[] {
   ];
 }
 
-async function mktReview(bizId: string, rubricKey: string, v: { title: string; hook: string; body: string; cta: string; channel: string | null }) {
+async function mktReview(bizId: string, rubricKey: string, v: { title: string; hook: string; body: string; cta: string; channel: string | null }, passMark: number) {
   const pb = agentPlaybook(bizId, "review");
   if (!pb.text) return null;
   const kind = rubricKey === "video_script" ? "kịch bản video ngắn" : rubricKey === "seo_article" ? "bài SEO" : "bài đăng mạng xã hội";
   try {
     const r = await generate({
       bizId, agentKey: "review", tier: "medium", schema: MktJudge,
-      system: "Bạn là Trưởng nhóm Kiểm duyệt của Phòng Marketing AI. Chấm thật, không nể. Trả JSON theo schema: score /100, verdict dat (>=80) hoặc sua, tối đa 3 lỗi cụ thể nhất, vi phạm DNA (claim cấm, số liệu không có trong DNA, ký tự cấm, sai lớp brand/xưng hô, rủi ro chính sách Meta), dấu vết văn AI, và 1 đoạn gợi ý sửa.",
+      system: `Bạn là Trưởng nhóm Kiểm duyệt của Phòng Marketing AI. Chấm thật, không nể. Trả JSON theo schema: score /100, verdict dat (>=${passMark}) hoặc sua, tối đa 3 lỗi cụ thể nhất, vi phạm DNA (claim cấm, số liệu không có trong DNA, ký tự cấm, sai lớp brand/xưng hô, rủi ro chính sách Meta), dấu vết văn AI, và 1 đoạn gợi ý sửa.`,
       systemSuffix: pb.text,
       user: `LOẠI: ${kind} · KÊNH: ${v.channel ?? "?"}\nTIÊU ĐỀ: ${v.title}\nHOOK: ${v.hook}\n\nNỘI DUNG:\n${v.body}\n\nCTA: ${v.cta}`,
       sandbox: () => ({ score: 0, verdict: "sua" as const, issues: [], dnaViolations: [], aiTraces: [], fix: "" }),

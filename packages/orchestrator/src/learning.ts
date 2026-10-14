@@ -2,6 +2,7 @@ import { audit, byId, emit, insert, q, update, type Row } from "@dotaka/db";
 import { REJECTION_REASONS } from "@dotaka/jev";
 import { AppError } from "@dotaka/shared";
 import { latestDaily, sumMetrics } from "./ads.ts";
+import { applySalesFlowProposal } from "./chat-insight.ts";
 
 /**
  * Feedback loop (spec §13). Agents learn by changing data and versions, never code:
@@ -14,12 +15,13 @@ export const AUTO_APPLY_POLICY = {
     { targetType: "posting_schedule", boundsHours: [7, 22], requiresCanary: true },
     { targetType: "rule_threshold", maxRelativeChangePct: 15, requiresDryRun: true },
   ],
-  alwaysHuman: ["dna", "strategy", "budget_cap", "permissions", "bot_boundaries", "core_prompt", "knowledge", "content_playbook"],
+  alwaysHuman: ["dna", "strategy", "budget_cap", "permissions", "bot_boundaries", "core_prompt", "knowledge", "content_playbook", "sales_flow"],
 };
 
-function propose(bizId: string, p: { target_type: string; target_id?: string | null; title: string; diff: Row; rationale: string; risk: string; lessonIds?: string[] }) {
+/** opts.human: luôn đưa vào hộp Duyệt dù chính sách cho tự áp dụng. */
+export function propose(bizId: string, p: { target_type: string; target_id?: string | null; title: string; diff: Row; rationale: string; risk: string; lessonIds?: string[] }, opts: { human?: boolean } = {}) {
   if (q.get("SELECT id FROM change_proposal WHERE biz_id = ? AND title = ? AND status IN ('draft','awaiting_approval','testing')", bizId, p.title)) return null;
-  const auto = AUTO_APPLY_POLICY.allow.some((a) => a.targetType === p.target_type) && !AUTO_APPLY_POLICY.alwaysHuman.includes(p.target_type);
+  const auto = !opts.human && AUTO_APPLY_POLICY.allow.some((a) => a.targetType === p.target_type) && !AUTO_APPLY_POLICY.alwaysHuman.includes(p.target_type);
   const row = insert("change_proposal", { biz_id: bizId, target_type: p.target_type, target_id: p.target_id ?? null, title: p.title, diff: p.diff, rationale: p.rationale, lesson_ids: p.lessonIds ?? [], risk: p.risk, status: auto ? "draft" : "awaiting_approval", auto_apply_allowed: auto ? 1 : 0 });
   if (!auto) {
     insert("approval", { biz_id: bizId, subject_type: "change_proposal", subject_id: row.id, agent_key: "feedback", title: p.title, risk: p.risk, status: "pending", preview: { diff: p.diff, rationale: p.rationale } });
@@ -110,6 +112,9 @@ export function applyProposal(bizId: string, proposalId: string, actor: string) 
       update("rule", rule.id, { definition: def, version: rule.version + 1, mode: "dry_run" }); // new version must re-earn live via dry-run
       break;
     }
+    case "sales_flow": // Vòng lặp Thấu hiểu khách (bước Tối ưu) → thêm băn khoăn / mẫu câu / tin nhắc lại vào kịch bản chốt đơn
+      applySalesFlowProposal(bizId, p, actor);
+      break;
   }
   update("change_proposal", p.id, { status: "applied" });
   audit(bizId, actor, "proposal.applied", { type: "change_proposal", id: p.id }, { target: p.target_type });

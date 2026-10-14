@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { activeDna, audit, bizSettings, byId, emit, isKilled, q, update, type Row } from "@dotaka/db";
 import { AppError, logger, nowIso } from "@dotaka/shared";
+import { linkCommentSettings } from "./link-product.ts";
 import { createGoal } from "./runtime.ts";
 import { decideApproval } from "./approvals.ts";
 import { makeVideoFromScript, planVideoFromScript } from "./script-video.ts";
@@ -504,7 +505,10 @@ function createAutopilotGoal(bizId: string, product: Row, platform: AutopilotPla
     product.audience ? `Đối tượng: ${product.audience}.` : "",
     product.price ? `Học phí/giá: ${Number(product.price).toLocaleString("vi-VN")}đ (chỉ dùng nếu DNA đã xác nhận).` : "",
     dna.leadMagnet ? `Cửa vào cho khách: ${dna.leadMagnet}.` : "",
-    `Chốt bằng: ${product.link ? `link ${product.link}` : dna.cta?.text ? dna.cta.text : "mời khách nhắn tin / để lại SĐT để được tư vấn"}.`,
+    // Facebook + tự gắn link: link nằm ở bình luận đầu tiên (hệ thống tự gắn sau khi đăng) → trong bài chỉ nhắc, không dán link.
+    platform === "facebook" && (product.shortLink || product.link) && linkCommentSettings(bizId).auto
+      ? "Chốt bằng: link sản phẩm đặt ở BÌNH LUẬN ĐẦU TIÊN (hệ thống tự gắn sau khi đăng) — trong bài chỉ nhắc \"link ở bình luận\", KHÔNG dán link vào bài."
+      : `Chốt bằng: ${product.link ? `link ${product.link}` : dna.cta?.text ? dna.cta.text : "mời khách nhắn tin / để lại SĐT để được tư vấn"}.`,
     videoHint,
     scout,
   ].filter(Boolean).join(" ");
@@ -587,7 +591,7 @@ export function autopilotPipeline(bizId: string, now = new Date()): Stage[] {
   // 6. Đăng bài
   const scheduled = n("SELECT COUNT(*) FROM publish_job WHERE biz_id = ? AND mode != 'draft' AND status = 'scheduled'");
   const pubToday = n("SELECT COUNT(*) FROM post WHERE biz_id = ? AND published_at >= ? AND COALESCE(simulated, 0) = 0", dayStart);
-  const broken = n("SELECT COUNT(*) FROM publish_job WHERE biz_id = ? AND status IN ('needs_check','failed') AND updated_at >= ?", new Date(now.getTime() - 3 * DAY).toISOString());
+  const broken = n("SELECT COUNT(*) FROM publish_job WHERE biz_id = ? AND status IN ('needs_check','failed','needs_setup') AND updated_at >= ?", new Date(now.getTime() - 3 * DAY).toISOString());
   stages.push({ key: "publish", title: "Đăng bài", href: "/publish", count: scheduled, label: "bài đã lên lịch", detail: `${pubToday} bài đăng thật hôm nay`,
     need: broken ? { text: `${broken} lượt đăng lỗi / cần kiểm tra`, href: "/publish" } : null });
 
@@ -598,7 +602,7 @@ export function autopilotPipeline(bizId: string, now = new Date()): Stage[] {
     need: adWait ? { text: `Xem ${adWait} đề xuất chạy ads bài thắng`, href: "/approvals" } : null });
 
   // 8. Chăm khách & chat
-  const comments = n("SELECT COUNT(*) FROM post_comment WHERE biz_id = ? AND created_at >= ?", dayStart);
+  const comments = n("SELECT COUNT(*) FROM post_comment WHERE biz_id = ? AND created_at >= ? AND COALESCE(label_source, '') != 'system'", dayStart);
   const leads = n("SELECT COUNT(*) FROM lead WHERE biz_id = ? AND created_at >= ?", dayStart);
   const handoff = n("SELECT COUNT(*) FROM conversation WHERE biz_id = ? AND state = 'handoff_pending'");
   stages.push({ key: "nurture", title: "Chăm khách & lead", href: "/chat", count: leads, label: "lead mới hôm nay", detail: `${comments} bình luận hôm nay`,

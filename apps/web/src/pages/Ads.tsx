@@ -93,14 +93,14 @@ export function Ads() {
 
       <PlatformTabs value={pf} onChange={setPf} allowAll />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat icon={Wallet} tone="amber" label="Ngân sách đã chi (7 ngày)" value={vnd(spend7)} sub={`${ads.filter((a) => a.status === "active").length}/${ads.length} ad đang chạy`} />
         <Stat icon={Coins} tone="green" label="Doanh thu từ quảng cáo" value={vnd(revenue)} sub={attributed ? "Theo liên kết attribution đủ tin cậy" : "Doanh thu đơn đã thanh toán 7 ngày"} />
         <Stat icon={TrendingUp} tone="blue" label="ROAS" value={roas == null ? "—" : `${roas.toFixed(1).replace(".", ",")}x`} sub="Doanh thu / chi phí quảng cáo" />
         <Stat icon={Target} tone="violet" label="Số kết quả (7 ngày)" value={num(results7)} sub={results7 ? `CPA TB ${vnd(spend7 / results7)}` : undefined} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-6 wide:grid-cols-[minmax(0,1fr)_340px]">
         <Card title="Chi tiêu, doanh thu & ROAS (14 ngày)">
           {!met ? <Loading /> : (
             <div className="h-72">
@@ -176,7 +176,7 @@ export function Ads() {
         )}
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card title={<span className="flex items-center gap-2"><Megaphone className="h-4 w-4 text-blue-600" />Gợi ý quảng cáo từ bài viết</span>}>
           {!cands ? <Loading /> : cands.length === 0 ? <Empty>Chưa có bài nào đủ điểm để đề xuất chạy ads.</Empty> : (
             <div className="space-y-3">

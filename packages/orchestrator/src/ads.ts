@@ -1,7 +1,7 @@
 import { RuleDefinition, type CanonicalMetrics } from "@dotaka/contracts";
 import { audit, bizSettings, byId, emit, insert, isKilled, q, tx, update, type Row } from "@dotaka/db";
 import { sendTelegram, type PlatformKey } from "@dotaka/connectors";
-import { adRefOf, connectorForAccount } from "./connections.ts";
+import { adRefOf, connectorForAccount, connectorForAdPublish } from "./connections.ts";
 import { DEFAULT_ATTRIBUTION, describeAction, evaluateRule, measureAttributionLag, suggestAttributionDays, type AttributionOptions, type MetricRevision, type RuleEntity } from "@dotaka/rule-engine";
 import { AppError, nowIso } from "@dotaka/shared";
 import { PermanentError, enqueue } from "./queue.ts";
@@ -256,6 +256,17 @@ export function revertAction(bizId: string, actionId: string, actor = "ceo") {
   return rev;
 }
 
+/**
+ * Total daily budget of everything running, counted ONCE per budget owner: several ads in one adset share the
+ * adset budget (each ad row carries it, like Meta reports it), so summing ad rows would count it once per ad.
+ * `excludeAdId` leaves out that ad's budget owner (used when that budget is about to change).
+ */
+export function activeAdBudget(bizId: string, excludeAdId?: string): number {
+  const owner = "COALESCE(json_extract(meta, '$.budgetOwnerId'), id)";
+  const skip = excludeAdId ? q.get<Row>(`SELECT ${owner} o FROM ad WHERE id = ?`, excludeAdId)?.o : undefined;
+  return q.scalar<number>(`SELECT COALESCE(SUM(b), 0) FROM (SELECT MAX(daily_budget) b FROM ad WHERE biz_id = ? AND status = 'active'${skip ? ` AND ${owner} != ?` : ""} GROUP BY ${owner})`, ...(skip ? [bizId, skip] : [bizId])) ?? 0;
+}
+
 /** Manual change from the UI or MCP: same path (action -> queue), same caps. */
 export function proposeManualAction(bizId: string, adId: string, type: "pause_ad" | "resume_ad" | "update_budget", amount: number | undefined, actor: string) {
   const ad = byId<Row>("ad", adId);
@@ -263,7 +274,7 @@ export function proposeManualAction(bizId: string, adId: string, type: "pause_ad
   const s = bizSettings(bizId);
   if (type === "update_budget") {
     if (!amount || amount <= 0) throw new AppError("INVALID", "Ngân sách không hợp lệ");
-    const total = q.scalar<number>("SELECT COALESCE(SUM(daily_budget),0) FROM ad WHERE biz_id = ? AND status = 'active' AND id != ?", bizId, adId);
+    const total = activeAdBudget(bizId, adId);
     if (total + amount > s.caps.maxTotalDailyAdBudget) throw new AppError("CAP_EXCEEDED", `Vượt trần tổng ngân sách ngày ${s.caps.maxTotalDailyAdBudget.toLocaleString("vi-VN")}đ`);
   }
   const act = insert("action", {
@@ -282,8 +293,12 @@ export async function publishCandidate(bizId: string, candidateId: string) {
   const s = bizSettings(bizId);
   if (isKilled(bizId, "ads")) { update("ad_candidate", cand.id, { status: "failed", decision_note: "Kill switch quảng cáo" }); return; }
   const post = byId<Row>("post", cand.post_id)!;
-  if (q.get("SELECT id FROM ad WHERE post_id = ? AND status = 'active'", post.id)) { update("ad_candidate", cand.id, { status: "failed", decision_note: "Bài đã có ad đang chạy" }); return; }
-  const total = q.scalar<number>("SELECT COALESCE(SUM(daily_budget),0) FROM ad WHERE biz_id = ? AND status = 'active'", bizId);
+  // Tự động (đề xuất bài điểm cao / luồng tự chạy) không tự nhân đôi chi tiêu trên cùng 1 bài. Sếp tạo tay ở
+  // "Tạo chiến dịch" thì 1 bài được chạy ở nhiều chiến dịch / nhiều nhóm khác nhau.
+  if (cand.options?.source !== "quick" && q.get("SELECT id FROM ad WHERE post_id = ? AND status = 'active'", post.id)) { update("ad_candidate", cand.id, { status: "failed", decision_note: "Bài đã có ad đang chạy" }); return; }
+  const total = activeAdBudget(bizId);
+  const structure = cand.options?.structure as CandidateStructure | undefined;
+  if (structure?.adsets?.length) return publishStructure(bizId, cand, structure, total);
   if (total + cand.daily_budget > s.caps.maxTotalDailyAdBudget) { update("ad_candidate", cand.id, { status: "failed", decision_note: "Vượt trần tổng ngân sách ngày" }); return; }
 
   update("ad_candidate", cand.id, { status: "publishing" });
@@ -295,7 +310,7 @@ export async function publishCandidate(bizId: string, candidateId: string) {
   const channel = byId<Row>("channel", post.channel_id);
   const opts = cand.options ?? {};
   const name = opts.name || `${today().replace(/-/g, "")}_${(channel?.name ?? "TAKI").replace(/\s+/g, "")}_${post.external_id.slice(-6)}_${tpl?.name ?? "msg"}`; // {date}_{page}_{postId}_{template}
-  const { c } = connectorForAccount(account.id, platform);
+  const { c } = await connectorForAdPublish(account.id, channel?.external_id, platform);
   let res: Awaited<ReturnType<NonNullable<typeof c.createAdFromPost>>>;
   try {
     res = await c.createAdFromPost!({ postExternalId: post.external_id, pageExternalId: channel?.external_id, accountExternalId: account.external_id, name, dailyBudget: cand.daily_budget, template: tpl?.definition, startPaused: !!opts.startPaused, currency: account.currency }, `cand:${cand.id}`);
@@ -313,10 +328,84 @@ export async function publishCandidate(bizId: string, candidateId: string) {
       ?? insert("ad", { biz_id: bizId, ad_account_id: account.id, platform, external_id: res.externalId, campaign_id: campaign.id, name, status: adStatus, daily_budget: cand.daily_budget, post_id: post.id, currency: account.currency, meta: res.meta ?? {} });
     insert("post_ad_link", { biz_id: bizId, post_id: post.id, ad_id: ad.id });
     update("ad_candidate", cand.id, { status: "published", ad_id: ad.id, ...(activationError ? { decision_note: `Đã tạo nhưng chưa bật được (đang tạm dừng): ${activationError}` } : {}) });
-    update("post", post.id, { ad_status: adStatus === "active" ? "running" : "none" });
+    syncPostAdStatus(post.id);
     insert("action", { biz_id: bizId, actor: "agent", type: "create_ad_from_post", target_type: "ad", target_id: ad.id, params: { candidateId: cand.id }, before: {}, after: { status: adStatus, daily_budget: cand.daily_budget }, status: "done", reason: activationError ? `Đã tạo (tạm dừng) — chưa bật được: ${activationError}` : "Đề xuất đã được duyệt", reversible: 1, idempotency_key: `create:${cand.id}` });
   });
   audit(bizId, "ads", "ad.created_from_post", { type: "ad_candidate", id: cand.id }, { name });
+  emit(bizId, "action.executed", { type: "create_ad_from_post", target: name });
+}
+
+/** post.ad_status từ quảng cáo thật của bài: "running" khi CÒN BẤT KỲ quảng cáo nào đang chạy (1 bài có thể ở nhiều chiến dịch). */
+export function syncPostAdStatus(postId: string) {
+  const running = q.get("SELECT id FROM ad WHERE post_id = ? AND status = 'active' LIMIT 1", postId);
+  update("post", postId, { ad_status: running ? "running" : "none" });
+}
+
+/** Saved on ad_candidate.options.structure by "Tạo chiến dịch" when several posts / adsets are chosen. */
+export type CandidateStructure = {
+  /** Every selected post (stored post ids); ad_candidate.post_id is the first one. */
+  postIds: string[];
+  /** Per adset: daily budget + optional own template (targeting). */
+  adsets: { dailyBudget: number; templateId?: string | null; name?: string }[];
+  /** "test" = công thức 1:3:3, "custom" = Sếp tự chọn số nhóm / số bài. */
+  mode?: "test" | "custom";
+};
+
+/** 1 campaign → N adsets → M ads (one per post). Same checks as a single ad, budget counted per adset. */
+async function publishStructure(bizId: string, cand: Row, st: CandidateStructure, activeTotal: number) {
+  const s = bizSettings(bizId);
+  const fail = (note: string) => { update("ad_candidate", cand.id, { status: "failed", decision_note: note }); };
+  const posts = st.postIds.map((id) => byId<Row>("post", id)).filter((p): p is Row => !!p);
+  if (!posts.length) return fail("Không thấy bài viết đã chọn");
+  const total = st.adsets.reduce((a, x) => a + x.dailyBudget, 0);
+  if (!cand.options?.startPaused && activeTotal + total > s.caps.maxTotalDailyAdBudget) return fail("Vượt trần tổng ngân sách ngày");
+
+  update("ad_candidate", cand.id, { status: "publishing" });
+  const platform = cand.platform as PlatformKey;
+  const account = cand.ad_account_id ? byId<Row>("ad_account", cand.ad_account_id) : undefined;
+  if (!account) return fail(`Chưa kết nối tài khoản quảng cáo ${platform} (Quản lý kết nối)`);
+  if (!account.whitelisted) return fail("Tài khoản quảng cáo không nằm trong whitelist");
+  const tpl = cand.ad_template_id ? byId<Row>("ad_template", cand.ad_template_id) : null;
+  const channel = byId<Row>("channel", posts[0].channel_id);
+  const opts = cand.options ?? {};
+  const name = opts.name || `${today().replace(/-/g, "")}_${(channel?.name ?? "TAKI").replace(/\s+/g, "")}_${st.adsets.length}nhom_${posts.length}bai_${tpl?.name ?? "msg"}`;
+  const { c } = await connectorForAdPublish(account.id, channel?.external_id, platform);
+  if (!c.createCampaignFromPosts) return fail("Nền tảng này chưa hỗ trợ tạo chiến dịch nhiều nhóm");
+  let res: Awaited<ReturnType<NonNullable<typeof c.createCampaignFromPosts>>>;
+  try {
+    res = await c.createCampaignFromPosts({
+      name, template: tpl?.definition, accountExternalId: account.external_id, pageExternalId: channel?.external_id,
+      startPaused: !!opts.startPaused, currency: account.currency,
+      posts: posts.map((p) => ({ postExternalId: p.external_id })),
+      adsets: st.adsets.map((a) => ({ dailyBudget: a.dailyBudget, name: a.name, template: a.templateId ? byId<Row>("ad_template", a.templateId)?.definition : undefined })),
+    }, `cand:${cand.id}`);
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e));
+    throw new PermanentError(e instanceof Error ? e.message : String(e));
+  }
+  const adStatus = res.status ?? (opts.startPaused ? "paused" : "active");
+  const activationError = (res.meta as any)?.activationError as string | undefined;
+  const byExternal = new Map(posts.map((p) => [String(p.external_id), p]));
+  let firstAdId: string | null = null;
+  tx(() => {
+    let campaign = q.get<Row>("SELECT id FROM campaign WHERE ad_account_id = ? AND external_id = ?", account.id, res.campaignExternalId);
+    if (!campaign) campaign = insert("campaign", { biz_id: bizId, ad_account_id: account.id, platform, external_id: res.campaignExternalId, name, objective: tpl?.definition?.objective ?? "messages", status: adStatus, daily_budget: null, target_cpa: tpl?.definition?.targetCpa ?? null });
+    for (const set of res.adsets) {
+      for (const a of set.ads) {
+        const post = byExternal.get(String(a.postExternalId));
+        // Each ad row carries its adset budget (same as an import from Meta); totals count it once per budgetOwnerId.
+        const ad = q.get<Row>("SELECT id FROM ad WHERE ad_account_id = ? AND external_id = ?", account.id, a.externalId)
+          ?? insert("ad", { biz_id: bizId, ad_account_id: account.id, platform, external_id: a.externalId, campaign_id: campaign.id, name: a.name, status: adStatus, daily_budget: set.dailyBudget, post_id: post?.id ?? null, currency: account.currency,
+            meta: { ...(res.meta ?? {}), adsetId: set.externalId, adsetName: set.name, budgetOwner: "adset", budgetOwnerId: set.externalId, structureCandidateId: cand.id } });
+        firstAdId ??= ad.id;
+        if (post) insert("post_ad_link", { biz_id: bizId, post_id: post.id, ad_id: ad.id });
+      }
+    }
+    for (const p of posts) syncPostAdStatus(p.id);
+    update("ad_candidate", cand.id, { status: "published", ad_id: firstAdId, ...(activationError ? { decision_note: `Đã tạo nhưng chưa bật được (đang tạm dừng): ${activationError}` } : {}) });
+    insert("action", { biz_id: bizId, actor: "agent", type: "create_ad_from_post", target_type: "campaign", target_id: campaign.id, params: { candidateId: cand.id, adsets: res.adsets.length, posts: posts.length }, before: {}, after: { status: adStatus, daily_budget: total }, status: "done", reason: activationError ? `Đã tạo (tạm dừng) — chưa bật được: ${activationError}` : `Chiến dịch ${res.adsets.length} nhóm × ${posts.length} bài`, reversible: 1, idempotency_key: `create:${cand.id}` });
+  });
+  audit(bizId, "ads", "ad.campaign_created", { type: "ad_candidate", id: cand.id }, { name, adsets: res.adsets.length, posts: posts.length, total });
   emit(bizId, "action.executed", { type: "create_ad_from_post", target: name });
 }
 
@@ -357,7 +446,7 @@ export function createAdsProposals(task: Row) {
       if (!ad.daily_budget || ad.status !== "active") continue;
       const pct = Math.max(-20, Math.min(20, d.budgetChangePct || (d.decision === "scale" ? 20 : -20)));
       const next = Math.round((ad.daily_budget * (1 + pct / 100)) / 1000) * 1000;
-      const total = q.scalar<number>("SELECT COALESCE(SUM(daily_budget),0) FROM ad WHERE biz_id = ? AND status = 'active'", bizId);
+      const total = activeAdBudget(bizId);
       if (next > ad.daily_budget && total + (next - ad.daily_budget) > s.caps.maxTotalDailyAdBudget) continue;
       type = "update_budget"; after = { daily_budget: next };
     }

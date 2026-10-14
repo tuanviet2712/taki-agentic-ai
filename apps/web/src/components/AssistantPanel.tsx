@@ -91,35 +91,22 @@ export function Markdown({ text }: { text: string }) {
 }
 
 // ---------------- Panel ----------------
-/** Wide screens: the panel docks to the right and pushes the page (no overlap). Narrow: floating overlay. */
-const DOCK_MQ = "(min-width: 1200px)";
-function useWide() {
-  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.matchMedia(DOCK_MQ).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(DOCK_MQ);
-    const h = () => setWide(mq.matches);
-    mq.addEventListener("change", h);
-    return () => mq.removeEventListener("change", h);
-  }, []);
-  return wide;
-}
-
+/** Always a floating overlay above the page (never pushes/shrinks the layout underneath). */
 export function AssistantPanel() {
   const location = useLocation();
-  const wide = useWide();
-  // Collapsed by default; only a wide screen remembers "open" (an overlay would cover the page).
-  const [open, setOpen] = useState(() => store.get("assistant.open") === "1" && window.matchMedia(DOCK_MQ).matches);
+  // Collapsed on every load: an open overlay would cover the page the user came to see.
+  const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("chat");
   const [threadId, setThreadId] = useState<string | null>(() => store.get("assistant.thread"));
-  const info = useApi<any>("assistant");
+  const info = useApi<any>("assistant", ["llm."]);
   const findings = useApi<any[]>("assistant/findings", ["task.", "approval.", "creative.", "alert.", "conversation.handoff"]);
   const toast = useToast();
-  useEffect(() => store.set("assistant.open", open ? "1" : null), [open]);
-  const docked = open && wide;
   useEffect(() => {
-    document.documentElement.classList.toggle("assistant-docked", docked);
-    return () => document.documentElement.classList.remove("assistant-docked");
-  }, [docked]);
+    if (!open) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !(e.target instanceof HTMLTextAreaElement)) setOpen(false); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [open]);
   useEffect(() => store.set("assistant.thread", threadId), [threadId]);
   const urgent = (findings.data ?? []).filter((f) => f.level !== "info").length;
 
@@ -140,17 +127,17 @@ export function AssistantPanel() {
   if (!open) {
     if (location.pathname.startsWith("/brain")) return null; // the brain page has its own "Nói với Ngân Nguyệt" bar
     return (
-      <button onClick={() => setOpen(true)} title="Trợ lý Ngân Nguyệt" className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-card py-1.5 pl-1.5 pr-4 shadow-lg ring-1 ring-line transition hover:shadow-xl">
-        <span className="relative"><NguyetAvatar size={40} />{urgent > 0 && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white ring-2 ring-card">{urgent}</span>}</span>
-        <span className="text-left leading-tight"><span className="block text-sm font-semibold text-ink">Ngân Nguyệt</span><span className="block text-[11px] text-muted">Trợ lý điều phối</span></span>
+      <button onClick={() => setOpen(true)} title="Trợ lý Ngân Nguyệt" aria-label="Mở trợ lý Ngân Nguyệt" className="group fixed bottom-[calc(var(--bottom-nav-h)+1rem)] right-4 z-40 flex items-center gap-2 rounded-full bg-card p-1 shadow-pop ring-1 ring-line transition-all hover:pr-4 hover:shadow-sheet">
+        <span className="relative"><NguyetAvatar size={44} />{urgent > 0 && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white ring-2 ring-card">{urgent}</span>}</span>
+        <span className="hidden max-w-0 overflow-hidden whitespace-nowrap text-left leading-tight opacity-0 transition-all duration-200 group-hover:max-w-[10rem] group-hover:opacity-100 group-focus-visible:max-w-[10rem] group-focus-visible:opacity-100 sm:block"><span className="block text-sm font-semibold text-ink">Ngân Nguyệt</span><span className="block text-[11px] text-muted">Trợ lý điều phối</span></span>
       </button>
     );
   }
 
   return (
-    <div className={cx("fixed z-40 flex flex-col overflow-hidden border-line bg-card", docked
-      ? "inset-y-0 right-0 w-[420px] border-l shadow-xl"
-      : "bottom-4 right-4 h-[min(760px,calc(100vh-2rem))] w-[440px] max-w-[calc(100vw-2rem)] rounded-2xl border shadow-2xl")}>
+    <>
+    <div className="fixed inset-0 z-40 bg-slate-900/30 sm:hidden" onClick={() => setOpen(false)} aria-hidden />
+    <div role="dialog" aria-label="Trợ lý Ngân Nguyệt" className="fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col overflow-hidden rounded-2xl border border-line bg-card shadow-[0_24px_64px_-12px_rgba(15,23,42,0.35)] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-auto sm:h-[min(780px,calc(100vh-2rem))] sm:w-[440px]">
       <div className="flex items-center gap-3 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 px-4 py-3 text-white">
         <NguyetAvatar size={44} />
         <div className="min-w-0 flex-1"><p className="truncate text-base font-bold">Trợ lý Ngân Nguyệt</p><p className="truncate text-xs text-white/80">Tổng điều phối · riêng của Sếp</p></div>
@@ -170,6 +157,7 @@ export function AssistantPanel() {
       {tab === "feedback" && <FeedbackTab open={(id) => { setThreadId(id); setTab("chat"); }} />}
       {tab === "reminders" && <RemindersTab ask={(t) => { setTab("chat"); setPendingAsk(t); }} />}
     </div>
+    </>
   );
 }
 
@@ -259,7 +247,7 @@ function ChatTab({ info, threadId, setThreadId, newThread, pendingAsk, clearAsk,
             <NguyetAvatar size={72} />
             <p className="mt-3 font-semibold text-ink">Em là Ngân Nguyệt — trợ lý riêng của Sếp.</p>
             <p className="mt-1 text-xs text-muted">Em điều phối toàn bộ Agentic AI: giao việc ngay cho các agent, theo dõi và can thiệp mọi tác vụ, báo cáo số liệu thật. Việc nhạy cảm em sẽ hỏi Sếp xác nhận trước.</p>
-            {info && !info.ready && <p className="mt-2 rounded-xl bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">Cần bật chế độ Tài khoản Claude (Cài đặt → Model AI) để em làm việc.</p>}
+            {info && !info.ready && <p className="mt-2 rounded-xl bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">{info.authError ?? "Chọn và đăng nhập Claude hoặc ChatGPT trong Kết nối AI để em làm việc."}</p>}
             <div className="mt-4 flex flex-col items-center gap-2">
               {(info?.suggestions ?? []).map((s: string) => (
                 <button key={s} onClick={() => void send(s)} className="rounded-full border border-dashed border-blue-400/60 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-500/5 dark:text-blue-300">{s}</button>

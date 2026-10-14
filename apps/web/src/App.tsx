@@ -12,6 +12,7 @@ import { Content } from "./pages/Content";
 import { Publish } from "./pages/Publish";
 import { Ads } from "./pages/Ads";
 import { Chat } from "./pages/Chat";
+import { SalesFlow } from "./pages/SalesFlow";
 import { Reports } from "./pages/Reports";
 import { Approvals } from "./pages/Approvals";
 import { Knowledge } from "./pages/Knowledge";
@@ -87,6 +88,7 @@ export function App() {
           <Route path="/mcp" element={<Navigate to="/ads/ai-gateway" replace />} />
           <Route path="/logs" element={<Navigate to="/ads/logs" replace />} />
           <Route path="/chat" element={<Chat />} />
+          <Route path="/sales-flow" element={<SalesFlow />} />
           <Route path="/zalo" element={<ZaloFollowUp />} />
           <Route path="/orchestra" element={<Orchestra />} />
           <Route path="/reports" element={<Reports />} />

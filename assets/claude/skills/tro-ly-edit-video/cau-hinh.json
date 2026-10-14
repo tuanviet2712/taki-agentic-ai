@@ -1,0 +1,72 @@
+{
+  "_doc": "Hồ sơ thương hiệu. Mỗi người sửa file này theo mình, không sửa script.",
+  "kenh": {
+    "ten": "Kênh của bạn",
+    "seri": "",
+    "ngon_ngu": "vi"
+  },
+  "kho": {
+    "duong_dan": "~/Movies/VideoKit-Free",
+    "_doc": "Trỏ tới kho tài nguyên của bạn. Xem CAI-DAT.md để biết cấu trúc thư mục."
+  },
+  "may": {
+    "che_do": "chuan",
+    "_doc": "nhanh = máy yếu, dựng gấp. chuan = mặc định. ky = chậm, chất nhất. Xem reference/may-yeu.md."
+  },
+  "chu": {
+    "phu_de": "BeVietnamPro-Black.ttf",
+    "title_to": "Anton-Regular.ttf",
+    "bia": "BarlowCondensed-Black.ttf",
+    "than": "BeVietnamPro-Bold.ttf",
+    "serif": "Lora-Italic-Var.ttf",
+    "_doc": "Font phải có dấu tiếng Việt đầy đủ. Xem reference/chu-va-hieu-ung.md."
+  },
+  "mau": {
+    "nhan": "#FFD200",
+    "chu_chinh": "#FFFFFF",
+    "nen_card": "#0E0E12",
+    "vien": "#000000"
+  },
+  "logo": {
+    "duong_dan": "",
+    "_doc": "Để trống nếu không có. Chỉ gắn lên bìa khi video đúng chủ đề thương hiệu đó."
+  },
+  "quay": {
+    "may": "DJI Pocket 3",
+    "profile_mau": "thuong",
+    "_doc": "profile_mau = 'thuong' thì KHÔNG áp LUT. Đổi thành 'dlog' mới dùng LUT."
+  },
+  "dung": {
+    "toc_do": 1.1,
+    "giu_nghi": 0.2,
+    "giu_nghi_dai": 0.28,
+    "nguong_lang": 0.33,
+    "khung_hinh": 30,
+    "kich_thuoc": [
+      1080,
+      1920
+    ]
+  },
+  "am_thanh": {
+    "giong": -16,
+    "nhac": -34,
+    "nhan": -27,
+    "chuyen_canh": -30,
+    "giao_dien": -29,
+    "dich_cuoi": -15.5,
+    "dinh_that": -2.0
+  },
+  "bia": {
+    "kieu": "hai-dong",
+    "cat_tiktok": [
+      240,
+      1680
+    ],
+    "le_duoi": 100,
+    "mo_tu_y": 880
+  },
+  "ban_giao": {
+    "thu_muc": "~/Downloads",
+    "moi_video_mot_thu_muc": true
+  }
+}

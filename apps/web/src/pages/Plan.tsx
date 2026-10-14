@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Lightbulb, Plus, RefreshCw, Target, Wand2 } fro
 import { api, useApi } from "../lib/api";
 import { TaskResult } from "../components/TaskResult";
 import { AGENT_LABEL, CONTENT_STATUS, TASK_STATUS, ddmm, hhmm, num, timeAgo, vnd } from "../lib/format";
-import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, Progress, cx, inputCls, platformName, useToast } from "../components/ui";
+import { Badge, Button, Card, Empty, ExpandableText, Field, Loading, Modal, PageHeader, PlatformIcon, Progress, cx, inputCls, platformName, useToast } from "../components/ui";
 
 const TEMPLATE_LABEL: Record<string, string> = { launch_campaign: "Ra mắt chiến dịch (đủ 9 khâu)", weekly_content: "Nội dung tuần" };
 const GOAL_STATUS: Record<string, { label: string; tone: any }> = {
@@ -11,7 +11,9 @@ const GOAL_STATUS: Record<string, { label: string; tone: any }> = {
 };
 const FUNNEL: Record<string, { label: string; tone: any }> = { tofu: { label: "TOFU · Nhận biết", tone: "blue" }, mofu: { label: "MOFU · Cân nhắc", tone: "violet" }, bofu: { label: "BOFU · Chốt đơn", tone: "green" } };
 const DAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-const EMPTY_FORM = { title: "", description: "", template: "launch_campaign", budgetAds: "", dueDate: "", stopAfter: "" };
+const EMPTY_FORM = { title: "", description: "", template: "launch_campaign", budgetAds: "", dueDate: "", stopAfter: "", product: "", contentCount: "", contentKind: "" };
+/** Loại nội dung của kế hoạch ("" = tự đọc từ tiêu đề / mô tả). */
+const KIND_LABEL: Record<string, string> = { "": "Tự nhận biết từ yêu cầu", mixed: "Đa kênh (bài, ảnh, video theo kế hoạch)", seo: "Toàn bài SEO website", video: "Toàn kịch bản video" };
 /** Chạy chuỗi đến bước nào thì dừng (Sếp bấm "Triển khai tiếp" khi muốn đi tiếp). */
 const STOP_LABEL: Record<string, string> = { "": "Chạy hết chuỗi (đến khi ra bài / kịch bản)", brief: "Dừng sau Brief", market_research: "Dừng sau Nghiên cứu thị trường", strategy: "Dừng sau Kế hoạch (chưa viết bài)" };
 const STOP_SHORT: Record<string, string> = { brief: "Brief", market_research: "Nghiên cứu", strategy: "Kế hoạch" };
@@ -26,6 +28,9 @@ export function Plan() {
   }, [weekOffset]);
   const cal = useApi<any>(`calendar?from=${encodeURIComponent(days[0].toISOString())}&to=${encodeURIComponent(days[7].toISOString())}`, ["post.", "task.", "approval."]);
   const lessons = useApi<any[]>("lessons", ["proposal."]);
+  // Sản phẩm của chiến dịch (tuỳ chọn): lấy từ Mục tiêu & DNA — bài của chiến dịch gắn đúng link sản phẩm này dưới bình luận.
+  const dna = useApi<any>("dna");
+  const dnaProducts: any[] = (dna.data?.data?.products ?? []).filter((x: any) => x?.name);
   const proposals = useApi<any[]>("change-proposals", ["proposal."]);
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -37,7 +42,7 @@ export function Plan() {
     if (form.title.trim().length < 3 || form.description.trim().length < 3) return toast("Sếp nhập tiêu đề và mô tả (tối thiểu 3 ký tự)", "err");
     setBusy(true);
     try {
-      await api.post("goals", { title: form.title.trim(), description: form.description.trim(), template: form.template, budgetAds: Math.max(0, Math.round(Number(form.budgetAds) || 0)), dueDate: form.dueDate || undefined, stopAfter: form.stopAfter || undefined });
+      await api.post("goals", { title: form.title.trim(), description: form.description.trim(), template: form.template, budgetAds: Math.max(0, Math.round(Number(form.budgetAds) || 0)), dueDate: form.dueDate || undefined, stopAfter: form.stopAfter || undefined, product: form.product || undefined, contentCount: Number(form.contentCount) >= 1 ? Math.min(30, Math.round(Number(form.contentCount))) : undefined, contentKind: form.contentKind || undefined });
       toast(form.stopAfter ? `Đội agent đã bắt đầu — sẽ dừng sau bước ${STOP_SHORT[form.stopAfter]}` : "Đội agent đã bắt đầu");
       setOpen(false); setForm(EMPTY_FORM); goals.reload();
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
@@ -121,6 +126,14 @@ export function Plan() {
         <div className="space-y-3">
           <Field label="Tiêu đề mục tiêu"><input className={inputCls} placeholder="VD: Tuyển 120 học viên khóa CEO Vận Hành Tự Động đợt tháng 11" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
           <Field label="Mô tả"><textarea rows={3} className={inputCls} placeholder="Bối cảnh, sản phẩm ưu tiên, kênh, ràng buộc…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+          {dnaProducts.length > 0 && (
+            <Field label="Sản phẩm của chiến dịch (tuỳ chọn)" hint="Chọn thì bài đăng Facebook của chiến dịch được tự gắn link sản phẩm này dưới bình luận (link lấy ở Mục tiêu & DNA)">
+              <select className={inputCls} value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
+                <option value="">Không chọn</option>
+                {dnaProducts.map((x: any) => <option key={x.key || x.name} value={x.key || x.name}>{x.name}{x.shortLink || x.link ? "" : " (chưa có link)"}</option>)}
+              </select>
+            </Field>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Mẫu quy trình"><select className={inputCls} value={form.template} onChange={(e) => setForm({ ...form, template: e.target.value, stopAfter: e.target.value !== "launch_campaign" && form.stopAfter === "market_research" ? "" : form.stopAfter })}>{Object.entries(TEMPLATE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
             <Field label="Chạy đến đâu" hint={form.stopAfter ? "Xong bước này là dừng — Sếp xem kết quả rồi bấm Triển khai tiếp" : "Chuỗi tự chạy, Kế hoạch vẫn chờ Sếp duyệt"}>
@@ -128,6 +141,10 @@ export function Plan() {
                 {Object.entries(STOP_LABEL).filter(([v]) => v !== "market_research" || form.template === "launch_campaign").map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Số bài / kịch bản cần làm" hint={'Để trống: hệ thống tự đọc từ tiêu đề (vd "10 bài SEO"), không có thì mặc định 4-5. Tối đa 30.'}><input type="number" min={1} max={30} className={inputCls} value={form.contentCount} placeholder="vd 10" onChange={(e) => setForm({ ...form, contentCount: e.target.value })} /></Field>
+            <Field label="Loại nội dung"><select className={inputCls} value={form.contentKind} onChange={(e) => setForm({ ...form, contentKind: e.target.value })}>{Object.entries(KIND_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Ngân sách quảng cáo (VND)" hint={Number(form.budgetAds) ? vnd(Number(form.budgetAds)) : "Để trống nếu không chạy ads"}><input type="number" min={0} className={inputCls} value={form.budgetAds} onChange={(e) => setForm({ ...form, budgetAds: e.target.value })} /></Field>
@@ -156,16 +173,17 @@ function GoalCard({ g }: { g: any }) {
   const s = g.strategy, b = g.brief;
   return (
     <Card>
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2"><Target className="h-4 w-4 text-blue-600" /><h3 className="font-semibold text-ink">{g.title}</h3><Badge tone={st.tone}>{st.label}</Badge>{stopAt && <Badge tone="violet">Dừng sau: {STOP_SHORT[stopAt] ?? stopAt}</Badge>}</div>
-          <p className="mt-1 text-sm text-muted">{g.description}</p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2"><Target className="h-4 w-4 shrink-0 text-blue-600" /><h3 className="font-semibold text-ink">{g.title}</h3><Badge tone={st.tone}>{st.label}</Badge>{stopAt && <Badge tone="violet">Dừng sau: {STOP_SHORT[stopAt] ?? stopAt}</Badge>}</div>
+          {g.description && <ExpandableText lines={2} className="mt-1">{g.description}</ExpandableText>}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-4 text-sm">
-          <div><p className="text-xs text-muted">Mẫu</p><p className="font-medium text-ink">{TEMPLATE_LABEL[g.template] ?? g.template}</p></div>
-          <div><p className="text-xs text-muted">Ngân sách ads</p><p className="font-medium text-ink">{vnd(g.budget_ads)}</p></div>
-          <div><p className="text-xs text-muted">Hạn</p><p className="font-medium text-ink">{g.due_date ? new Date(g.due_date).toLocaleDateString("vi-VN") : "—"}</p></div>
-        </div>
+        {/* Same three facts, same order, same width on every goal card so the headers line up down the page. */}
+        <dl className="grid shrink-0 grid-cols-3 divide-x divide-line rounded-xl bg-soft/70 py-2 text-sm lg:w-[22rem]">
+          <div className="min-w-0 px-3"><dt className="text-xs text-muted">Mẫu</dt><dd className="truncate font-medium text-ink" title={TEMPLATE_LABEL[g.template] ?? g.template}>{TEMPLATE_LABEL[g.template] ?? g.template}</dd></div>
+          <div className="min-w-0 px-3"><dt className="text-xs text-muted">Ngân sách ads</dt><dd className="truncate font-medium text-ink">{vnd(g.budget_ads)}</dd></div>
+          <div className="min-w-0 px-3"><dt className="text-xs text-muted">Hạn</dt><dd className="truncate font-medium text-ink">{g.due_date ? new Date(g.due_date).toLocaleDateString("vi-VN") : "—"}</dd></div>
+        </dl>
       </div>
       {stopAt && g.status === "paused" && (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-violet-400/40 bg-violet-500/5 p-3">
@@ -174,11 +192,26 @@ function GoalCard({ g }: { g: any }) {
         </div>
       )}
       <div className="mt-4 flex items-center gap-3"><Progress value={tasks.length ? (done / tasks.length) * 100 : 0} tone="green" /><span className="whitespace-nowrap text-xs text-muted">{done}/{tasks.length} khâu xong</span></div>
+      {(() => {
+        // Số bài Sếp yêu cầu so với số bài đang có: thấy ngay bài nào chờ duyệt / bị chặn (bị chặn thì kế hoạch không tự làm tiếp bài đó).
+        const want = Number(g.params?.contentCount) || 0;
+        const pieces = tasks.filter((t) => ["content", "video_script", "seo_web"].includes(t.agent_key));
+        if (!want && !pieces.length) return null;
+        const n = (st: string[]) => pieces.filter((t) => st.includes(t.status)).length;
+        const blocked = n(["blocked", "failed", "rejected", "expired"]);
+        return (
+          <p className="mt-2 text-xs text-muted">
+            {want ? <>Yêu cầu <b className="text-ink">{want}</b> bài · {pieces.length < want && tasks.some((t) => t.agent_key === "strategy" && t.status === "done") ? <b className="text-amber-600">mới lập {pieces.length}</b> : <>đã lập {pieces.length}</>}</> : <>Đã lập {pieces.length} bài</>}
+            {" "}· xong {n(["done"])} · chờ duyệt {n(["awaiting_approval"])} · đang làm {n(["ready", "running", "in_review", "revising", "pending", "approved"])}
+            {blocked > 0 && <> · <b className="text-rose-600">bị chặn / lỗi {blocked}</b> (bấm vào bài để xem lý do và làm lại)</>}
+          </p>
+        );
+      })()}
       <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {tasks.map((t, i) => {
           const ts = TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const };
           return (
-            <button key={t.id} onClick={() => setOpenTask(t.id)} title="Bấm để xem kết quả và chỉnh sửa" className="group rounded-xl border border-line bg-page p-3 text-left transition hover:border-blue-400 hover:shadow-sm">
+            <button key={t.id} onClick={() => setOpenTask(t.id)} title="Bấm để xem kết quả và chỉnh sửa" className="group rounded-xl border border-line bg-soft/40 p-3 text-left transition hover:border-blue-400 hover:bg-card hover:shadow-card">
               <div className="flex items-start justify-between gap-2"><p className="min-w-0 truncate text-sm font-medium text-ink" title={t.title}>{i + 1}. {t.title}</p><Badge tone={ts.tone}>{ts.label}</Badge></div>
               <p className="mt-0.5 text-xs text-muted">{AGENT_LABEL[t.agent_key] ?? t.agent_key}{t.step ? ` · ${t.step}` : ""}</p>
               <div className="mt-2 flex items-center gap-2"><Progress value={(t.progress ?? 0) * 100} tone={ts.tone === "red" ? "red" : "blue"} className="h-1.5" /><span className="w-9 text-right text-[11px] text-muted">{Math.round((t.progress ?? 0) * 100)}%</span></div>

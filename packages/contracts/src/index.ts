@@ -223,11 +223,38 @@ export const CreateGoal = z.object({
   dueDate: z.string().optional(),
   /** Chạy đến bước này thì dừng (không triển khai các khâu sau) — Sếp bấm "Triển khai tiếp" khi muốn. */
   stopAfter: z.enum(["brief", "market_research", "strategy"]).optional(),
+  /** Sản phẩm của chiến dịch (key hoặc tên trong DNA) — bài đăng của chiến dịch gắn đúng link sản phẩm này dưới bình luận. */
+  product: z.string().trim().max(160).optional(),
+  /** Số bài / kịch bản cần làm (1-30). Bỏ trống: hệ thống tự đọc từ tiêu đề + mô tả ("10 bài SEO", "10 kịch bản video"), không có thì dùng mặc định của mẫu. */
+  contentCount: z.number().int().min(1).max(30).optional(),
+  /** Loại nội dung: mixed = đa kênh theo kế hoạch · seo = toàn bài SEO website · video = toàn kịch bản video. Bỏ trống: tự đọc từ yêu cầu. */
+  contentKind: z.enum(["mixed", "seo", "video"]).optional(),
 });
+/** Phiếu lên đơn Sếp điền/xác nhận khi duyệt đơn nháp (order_draft) — thông tin giao hàng, số lượng, giá, COD, đẩy Pancake. */
+export const OrderForm = z.object({
+  fullName: z.string().trim().min(1, "Thiếu tên người nhận").max(120),
+  /** Trống khi đẩy lại = giữ SĐT đã lưu. */
+  phone: z.string().trim().max(20).optional(),
+  address: z.string().trim().max(300).optional(),
+  provinceId: z.string().trim().max(20).optional(),
+  districtId: z.string().trim().max(20).optional(),
+  communeId: z.string().trim().max(20).optional(),
+  quantity: z.number().int().min(1).max(999).default(1),
+  unitPrice: z.number().int().nonnegative().max(10_000_000_000).optional(),
+  discount: z.number().int().nonnegative().max(10_000_000_000).default(0),
+  shippingFee: z.number().int().nonnegative().max(100_000_000).default(0),
+  /** Tiền thu hộ; bỏ trống = bằng tổng đơn. */
+  cod: z.number().int().nonnegative().max(10_000_000_000).optional(),
+  note: z.string().trim().max(500).optional(),
+  /** Chỉ đẩy sang Pancake khi phiếu nói rõ true. */
+  pushToPancake: z.boolean().optional(),
+});
+export type OrderForm = z.infer<typeof OrderForm>;
 export const DecideApproval = z.object({
   decision: z.enum(["approve", "edit", "reject"]),
   note: z.string().optional(),
   editedOutput: z.unknown().optional(),
+  orderForm: OrderForm.optional(),
 });
 export const IncomingMessage = z.object({
   channel: z.enum(["messenger", "zalo", "pancake", "website"]),
@@ -236,8 +263,23 @@ export const IncomingMessage = z.object({
   text: z.string().min(1).max(4000),
   referral: z.object({ adId: z.string().optional(), postId: z.string().optional(), utm: z.string().optional() }).optional(),
   messageId: z.string().optional(),
+  /** Facebook Page id that owns a Messenger thread (để gửi tin trả lời bằng page token đúng Fanpage). */
+  pageExternalId: z.string().optional(),
   /** Analyse only (lead grade, intent, opt-out) — staff reply in the source tool (e.g. ZL-CRM); the bot stays silent. */
   noReply: z.boolean().optional(),
+  /** Chỉ đi kèm `noReply` (bot Messenger đang tắt): nếu kịch bản của sản phẩm ở chế độ "Gợi ý cho nhân viên" thì soạn gợi ý
+   *  để nhân viên gửi (KHÔNG BAO GIỜ gửi gì cho khách); các trường hợp khác xử lý như `noReply` thường. */
+  suggestOnly: z.boolean().optional(),
+  /** Thời điểm khách gửi theo nền tảng (đồng bộ Messenger kéo tin về muộn vài phút). Không có = lúc nhận. */
+  sentAt: z.string().optional(),
+  /** Ảnh/tệp kèm tin (lưu vào message.meta.attachments; link KHÔNG BAO GIỜ đưa cho model — model chỉ thấy chữ thay thế). */
+  attachments: z.array(z.object({
+    type: z.enum(["image", "video", "audio", "file", "sticker"]), url: z.string().url().max(2000).optional(),
+    name: z.string().max(200).optional(), mime: z.string().max(100).optional(), size: z.number().nonnegative().optional(),
+  })).max(10).optional(),
+  /** Khách chỉ gửi ảnh/tệp, không có chữ (text = "[Ảnh]"…): lưu + báo chưa đọc. Có ảnh + bật `chat.vision` (và bot Messenger bật)
+   *  → bot xem ảnh (mô tả đã che dữ liệu cá nhân) rồi trả lời / chuyển người; ngược lại bot KHÔNG trả lời. */
+  attachmentOnly: z.boolean().optional(),
 });
 export type IncomingMessage = z.infer<typeof IncomingMessage>;
 

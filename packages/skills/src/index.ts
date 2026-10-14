@@ -31,15 +31,21 @@ export const DEPT_SKILL = "phong-marketing";
 export const TEAM: { employee: string | null; label: string; agents: string[]; extraSkills?: string[] }[] = [
   { employee: "mkt-nghien-cuu", label: "Nghiên cứu & Insight", agents: ["market_research"] },
   { employee: "mkt-chien-luoc", label: "Chiến lược & Kế hoạch", agents: ["brief", "strategy"], extraSkills: ["mkt-workflow"] },
-  { employee: "mkt-content", label: "Content Writer", agents: ["content"] },
-  { employee: "mkt-video", label: "Biên kịch Video", agents: ["video_script"] },
+  // Landing / prompt-card carousel. (`nhan-ban-content-facebook` của bản affiliate CHƯA nạp: ví dụ trong skill có số hotline thật.)
+  { employee: "mkt-content", label: "Content Writer", agents: ["content"], extraSkills: ["taki-landing-builder", "prompt-card-carousel"] },
+  { employee: "mkt-video", label: "Biên kịch Video", agents: ["video_script"], extraSkills: ["ecom-ai-video-creator", "autovis-script", "news-to-video", "fape-video-script",
+    // kịch bản theo thể loại kênh: đạo lý / hôn nhân, người que, card AI, kịch bản viral Facebook
+    "hon-nhan-dao-ly-script", "video-viral-dao-ly-trung-quoc", "content-creator-dao-ly", "facebook-viral-script-factory", "nguoi-que-ai-prompt", "kich-ban-card-ai"] },
   { employee: "mkt-seo", label: "SEO", agents: ["seo_web"] },
   { employee: "mkt-ads", label: "Quảng cáo", agents: ["ads"] },
   { employee: "mkt-phan-tich", label: "Phân tích dữ liệu", agents: ["analytics"] },
-  { employee: "mkt-kiem-duyet", label: "Kiểm duyệt", agents: ["review"], extraSkills: ["remove-ai-marks"] },
-  { employee: null, label: "Tư vấn bán hàng (ABS)", agents: ["chat"], extraSkills: ["abs-sales-agent", "objection-handler-ai-sales", "lead-qualifier-taki"] },
+  { employee: "mkt-kiem-duyet", label: "Kiểm duyệt", agents: ["review"], extraSkills: ["remove-ai-marks", "cham-diem-noi-dung"] },
+  { employee: null, label: "Tư vấn bán hàng (ABS)", agents: ["chat"], extraSkills: ["abs-sales-agent", "objection-handler-ai-sales", "lead-qualifier-taki", "telesales-ai-chu-doanh-nghiep", "lead-hunter-qualifier"] },
   { employee: null, label: "Chăm sóc lead", agents: ["follow_up"], extraSkills: ["follow-up-sequence-abs"] },
-  { employee: null, label: "Sản xuất video Flow", agents: ["creative"], extraSkills: ["flow-review-do-an-vat", "flow-review-thoi-trang", "flow-nguoi-que-so-sanh", "flow-video-nhan-hieu", "video-nhan-hieu-google-flow", "flow-koc-thoi-trang-nu", "flow-review-gia-dung", "flow-review-nha-hang-shop", "news-to-video", "flow-cooking-director-video", "flow-cinematic-short-film"] },
+  { employee: null, label: "Sản xuất video Flow", agents: ["creative"], extraSkills: ["flow-review-do-an-vat", "flow-review-thoi-trang", "flow-nguoi-que-so-sanh", "flow-video-nhan-hieu", "video-nhan-hieu-google-flow", "flow-koc-thoi-trang-nu", "flow-review-gia-dung", "flow-review-nha-hang-shop", "news-to-video", "flow-cooking-director-video", "flow-cinematic-short-film", "flow-anh-chan-dung-cu-dong",
+    // kịch bản / prompt Veo3 theo kênh nhân vật + dựng / hậu kỳ video
+    "bac-si-baby-veo3", "ong-ban-sua-veo3", "nguoi-noi-dao-ly-veo3", "me-bim-cho-que", "tho-trang-nau-an-veo3", "tieng-anh-tre-em-veo3", "veo3-tra-an-nhien", "yen-mach-veo3-animation",
+    "tro-ly-edit-video", "video-edit-ai-keynote", "viral-video-editor", "remotion-best-practices"] },
 ];
 /** Agents that read the DNA layer when they call Claude. */
 export const LLM_AGENTS = ["brief", "market_research", "strategy", "content", "video_script", "seo_web", "chat", "follow_up", "review", "ads", "analytics"];
@@ -55,8 +61,12 @@ const DNA_REFS: Record<string, string[]> = {
 };
 
 // ---------------- Reading from disk ----------------
-function parseFrontmatter(text: string): { meta: Record<string, string>; body: string } {
-  const m = text.match(/^---\n([\s\S]*?)\n---\n?/);
+/** Windows checkouts (core.autocrlf) make every skill file CRLF: normalise so frontmatter parses and hashes match on every OS. */
+const lf = (s: string) => s.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+
+export function parseFrontmatter(text: string): { meta: Record<string, string>; body: string } {
+  text = lf(text);
+  const m = text.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
   if (!m) return { meta: {}, body: text };
   const meta: Record<string, string> = {};
   let key = "";
@@ -79,8 +89,8 @@ function readSkillDir(name: string) {
       const p = join(d, f);
       if (statSync(p).isDirectory()) walk(p);
       else if (p !== file && /\.(md|txt|json|csv|ya?ml)$/i.test(f)) {
-        const content = readFileSync(p, "utf8");
-        refs.push({ path: relative(dir, p), size: content.length, content });
+        const content = lf(readFileSync(p, "utf8"));
+        refs.push({ path: relative(dir, p).replace(/\\/g, "/"), size: content.length, content });
       }
     }
   };
@@ -174,7 +184,7 @@ export function agentPlaybook(bizId: string, agentKey: string): { text: string; 
     // DNA references are always wanted; other skills' references only while budget is generous.
     const refs = (r.refs as { path: string; content: string }[]) ?? [];
     for (const ref of refs) {
-      const wanted = r.role === "dna" ? !DNA_REFS[agentKey] || DNA_REFS[agentKey].includes(ref.path) : text.length + ref.content.length < budget * 0.3;
+      const wanted = r.role === "dna" ? !DNA_REFS[agentKey] || DNA_REFS[agentKey].includes(ref.path.replace(/\\/g, "/")) : text.length + ref.content.length < budget * 0.3;
       if (wanted) text += `\n\n### [${ref.path}]\n${ref.content}`;
     }
     const truncated = text.length > budget;

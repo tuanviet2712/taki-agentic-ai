@@ -65,14 +65,14 @@ export function Knowledge() {
       <PageHeader title="Kho tri thức" subtitle="Quản lý, kết nối và tổ chức tri thức doanh nghiệp để AI Agent hiểu, học hỏi và trả lời chính xác."
         actions={<Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>Thêm tài liệu</Button>} />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat icon={BookOpen} tone="blue" label="Tài liệu" value={docs.length} sub={`${kinds.length} loại tài liệu`} />
         <Stat icon={Layers} tone="violet" label="Đoạn tri thức" value={docs.reduce((s, d) => s + (d.chunks ?? 0), 0)} sub="bot chỉ trả lời theo các đoạn này" />
         <Stat icon={FileWarning} tone="amber" label="Tài liệu nháp cần điền" value={drafts} sub={drafts ? "Bot chưa dùng được cho tới khi điền" : "Không có tài liệu nháp"} />
         <Stat icon={Lightbulb} tone="green" label="Bài học đang hiệu lực" value={activeLessons} sub="rút ra từ dữ liệu & phản hồi của Sếp" />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
+      <div className="grid items-start gap-6 wide:grid-cols-[minmax(0,1fr)_420px]">
         <Card title="Thư viện tri thức">
           <div className="mb-3 flex flex-wrap gap-2">
             {["all", ...kinds].map((k) => (
@@ -84,14 +84,14 @@ export function Knowledge() {
           {filtered.length === 0 ? <Empty>Chưa có tài liệu. Bấm “Thêm tài liệu” để bắt đầu.</Empty> : (
             <div className="divide-y divide-line">
               {filtered.map((d) => (
-                <button key={d.id} onClick={() => setSelId(d.id)} className={cx("flex w-full flex-col gap-1.5 rounded-xl px-2 py-3 text-left transition hover:bg-soft", selId === d.id && "bg-soft")}>
+                <button key={d.id} onClick={() => setSelId(d.id)} className={cx("flex w-full flex-col gap-1 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-soft", selId === d.id && "bg-soft")}>
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-medium text-ink">{d.title}</p>
                     <Badge tone={kindOf(d.kind).tone}>{kindOf(d.kind).label}</Badge>
                     {d.status === "draft" ? <Badge tone="amber">Cần điền câu trả lời</Badge> : <Badge tone="green">Đã xử lý</Badge>}
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                    <span>{d.source}</span><span>·</span><span>{d.chunks} đoạn</span><span>·</span><span>cập nhật {timeAgo(d.updated_at)}</span>
+                    <span className="max-w-[22rem] truncate" title={d.source}>{String(d.source ?? "").replace(/^brain:[0-9a-f-]+:\d+\.\s*/i, "")}</span><span>·</span><span>{d.chunks} đoạn</span><span>·</span><span>cập nhật {timeAgo(d.updated_at)}</span>
                     {(d.tags ?? []).map((t: string) => <Badge key={t} tone="gray" className="!px-2 !py-0 text-[11px]">#{t}</Badge>)}
                   </div>
                 </button>
@@ -100,7 +100,7 @@ export function Knowledge() {
           )}
         </Card>
 
-        <Card title="Chi tiết tài liệu" action={sel && <Button size="sm" icon={Pencil} onClick={() => { setEditBody(sel.body ?? ""); setEditOpen(true); }}>Chỉnh sửa</Button>}>
+        <Card className="wide:sticky wide:top-4 wide:max-h-[calc(100vh-7rem)] wide:overflow-y-auto scroll-thin" title="Chi tiết tài liệu" action={sel && <Button size="sm" icon={Pencil} onClick={() => { setEditBody(sel.body ?? ""); setEditOpen(true); }}>Chỉnh sửa</Button>}>
           {!sel ? <Empty>Chọn một tài liệu để xem nội dung.</Empty> : (
             <div className="space-y-3">
               <div>
@@ -118,7 +118,7 @@ export function Knowledge() {
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
+      <div className="grid gap-6 wide:grid-cols-[minmax(0,1fr)_380px]">
         <Card title={<span className="flex items-center gap-2">Tìm kiếm ngữ nghĩa {result?.source && <JevBadge source={result.source} />}</span>}>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input className={inputCls} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="Ví dụ: Lịch khai giảng khóa CEO ở Hà Nội?" />

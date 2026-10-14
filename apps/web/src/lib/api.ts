@@ -73,9 +73,13 @@ function ensureStream() {
   es = new EventSource("/v1/stream");
   const types = [
     "task.updated", "approval.created", "approval.decided", "review.completed", "post.published", "post.scored",
-    "action.executed", "conversation.message_in", "conversation.message_out", "conversation.handoff", "lead.graded",
-    "metrics.updated", "alert.raised", "proposal.created", "proposal.applied", "goal.created", "creative.updated", "automation.ran", "assistant.updated", "brain.updated",
-    "autopilot.ran", "autopilot.settings_changed", "autopilot.goal_created", "goal.updated",
+    "action.executed", "conversation.message_in", "conversation.message_out", "conversation.handoff", "conversation.suggestion", "lead.graded", "messenger.synced", "chat_insight.updated", "order.created", "order.updated",
+    "post.comment_linked", "metrics.updated", "alert.raised", "proposal.created", "proposal.applied", "goal.created", "creative.updated", "automation.ran", "assistant.updated", "brain.updated",
+    "autopilot.ran", "autopilot.settings_changed", "autopilot.goal_created", "goal.updated", "llm.updated",
+    "content.image", "content.image_progress", // ảnh bài viết / ảnh bài SEO vừa tạo xong · tiến độ tạo ảnh bài SEO
+    // Chăm khách từ bình luận (packages/orchestrator/src/nurture.ts + chat-engine/optout.ts)
+    "nurture.comment_in", "nurture.comments_classified", "nurture.lead_created", "nurture.dm_sent", "nurture.phone", "nurture.friend_requested", "nurture.friend_accepted",
+    "nurture.following_up", "nurture.started", "nurture.needs_check", "nurture.review_skipped", "optout.added", "optout.removed",
   ];
   for (const t of types) es.addEventListener(t, (ev) => {
     const data = JSON.parse((ev as MessageEvent).data);

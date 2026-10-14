@@ -7,9 +7,9 @@ import { MCP_SCOPES, PLATFORMS, live, platformDef, sendTelegram } from "@dotaka/
 import { jevEnabled } from "@dotaka/jev";
 import { effectiveProvider } from "@dotaka/llm-gateway";
 import {
-  AUTOMATION_TYPES, automationCounts, createConnection, credsOf, deleteAutomation, disconnect, enqueue, importAds, publicAutomation, publicConnection,
+  activeAdBudget, AUTOMATION_TYPES, automationCounts, createConnection, credsOf, deleteAutomation, disconnect, enqueue, importAds, publicAutomation, publicConnection,
   runAutomation, saveAutomation, setAutomationLive, setAutomationStatus, setWhitelist, syncAdMetrics, testConnection, today,
-  attributionInfo, attributionOptions, liveMetaToken,
+  attributionInfo, attributionOptions, liveMetaToken, applyPancakeOrderList,
 } from "@dotaka/orchestrator";
 import { AppError, decryptSecret, sha256 } from "@dotaka/shared";
 import { currentBizId, routes } from "../http.ts";
@@ -25,7 +25,7 @@ export function connectRoutes(app: FastifyInstance) {
       ...p,
       count: p.key === "whitelist"
         ? q.scalar<number>("SELECT COUNT(*) FROM ad_account WHERE biz_id = ? AND whitelisted = 1", bizId) + q.scalar<number>("SELECT COUNT(*) FROM channel WHERE biz_id = ? AND platform = 'facebook' AND whitelisted = 1 AND connection_id IS NOT NULL", bizId)
-        : p.key === "ai" ? (eff.provider !== "sandbox" ? 1 : 0) + (jevEnabled() ? 1 : 0)
+        : p.key === "ai" ? (eff.provider !== "sandbox" && eff.ready !== false ? 1 : 0) + (jevEnabled() ? 1 : 0)
         : q.scalar<number>("SELECT COUNT(*) FROM connection WHERE biz_id = ? AND platform = ? AND status != 'revoked'", bizId, p.key),
       ...(p.key === "ai" ? { ai: { claude: eff.provider, jev: jevEnabled() } } : {}),
     }));
@@ -66,7 +66,11 @@ export function connectRoutes(app: FastifyInstance) {
     const c = byId<Row>("connection", params.id);
     if (!c || c.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy kết nối", 404);
     if (c.mode !== "live") return q.all("SELECT id, customer_name customer, total, status, created_at createdAt FROM orders WHERE biz_id = ? ORDER BY created_at DESC LIMIT 30", bizId);
-    if (c.platform === "pancake") return live.pancakeOrders(credsOf(c) as any, c.config?.shops?.[0]?.externalId ?? c.external_account_id);
+    if (c.platform === "pancake") {
+      const list = await live.pancakeOrders(credsOf(c) as any, c.config?.shop_id || c.config?.shops?.[0]?.externalId || c.external_account_id);
+      applyPancakeOrderList(bizId, list); // mở danh sách = làm mới trạng thái các đơn đã đẩy từ hệ thống
+      return list;
+    }
     if (c.platform === "nhanh") return live.nhanhOrders({ ...(credsOf(c) as any), app_id: c.config.app_id, business_id: c.config.business_id });
     throw new AppError("NOT_SUPPORTED", "Kết nối này không có đơn hàng");
   });
@@ -249,12 +253,27 @@ export function connectRoutes(app: FastifyInstance) {
     return ["Doanh nghiệp 30 nhân sự dùng AI cắt 40% việc lặp lại — học cách làm trong 1 buổi", "Chủ doanh nghiệp: 5 việc nên giao cho AI ngay tuần này", "Lịch khai giảng AI Business System tháng tới — còn 20 chỗ"]
       .map((t, i) => ({ externalId: `${ch.external_id}_demo${i + 1}`, text: t, createdAt: new Date(Date.now() - (i + 1) * 5 * 3600_000).toISOString(), image: null, permalink: null, kind: "post" }));
   });
+  /**
+   * Tạo chiến dịch từ bài Fanpage. `post` = 1 bài (1 nhóm, 1 quảng cáo — như trước); `posts` + `adsets` = nhiều bài và
+   * nhiều nhóm trong CÙNG 1 chiến dịch: mỗi nhóm chạy mọi bài đã chọn (công thức test 1:3:3 = 1 chiến dịch, 3 nhóm, 3 bài).
+   * `dailyBudget` là ngân sách/ngày của MỖI nhóm khi không truyền ngân sách riêng cho từng nhóm.
+   */
+  const QuickPost = z.object({ externalId: z.string(), text: z.string(), permalink: z.string().nullable().optional(), kind: z.string().optional() });
   r.post("/v1/ads/quick", ({ bizId, body, actor }) => {
     const p = z.object({
       adAccountId: z.string(), channelId: z.string(), templateId: z.string().nullable().default(null), dailyBudget: z.number().int().positive(),
-      post: z.object({ externalId: z.string(), text: z.string(), permalink: z.string().nullable().optional(), kind: z.string().optional() }),
+      post: QuickPost.optional(), posts: z.array(QuickPost).min(1).max(10).optional(),
+      adsets: z.array(z.object({ dailyBudget: z.number().int().positive().optional(), templateId: z.string().nullable().optional(), name: z.string().max(120).optional() })).min(1).max(10).optional(),
+      mode: z.enum(["test", "custom"]).optional(),
       name: z.string().optional(), startPaused: z.boolean().default(true), confirm: z.literal(true),
     }).parse(body);
+    const posts = p.posts ?? (p.post ? [p.post] : []);
+    if (!posts.length) throw new AppError("INVALID", "Chọn ít nhất 1 bài viết");
+    if (new Set(posts.map((x) => x.externalId)).size !== posts.length) throw new AppError("INVALID", "Một bài được chọn hai lần");
+    const adsets = (p.adsets ?? [{}]).map((a) => ({ dailyBudget: a.dailyBudget ?? p.dailyBudget, templateId: a.templateId || null, name: a.name?.trim() || undefined }));
+    if (p.mode === "test" && (adsets.length !== 3 || posts.length !== 3)) throw new AppError("INVALID", "Chế độ test 1:3:3 cần đúng 3 nhóm quảng cáo và 3 bài viết");
+    const multi = posts.length > 1 || adsets.length > 1;
+
     const acc = byId<Row>("ad_account", p.adAccountId);
     const ch = byId<Row>("channel", p.channelId);
     if (!acc || acc.biz_id !== bizId || !ch || ch.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy tài khoản hoặc Fanpage", 404);
@@ -262,21 +281,60 @@ export function connectRoutes(app: FastifyInstance) {
     if (!ch.whitelisted) throw new AppError("NOT_WHITELISTED", `Fanpage "${ch.name}" không nằm trong whitelist`);
     if (acc.platform !== "meta") throw new AppError("NOT_SUPPORTED", "Đăng nhanh hiện hỗ trợ Facebook (Meta Ads)");
     if (isKilled(bizId, "ads")) throw new AppError("KILLED", "Đang bật dừng khẩn cấp quảng cáo");
+
+    // Mẫu riêng của từng nhóm chỉ đổi nhắm mục tiêu: mục tiêu (objective) thuộc chiến dịch nên phải trùng mẫu chính.
+    const tpl = p.templateId ? byId<Row>("ad_template", p.templateId) : null;
+    if (p.templateId && (!tpl || tpl.biz_id !== bizId)) throw new AppError("NOT_FOUND", "Không tìm thấy mẫu quảng cáo", 404);
+    const mainObjective = tpl?.definition?.objective ?? "messages";
+    for (const a of adsets) {
+      if (!a.templateId) continue;
+      const t = byId<Row>("ad_template", a.templateId);
+      if (!t || t.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy mẫu của nhóm quảng cáo", 404);
+      if ((t.definition?.objective ?? "messages") !== mainObjective) throw new AppError("INVALID", `Mẫu "${t.name}" khác mục tiêu chiến dịch — các nhóm trong 1 chiến dịch phải cùng mục tiêu`);
+    }
+
     const s = bizSettings(bizId);
-    const total = q.scalar<number>("SELECT COALESCE(SUM(daily_budget),0) FROM ad WHERE biz_id = ? AND status = 'active'", bizId);
-    if (!p.startPaused && total + p.dailyBudget > s.caps.maxTotalDailyAdBudget) throw new AppError("CAP_EXCEEDED", `Vượt trần tổng ngân sách ngày ${s.caps.maxTotalDailyAdBudget.toLocaleString("vi-VN")}đ`);
+    const totalBudget = adsets.reduce((a, x) => a + x.dailyBudget, 0);
+    if (!p.startPaused && activeAdBudget(bizId) + totalBudget > s.caps.maxTotalDailyAdBudget) throw new AppError("CAP_EXCEEDED", `Vượt trần tổng ngân sách ngày ${s.caps.maxTotalDailyAdBudget.toLocaleString("vi-VN")}đ`);
+    // Giới hạn "chiến dịch tạo mới/ngày": 1 lần bấm Tạo = 1 lượt, dù chiến dịch có nhiều nhóm và quảng cáo.
     const createdToday = q.scalar<number>("SELECT COUNT(*) FROM ad_candidate WHERE biz_id = ? AND created_at >= ? AND status != 'rejected'", bizId, `${today()}T00:00:00`);
-    if (createdToday >= s.caps.maxAdsCreatedPerDay) throw new AppError("CAP_EXCEEDED", `Đã đạt giới hạn ${s.caps.maxAdsCreatedPerDay} ads tạo mới/ngày (Cài đặt → Giới hạn)`);
-    let post = q.get<Row>("SELECT * FROM post WHERE channel_id = ? AND external_id = ?", ch.id, p.post.externalId);
-    if (!post) post = insert("post", { biz_id: bizId, channel_id: ch.id, external_id: p.post.externalId, content_item_id: null, kind: p.post.kind ?? "post", title: p.post.text.slice(0, 90), body: p.post.text, published_at: new Date().toISOString(), permalink: p.post.permalink ?? null, ad_status: "none" });
-    if (q.get("SELECT id FROM ad WHERE post_id = ? AND status = 'active'", post.id)) throw new AppError("DUPLICATE", "Bài này đã có quảng cáo đang chạy");
-    const cand = insert("ad_candidate", {
-      biz_id: bizId, post_id: post.id, platform: "meta", ad_template_id: p.templateId, daily_budget: p.dailyBudget, score: 0, reasons: ["Đăng nhanh thủ công"],
-      status: "approved", ad_account_id: acc.id, options: { source: "quick", startPaused: p.startPaused, name: p.name?.trim() || undefined },
+    if (createdToday >= s.caps.maxAdsCreatedPerDay) throw new AppError("CAP_EXCEEDED", `Đã đạt giới hạn ${s.caps.maxAdsCreatedPerDay} lượt tạo quảng cáo/ngày (Cài đặt → Giới hạn)`);
+
+    const stored = posts.map((x) => {
+      const row = q.get<Row>("SELECT * FROM post WHERE channel_id = ? AND external_id = ?", ch.id, x.externalId)
+        ?? insert("post", { biz_id: bizId, channel_id: ch.id, external_id: x.externalId, content_item_id: null, kind: x.kind ?? "post", title: x.text.slice(0, 90), body: x.text, published_at: new Date().toISOString(), permalink: x.permalink ?? null, ad_status: "none" });
+      return row;
     });
-    update("post", post.id, { ad_status: "candidate" });
+    const cand = insert("ad_candidate", {
+      biz_id: bizId, post_id: stored[0].id, platform: "meta", ad_template_id: p.templateId, daily_budget: multi ? totalBudget : adsets[0].dailyBudget, score: 0,
+      reasons: [multi ? `Đăng nhanh: ${adsets.length} nhóm × ${stored.length} bài` : "Đăng nhanh thủ công"],
+      status: "approved", ad_account_id: acc.id,
+      options: {
+        source: "quick", startPaused: p.startPaused, name: p.name?.trim() || undefined,
+        ...(multi ? { structure: { postIds: stored.map((x) => x.id), adsets, mode: p.mode ?? "custom" } } : {}),
+      },
+    });
+    for (const x of stored) if (byId<Row>("post", x.id)?.ad_status === "none") update("post", x.id, { ad_status: "candidate" });
     enqueue("ads", "candidate.publish", { candidateId: cand.id }, { bizId, idempotencyKey: `candpub:${cand.id}` });
-    audit(bizId, actor, "ad.quick_publish", { type: "ad_candidate", id: cand.id }, { account: acc.name, page: ch.name, budget: p.dailyBudget, startPaused: p.startPaused });
+    audit(bizId, actor, "ad.quick_publish", { type: "ad_candidate", id: cand.id }, { account: acc.name, page: ch.name, budget: totalBudget, adsets: adsets.length, posts: stored.length, mode: p.mode ?? null, startPaused: p.startPaused });
+    return cand;
+  });
+  /** "Tạo lại" một lần tạo nhanh bị lỗi: lượt mới, y nguyên bài / nhóm / ngân sách / trạng thái — vẫn qua trần ngân sách & giới hạn/ngày. */
+  r.post("/v1/ads/quick/:id/retry", ({ bizId, params, actor }) => {
+    const old = byId<Row>("ad_candidate", params.id);
+    if (!old || old.biz_id !== bizId || old.options?.source !== "quick") throw new AppError("NOT_FOUND", "Không tìm thấy lần tạo", 404);
+    if (old.status !== "failed") throw new AppError("INVALID", "Chỉ tạo lại được lần tạo bị lỗi");
+    if (isKilled(bizId, "ads")) throw new AppError("KILLED", "Đang bật dừng khẩn cấp quảng cáo");
+    const s = bizSettings(bizId);
+    if (!old.options?.startPaused && activeAdBudget(bizId) + old.daily_budget > s.caps.maxTotalDailyAdBudget) throw new AppError("CAP_EXCEEDED", `Vượt trần tổng ngân sách ngày ${s.caps.maxTotalDailyAdBudget.toLocaleString("vi-VN")}đ`);
+    const createdToday = q.scalar<number>("SELECT COUNT(*) FROM ad_candidate WHERE biz_id = ? AND created_at >= ? AND status != 'rejected'", bizId, `${today()}T00:00:00`);
+    if (createdToday >= s.caps.maxAdsCreatedPerDay) throw new AppError("CAP_EXCEEDED", `Đã đạt giới hạn ${s.caps.maxAdsCreatedPerDay} lượt tạo quảng cáo/ngày (Cài đặt → Giới hạn)`);
+    const cand = insert("ad_candidate", {
+      biz_id: bizId, post_id: old.post_id, platform: old.platform, ad_template_id: old.ad_template_id, daily_budget: old.daily_budget, score: 0,
+      reasons: [...(old.reasons ?? []), "Tạo lại sau lỗi"], status: "approved", ad_account_id: old.ad_account_id, options: { ...old.options, retryOf: old.id },
+    });
+    enqueue("ads", "candidate.publish", { candidateId: cand.id }, { bizId, idempotencyKey: `candpub:${cand.id}` });
+    audit(bizId, actor, "ad.quick_retry", { type: "ad_candidate", id: cand.id }, { retryOf: old.id });
     return cand;
   });
   r.get("/v1/ads/quick/recent", ({ bizId }) => q.all(`SELECT c.id, c.status, c.daily_budget, c.decision_note, c.options, c.created_at, p.title, x.name account, ad.name ad_name, ad.status ad_status, ch.name page

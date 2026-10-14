@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve, sep } from "node:path";
 import { z } from "zod";
 import { activeDna, byId, emit, insert, update, type Row } from "@dotaka/db";
@@ -28,7 +28,11 @@ export const VI_VOICES = [
   { id: "vi-VN-HoaiMyNeural-Female", label: "Hoài My — nữ, miền Bắc" },
   { id: "vi-VN-NamMinhNeural-Male", label: "Nam Minh — nam, miền Bắc" },
 ];
-const py = (dir: string) => join(dir, ".venv", "bin", "python");
+const IS_WIN = process.platform === "win32";
+/** Executable inside a project's virtualenv (bin/ on macOS/Linux, Scripts/*.exe on Windows). */
+const venvBin = (dir: string, name: string) => (IS_WIN ? join(dir, ".venv", "Scripts", `${name}.exe`) : join(dir, ".venv", "bin", name));
+const py = (dir: string) => venvBin(dir, "python");
+const EDGE_TTS = venvBin(MPT, "edge-tts");
 
 // ---------------- Status & settings ----------------
 const tomlPath = () => join(MPT, "config.toml");
@@ -52,7 +56,7 @@ export function videoAiStatus() {
     },
     whisper: { installed: whisper },
     remotion: { installed: existsSync(join(REMOTION_NEWS, "node_modules", "@remotion", "cli")) && existsSync(join(REMOTION_NEWS, "node_modules", ".remotion", "chrome-headless-shell")) },
-    tts: { installed: existsSync(join(MPT, ".venv", "bin", "edge-tts")), voices: VI_VOICES },
+    tts: { installed: existsSync(EDGE_TTS), voices: VI_VOICES },
     fishSpeech: { installed: false, note: "Thay bằng Edge TTS: bản S2-Pro cần GPU/RAM lớn và giấy phép Fish Audio cấm dùng thương mại." },
     freeDiskGB: free ? Math.round(free / 1e9) : null,
   };
@@ -71,18 +75,42 @@ export function setStockKeys(p: { pexels?: string[]; pixabay?: string[] }) {
   return videoAiStatus().moneyprinter;
 }
 
+/** taki-flow-collect: tải clip của luồng "Làm thủ công trên Flow" từ dự án Flow (Chrome Flow) đúng thứ tự cảnh. */
+export const FLOW_COLLECT = resolve("packages/orchestrator/bin/flow-collect.mjs");
+
 /** System commands the Flow agent uses, pointing at THIS repo (prepended to its PATH). */
 export function ensureVideoBins() {
   const dir = resolve("data/bin");
   mkdirSync(dir, { recursive: true });
-  const w = (name: string, cmd: string) => { const p = join(dir, name); writeFileSync(p, `#!/bin/sh\n# TAKI Agentic AI (${resolve(".")})\nexec ${cmd} "$@"\n`); chmodSync(p, 0o755); };
+  // Scripts run under /bin/sh (Git Bash on Windows, where Windows paths are written with forward slashes).
+  const fwd = (s: string) => (IS_WIN ? s.replace(/\\/g, "/").replace("#!/bin/sh\n", "#!/bin/sh\nexport PYTHONUTF8=1 PYTHONIOENCODING=utf-8\n") : s);
+  const w = (name: string, cmd: string) => { const p = join(dir, name); writeFileSync(p, fwd(`#!/bin/sh\n# TAKI Agentic AI (${resolve(".")})\nexec ${cmd} "$@"\n`)); chmodSync(p, 0o755); };
   w("taki-video-finish", `"${py(TOOLS)}" "${join(TOOLS, "finish.py")}"`);
   w("taki-video-stt", `"${py(TOOLS)}" "${join(TOOLS, "stt.py")}"`);
   w("taki-flow-save", `"${process.execPath}" "${resolve("packages/orchestrator/bin/flow-save.mjs")}"`);
   w("taki-flow-wait", `"${process.execPath}" "${resolve("packages/orchestrator/bin/flow-wait.mjs")}"`);
-  const sh = (name: string, body: string) => { const p = join(dir, name); writeFileSync(p, `#!/bin/sh\n# TAKI Agentic AI (${resolve(".")})\n${body}\n`); chmodSync(p, 0o755); };
+  w("taki-flow-collect", `"${process.execPath}" "${FLOW_COLLECT}"`);
+  const sh = (name: string, body: string) => { const p = join(dir, name); writeFileSync(p, fwd(`#!/bin/sh\n# TAKI Agentic AI (${resolve(".")})\n${body}\n`)); chmodSync(p, 0o755); };
   // Edge TTS sometimes answers "No audio was received" and succeeds on the next call: retry up to 3 times.
-  if (existsSync(join(MPT, ".venv", "bin", "edge-tts"))) sh("taki-tts", `for i in 1 2 3; do "${join(MPT, ".venv", "bin", "edge-tts")}" "$@" && exit 0; echo "taki-tts: thử lại ($i)" >&2; sleep 2; done\nexit 1`);
+  if (existsSync(EDGE_TTS)) sh("taki-tts", `for i in 1 2 3; do "${EDGE_TTS}" "$@" && exit 0; echo "taki-tts: thử lại ($i)" >&2; sleep 2; done\nexit 1`);
+  // Flow downloads clips as .zip. Git for Windows normally brings a real `unzip`; only when it is missing, a small stand-in on
+  // top of Python's zipfile — `unzip [-o] [-q] file.zip [-d dir]` — is put first on the agent's PATH.
+  const gitUnzip = IS_WIN && [process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Programs")]
+    .some((r) => !!r && existsSync(join(r, "Git", "usr", "bin", "unzip.exe")));
+  if (IS_WIN && gitUnzip) for (const f of ["unzip", "unzip.py"]) rmSync(join(dir, f), { force: true });
+  if (IS_WIN && !gitUnzip) {
+    const z = join(dir, "unzip.py");
+    writeFileSync(z, [
+      "import sys, zipfile, os",
+      "a = [x for x in sys.argv[1:] if x not in ('-o', '-q', '-qq', '-n', '-j')]",
+      "d = '.'",
+      "if '-d' in a:",
+      "    i = a.index('-d'); d = a[i + 1]; del a[i:i + 2]",
+      "zipfile.ZipFile(a[0]).extractall(d)",
+      "print('Archive: ' + os.path.basename(a[0]))",
+    ].join("\n"));
+    sh("unzip", `exec "${py(TOOLS)}" "${z}" "$@"`);
+  }
   // news-to-video skill helpers (scripts ship inside the skill folder; taki-news-fetch = step 1 without ad-hoc parsing).
   w("taki-news-fetch", `"${process.execPath}" "${resolve("packages/orchestrator/bin/news-fetch.mjs")}"`);
   w("taki-news-transcribe", `"${py(TOOLS)}" "${join(NEWS_SKILL_DIR, "scripts", "transcribe.py")}"`);
@@ -92,10 +120,20 @@ export function ensureVideoBins() {
   return dir;
 }
 
+// ---------------- Shared with the pro editor (pro-edit.ts) ----------------
+export const toolsPython = () => py(TOOLS);
+export { durationOf as mediaDuration, run as runProcess };
+export const TOOLS_DIR = TOOLS;
+/** Nhạc nền có sẵn của MoneyPrinterTurbo (resource/songs) — dùng làm nhạc nền mặc định cho video dựng từ video thô. */
+export function bgmFiles(): string[] {
+  const dir = join(MPT, "resource", "songs");
+  try { return readdirSync(dir).filter((f) => /\.(mp3|m4a|wav)$/i.test(f)).sort().map((f) => join(dir, f)); } catch { return []; }
+}
 // ---------------- Small tools: voice-over, transcript ----------------
 function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; onLine?: (l: string) => void; signal?: AbortSignal; timeoutMs?: number } = {}) {
   return new Promise<{ code: number; out: string }>((res, rej) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"] });
+    // Python on Windows writes pipes in cp1252: rich/tqdm emoji and Vietnamese text would raise UnicodeEncodeError.
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8", ...opts.env }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let out = "";
     let buf = "";
     const onData = (d: Buffer) => {
@@ -116,7 +154,7 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
 const durationOf = (f: string) => { try { return Number(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f], { encoding: "utf8" }).trim()) || 0; } catch { return 0; } };
 
 export async function voiceOver(p: { text: string; voice?: string; rate?: number }) {
-  const bin = join(MPT, ".venv", "bin", "edge-tts");
+  const bin = EDGE_TTS;
   if (!existsSync(bin)) throw new AppError("NOT_INSTALLED", "Chưa cài công cụ giọng đọc (pnpm video-ai:install)");
   const id = randomUUID().slice(0, 12);
   const dir = join(OUT, "voice");
@@ -124,7 +162,12 @@ export async function voiceOver(p: { text: string; voice?: string; rate?: number
   const voice = (p.voice ?? VI_VOICES[0].id).replace(/-(Female|Male)$/, "");
   const rate = Math.round(((p.rate ?? 1) - 1) * 100);
   const mp3 = join(dir, `${id}.mp3`), srt = join(dir, `${id}.srt`);
-  const r = await run(bin, ["--voice", voice, `--rate=${rate >= 0 ? "+" : ""}${rate}%`, "--text", p.text, "--write-media", mp3, "--write-subtitles", srt], { timeoutMs: 120_000 });
+  // Edge TTS sometimes answers "No audio was received" and succeeds on the next call (same retry as the taki-tts command).
+  let r = await run(bin, ["--voice", voice, `--rate=${rate >= 0 ? "+" : ""}${rate}%`, "--text", p.text, "--write-media", mp3, "--write-subtitles", srt], { timeoutMs: 120_000 });
+  for (let i = 0; i < 2 && r.code !== 0; i++) {
+    await new Promise((res) => setTimeout(res, 2000));
+    r = await run(bin, ["--voice", voice, `--rate=${rate >= 0 ? "+" : ""}${rate}%`, "--text", p.text, "--write-media", mp3, "--write-subtitles", srt], { timeoutMs: 120_000 });
+  }
   if (r.code !== 0 || !existsSync(mp3)) throw new AppError("TTS_FAILED", `Không tạo được giọng đọc: ${r.out.slice(-300)}`);
   return { mp3: `voice/${id}.mp3`, srt: `voice/${id}.srt`, duration: durationOf(mp3), voice };
 }
@@ -171,6 +214,11 @@ async function writeScript(job: Row) {
   return o.scriptReady ? { ...r.output, script: input.brief } : r.output;
 }
 
+/** Chỉ cần 1 trong 2 khóa kho clip: nguồn đã chọn chưa có khóa mà nguồn kia có thì dùng nguồn kia. */
+export function pickStockSource(want: "pexels" | "pixabay", keys: { pexels: number; pixabay: number }): "pexels" | "pixabay" {
+  const other = want === "pexels" ? "pixabay" : "pexels";
+  return !keys[want] && keys[other] ? other : want;
+}
 function materialsFor(job: Row): { source: string; materials: string[] } {
   const o = ((job.input as Row).video ?? {}) as Row;
   if (o.source === "flow" && o.flowJobId) {
@@ -185,7 +233,7 @@ function materialsFor(job: Row): { source: string; materials: string[] } {
     if (!m.length) throw new AppError("NO_MATERIALS", "Chưa có clip/ảnh để dựng (tải lên hoặc chọn nguồn khác)");
     return { source: "local", materials: m };
   }
-  const src = o.source === "pixabay" ? "pixabay" : "pexels";
+  const src = pickStockSource(o.source === "pixabay" ? "pixabay" : "pexels", { pexels: readKeys("pexels_api_keys").length, pixabay: readKeys("pixabay_api_keys").length });
   if (!readKeys(`${src}_api_keys`).length) throw new AppError("NO_STOCK_KEY", `Chưa có khóa ${src === "pexels" ? "Pexels" : "Pixabay"} — nhập ở thẻ "Công cụ video AI" (miễn phí) hoặc chọn nguồn clip của Sếp`);
   return { source: src, materials: [] };
 }
@@ -234,13 +282,16 @@ export async function runPortrait({ job, log, signal }: JobCtx) {
   // M2 renders ~1 s of video per 30-40 s: animate only what is needed (voice-over length, else 6 s)
   let voice: Awaited<ReturnType<typeof voiceOver>> | null = null;
   if (o.voiceText) { log("Tạo giọng đọc Edge TTS", "tool"); voice = await voiceOver({ text: o.voiceText, voice: o.voiceName, rate: o.voiceRate }); }
-  const want = Math.min(20, Math.max(3, Math.ceil(voice?.duration ?? o.seconds ?? 6)));
+  const onMac = process.platform === "darwin";
+  // Without the Apple GPU this runs on CPU (~6-7 min per second of clip): keep the default short.
+  const want = Math.min(20, Math.max(3, Math.ceil(voice?.duration ?? o.seconds ?? (onMac ? 6 : 3))));
   const driving = join(job.workdir, `driving-${want}s.mp4`);
   execFileSync("ffmpeg", ["-v", "error", "-y", "-stream_loop", "-1", "-i", fullDriving, "-t", String(want), "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", driving]);
-  log(`LivePortrait (MediaPipe) làm ảnh cử động ${want} giây theo ${basename(fullDriving)} — GPU M2, khoảng ${Math.ceil(want * 0.6) + 1} phút`, "tool");
+  log(`LivePortrait (MediaPipe) làm ảnh cử động ${want} giây theo ${basename(fullDriving)} — ${onMac ? `GPU M2, khoảng ${Math.ceil(want * 0.6) + 1} phút` : "chạy bằng CPU, có thể mất vài phút mỗi giây clip"}`, "tool");
   let lastPct = -1;
-  const r = await run(py(LP), ["inference.py", "-s", src, "-d", driving, "-o", outDir], {
-    cwd: LP, signal, env: { PYTORCH_ENABLE_MPS_FALLBACK: "1" }, timeoutMs: 30 * 60_000,
+  // No Apple GPU (MPS) off macOS: without --flag-force-cpu LivePortrait looks for CUDA and stops; FP16 is for GPUs only.
+  const r = await run(py(LP), ["inference.py", "-s", src, "-d", driving, "-o", outDir, ...(onMac ? [] : ["--flag-force-cpu", "--no-flag-use-half-precision"])], {
+    cwd: LP, signal, env: { PYTORCH_ENABLE_MPS_FALLBACK: "1" }, timeoutMs: (onMac ? 30 : 10 + want * 9) * 60_000,
     onLine: (l) => {
       const m = l.match(/(\d{1,3})%\|/);
       if (m && /Animating/i.test(l)) { const pct = Math.floor(Number(m[1]) / 20) * 20; if (pct !== lastPct) { lastPct = pct; log(`Đang làm ảnh cử động… ${m[1]}%`, "tool"); } return; }

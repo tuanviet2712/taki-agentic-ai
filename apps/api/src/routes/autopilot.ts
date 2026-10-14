@@ -3,7 +3,7 @@ import { activeDna, bizSettings, isKilled, q, type Row } from "@dotaka/db";
 import { effectiveProvider } from "@dotaka/llm-gateway";
 import {
   AUTOPILOT_PLATFORMS, PLATFORM_NAME, autopilotAllocation, autopilotNextTick, autopilotPipeline, autopilotSettings, autopilotState, autopilotTick,
-  assertAutopilotEnabled, dnaProducts, pipelineCoverage, publishRoute, rotationProducts, routeReason, saveAutopilotSettings, setAutopilotEnabled,
+  assertAutopilotEnabled, dnaProducts, pipelineCoverage, publishChannelFor, publishRoute, rotationProducts, routeReason, saveAutopilotSettings, setAutopilotEnabled,
   telegramAssistantStatus, videoAiStatus, type AutopilotSettings,
 } from "@dotaka/orchestrator";
 import { AppError } from "@dotaka/shared";
@@ -43,7 +43,7 @@ export async function autopilotPrerequisites(bizId: string, s: AutopilotSettings
   if (!s.platforms.length) add({ key: "platforms", title: "Nền tảng đăng", status: "fail", detail: "Chưa chọn nền tảng nào", action: { label: "Chọn nền tảng bên dưới", href: "/autopilot#settings" } });
   for (const { platform } of s.platforms) {
     const name = PLATFORM_NAME[platform];
-    const ch = q.get<Row>("SELECT * FROM channel WHERE biz_id = ? AND platform = ? AND enabled = 1 ORDER BY created_at LIMIT 1", bizId, platform);
+    const ch = publishChannelFor(bizId, platform); // đúng kênh sẽ đăng (kênh đăng chính trước)
     if (!ch) { add({ key: `channel_${platform}`, title: `Kênh đăng ${name}`, status: "fail", detail: `Chưa có kênh ${name} nào để đăng`, action: { label: "Thêm kênh đăng", href: "/channels" } }); continue; }
     const route = publishRoute(ch);
     add(route === "none"

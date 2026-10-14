@@ -40,11 +40,24 @@ try {
     if (!page) throw new Error("Không thấy tab Flow trong Chrome Flow");
     let videos = 0, images = 0, body = "";
     for (const f of page.frames()) {
-      const r = await f.evaluate(() => ({
-        v: [...document.querySelectorAll("video")].filter((x) => (x.currentSrc || x.src || x.querySelector("source")?.src) && (x.readyState >= 1 || x.duration > 0)).length,
-        i: [...document.querySelectorAll("img")].filter((x) => x.complete && x.naturalWidth >= 400 && x.naturalHeight >= 400).length,
-        t: document.body?.innerText ?? "",
-      })).catch(() => ({ v: 0, i: 0, t: "" }));
+      const r = await f.evaluate(() => {
+        // Lưới dự án Flow (trình tạo thường) KHÔNG có thẻ <video> cho clip đã xong: mỗi clip là 1 ảnh thu nhỏ
+        // alt "Generated video thumbnail" (+ nút ▶). Đếm các ô đó là video, và không tính chúng là ảnh.
+        const thumb = (x) => /video thumbnail/i.test(x.alt || "");
+        const imgs = [...document.querySelectorAll("img")].filter((x) => x.complete && x.naturalWidth >= 400 && x.naturalHeight >= 400);
+        const players = [...document.querySelectorAll("video")].filter((x) => (x.currentSrc || x.src || x.querySelector("source")?.src) && (x.readyState >= 1 || x.duration > 0)).length;
+        const thumbs = new Set(imgs.filter(thumb).map((x) => x.src.split("?")[0])).size;
+        // Đếm theo Ô video của lưới dự án: clip đã xong là ảnh "Generated video thumbnail" ở NHIỀU cỡ (720×1280, bản nhỏ 288×512,
+        // cả ngang 512×288) hoặc một thẻ <video> đã nạp. Lọc ảnh ≥ 400px ở trên bỏ sót bản nhỏ → đếm 3/9 → chờ mãi dù Flow đã tạo xong.
+        // Ô đang tạo (hiện %, "Generating"…) hoặc lỗi không tính.
+        const tiles = [...document.querySelectorAll("flow-video-tile")].filter((t) => {
+          if (/generating|đang tạo|\d+\s*%|failed|thất bại|lỗi/i.test(t.innerText || "")) return false;
+          const p = t.querySelector("video");
+          if (p && (p.currentSrc || p.src) && (p.readyState >= 1 || p.duration > 0)) return true;
+          return [...t.querySelectorAll("img")].some((x) => thumb(x) && x.complete && x.naturalWidth > 0);
+        }).length;
+        return { v: Math.max(players, thumbs, tiles), i: imgs.filter((x) => !thumb(x)).length, t: document.body?.innerText ?? "" };
+      }).catch(() => ({ v: 0, i: 0, t: "" }));
       videos += r.v; images += r.i; body += `\n${r.t}`;
     }
     const progress = [...new Set(body.match(/\b\d{1,2}\s*\/\s*\d{1,2}\b(?:\s*(?:clip|cảnh|video|xong))?/gi) ?? [])].slice(0, 4);

@@ -9,7 +9,7 @@ const API = `http://127.0.0.1:${process.env.API_PORT || 8787}`;
 
 function readEnv(file) {
   const env = {};
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) { // .env có thể là CRLF (Windows)
     const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
     if (m) env[m[1]] = m[2].trim().replace(/^"(.*)"$/, "$1");
   }

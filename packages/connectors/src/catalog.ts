@@ -28,7 +28,7 @@ export const PLATFORMS: PlatformDef[] = [
     guide: [
       "Vào business.facebook.com → Cài đặt doanh nghiệp → Người dùng hệ thống → Thêm (vai trò Quản trị viên).",
       "Gán tài sản: các Tài khoản quảng cáo + Trang (quyền toàn quyền).",
-      "Bấm 'Tạo mã' → chọn app → tick ads_management, ads_read, business_management, pages_show_list, pages_read_engagement, pages_manage_ads, pages_manage_posts (đăng bài), pages_manage_engagement (trả lời bình luận), pages_messaging (Messenger) → hết hạn: Không bao giờ.",
+      "Bấm 'Tạo mã' → chọn app → tick ads_management, ads_read, business_management, pages_show_list, pages_read_engagement, pages_manage_ads, pages_manage_posts (đăng bài), pages_manage_engagement (trả lời bình luận), pages_messaging (Messenger), instagram_basic + instagram_content_publish (đăng Instagram, Trang phải gắn tài khoản Instagram Business) → hết hạn: Không bao giờ.",
       "Dán token vào đây. Hệ thống tự tìm tài khoản quảng cáo và Fanpage.",
     ],
   },
@@ -44,6 +44,19 @@ export const PLATFORMS: PlatformDef[] = [
       "Tạo app tại business-api.tiktok.com (Developer) với quyền Ads Management + Reporting.",
       "Uỷ quyền app cho tài khoản quảng cáo → nhận long-term Access token.",
       "Lấy Advertiser ID trong TikTok Ads Manager (góc trên bên phải).",
+    ],
+  },
+  {
+    key: "tiktok_post", name: "TikTok (đăng video)", category: "messaging", status: "live", color: "#111111",
+    description: "Đăng video lên kênh TikTok hoặc gửi bản nháp vào hộp thư TikTok (Content Posting API). Nên kết nối bằng nút đăng nhập ở trang Kênh đăng.",
+    capabilities: ["Gửi bản nháp", "Đăng video", "Số liệu video"],
+    fields: [
+      { key: "access_token", label: "User access token", type: "password", secret: true, required: true, help: "Token OAuth của tài khoản TikTok với scope user.info.basic, video.upload, video.publish, video.list. Dùng nút đăng nhập ở trang Kênh đăng thì hệ thống tự gia hạn." },
+    ],
+    guide: [
+      "Tạo app tại developers.tiktok.com → thêm sản phẩm Login Kit + Content Posting API.",
+      "Xin scope: user.info.basic, video.upload (bản nháp), video.publish + video.list (đăng công khai, cần TikTok duyệt app).",
+      "App CHƯA được TikTok duyệt: chỉ gửi được bản nháp vào hộp thư TikTok; đăng công khai dùng 'Đăng qua Chrome'. Khi app đã duyệt, bật 'App đã được TikTok duyệt' ở thẻ kênh.",
     ],
   },
   {
@@ -87,6 +100,27 @@ export const PLATFORMS: PlatformDef[] = [
     ],
   },
   {
+    key: "wordpress", name: "Website (WordPress)", category: "messaging", status: "live", color: "#21759B",
+    description: "Đăng bài SEO lên website WordPress: tiêu đề, nội dung, ảnh trong bài (có alt), ảnh đại diện, mô tả ngắn, đường dẫn theo từ khoá.",
+    capabilities: ["Đăng bài SEO", "Tải ảnh + alt", "Ảnh đại diện", "Bản nháp / công khai"],
+    fields: [
+      { key: "site_url", label: "Địa chỉ website", type: "text", required: true, placeholder: "https://taki.vn", help: "Trang chủ website WordPress, dùng https://." },
+      { key: "username", label: "Tên đăng nhập WordPress", type: "text", required: true, placeholder: "admin", help: "Tài khoản có vai trò Tác giả / Biên tập viên / Quản trị (được đăng bài + tải ảnh)." },
+      { key: "app_password", label: "Mật khẩu ứng dụng (Application Password)", type: "password", secret: true, required: true, placeholder: "abcd EFGH 1234 ijkl MNOP 5678", help: "KHÔNG phải mật khẩu đăng nhập. Tạo ở WordPress → Thành viên → Hồ sơ → Mật khẩu ứng dụng." },
+      { key: "post_status", label: "Đăng bài ở trạng thái", type: "select", options: [
+        { value: "publish", label: "Công khai ngay (bài đã qua hộp Duyệt)" }, { value: "draft", label: "Bản nháp — tự xuất bản trên WordPress" }, { value: "pending", label: "Chờ duyệt trên WordPress" },
+      ] },
+      { key: "category_id", label: "ID chuyên mục (tuỳ chọn)", type: "text", placeholder: "12", help: "WordPress → Bài viết → Chuyên mục → di chuột lên chuyên mục, số sau tag_ID=. Trống = chuyên mục mặc định." },
+    ],
+    guide: [
+      "Đăng nhập WordPress bằng tài khoản sẽ đứng tên bài viết (vai trò Tác giả trở lên).",
+      "Vào Thành viên → Hồ sơ (Users → Profile), kéo xuống mục \"Mật khẩu ứng dụng\" (Application Passwords).",
+      "Đặt tên \"TAKI Agentic AI\" → Thêm mật khẩu ứng dụng mới → chép dãy 24 ký tự vừa hiện (chỉ hiện 1 lần).",
+      "Dán địa chỉ website, tên đăng nhập và mật khẩu ứng dụng vào đây → Kết nối. Hệ thống tự kiểm tra quyền đăng bài + tải ảnh và tạo kênh \"website\".",
+      "Không thấy mục Mật khẩu ứng dụng: website chưa có https, hoặc plugin bảo mật (Wordfence, iThemes…) đang tắt tính năng này / chặn REST API — bật lại trong plugin.",
+    ],
+  },
+  {
     key: "zlcrm", name: "ZL-CRM (Zalo)", category: "messaging", status: "live", color: "#0068FF",
     description: "Nhiều nick Zalo cá nhân qua ZL-CRM: đọc hội thoại, chấm lead bằng Jev, follow-up khách im lặng.",
     capabilities: ["Hội thoại Zalo", "Follow-up", "Gửi tin qua nick"],
@@ -104,7 +138,7 @@ export const PLATFORMS: PlatformDef[] = [
   },
   {
     key: "ai", name: "AI", category: "ai", status: "live", color: "#7C3AED",
-    description: "Claude (qua tài khoản CLI) + Jev System One — cấu hình trong Cài đặt.", capabilities: ["Claude CLI", "Jev"], fields: [],
+    description: "Claude CLI, tài khoản ChatGPT qua Codex CLI và Jev System One — chọn hồ sơ tại Kết nối AI.", capabilities: ["Claude CLI", "ChatGPT / Codex CLI", "Nhiều hồ sơ ChatGPT", "Jev"], fields: [],
   },
   {
     key: "pancake", name: "Pancake", category: "commerce", status: "live", color: "#1DA1F2",

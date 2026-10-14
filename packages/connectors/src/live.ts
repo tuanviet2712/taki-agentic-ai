@@ -1,13 +1,17 @@
 import { createSign } from "node:crypto";
 import type { CanonicalMetrics } from "@dotaka/contracts";
-import { ConnectorError, type AdRef, type Connector, type ImportedAd } from "./index.ts";
+import { ConnectorError, type AdRef, type Connector, type CreatedCampaign, type ImportedAd } from "./index.ts";
 import { graphAll, graphGet, graphPost } from "./meta/graph.ts";
 import { CONVERSION_EVENTS, OBJECTIVE, toObjective } from "./meta/objectives.ts";
 import { buildTargeting, estimateReach, listPixels, searchInterests, searchLocations, templateTargeting } from "./meta/targeting.ts";
-import { AdCreateError, activateBoost, cleanupPartial, createBoost, readDailyBudget, readStatus, storyIdOf, validateBoost, type BoostSpec, type CreatedAd } from "./meta/create.ts";
+import { AdCreateError, StructureCreateError, activateBoost, activateStructure, cleanupPartial, cleanupStructure, createBoost, createCampaignStructure, readDailyBudget, readStatus, storyIdOf, validateBoost, type BoostSpec, type CreatedAd, type CreatedStructure } from "./meta/create.ts";
 import { FIT_LABEL, assessPosts, fetchPostsDetailed } from "./meta/posts.ts";
 export { metaPageConnector } from "./meta/page.ts";
+export { instagramConnector } from "./meta/instagram.ts";
+export { tiktokError, tiktokPostConnector, tiktokPostTest } from "./tiktok-post.ts";
+export * from "./oauth.ts";
 export { googleAdsConnector, googleAdsTest, type GoogleAdsCreds } from "./google/ads.ts";
+export { wordpressConnector, wordpressTest, wpSiteUrl, type WordpressCreds } from "./wordpress.ts";
 import { CONVERSION_ACTIONS, RESULT_SETTING, countConversions, mapObjective } from "./meta/conversions.ts";
 
 /**
@@ -63,15 +67,43 @@ export async function metaTest(c: MetaCreds) {
   const me = await graphGet(c.access_token, "me", { fields: "id,name" });
   return { accountId: String(me.id), name: String(me.name ?? me.id) };
 }
-export async function metaDiscover(c: MetaCreds) {
-  const [adAccounts, pages] = await Promise.all([
-    graphAll(c.access_token, "me/adaccounts", { fields: "id,name,currency,account_status,business_name", limit: 200 }),
-    graphAll(c.access_token, "me/accounts", { fields: "id,name,category,access_token", limit: 100 }, 5).catch(() => []),
+/**
+ * Tìm tài sản của token: tài khoản quảng cáo, Fanpage (+ token Trang) và tài khoản Instagram Business gắn với Trang.
+ * Phòng thủ: lỗi ở một nhánh KHÔNG BAO GIỜ làm mất danh sách Trang đã có — Instagram lấy bằng lời gọi RIÊNG (token thiếu
+ * `instagram_basic` thì chỉ không có Instagram, Trang vẫn đủ). `tolerant` (token đăng nhập bằng nút): thiếu quyền quảng cáo
+ * không làm kết nối thất bại, và gom thêm Trang nằm trong Business Manager (không hiện ở me/accounts).
+ */
+export async function metaDiscover(c: MetaCreds, opts: { tolerant?: boolean } = {}) {
+  const t = c.access_token;
+  const adAccountsP = graphAll(t, "me/adaccounts", { fields: "id,name,currency,account_status,business_name", limit: 200 });
+  const [adAccounts, basePages, igRows, bmPages] = await Promise.all([
+    opts.tolerant ? adAccountsP.catch(() => [] as any[]) : adAccountsP,
+    graphAll(t, "me/accounts", { fields: "id,name,category,access_token", limit: 100 }, 5).catch(() => [] as any[]),
+    graphAll(t, "me/accounts", { fields: "id,username,instagram_business_account{id,username,name}", limit: 100 }, 5).catch(() => [] as any[]),
+    opts.tolerant ? businessPages(t) : Promise.resolve([] as any[]),
   ]);
+  const seen = new Set<string>(basePages.map((p) => String(p.id)));
+  const pages = [...basePages, ...bmPages.filter((p) => p?.id && !seen.has(String(p.id)) && seen.add(String(p.id)))];
+  const extra = new Map<string, any>(igRows.map((r) => [String(r.id), r]));
   return {
     adAccounts: adAccounts.map((a) => ({ externalId: String(a.id), name: String(a.name ?? a.id), currency: String(a.currency ?? "VND"), active: a.account_status === 1, business: a.business_name ?? null })),
-    pages: pages.map((p) => ({ externalId: String(p.id), name: String(p.name), category: p.category ?? null, token: p.access_token as string | undefined })),
+    pages: pages.map((p) => ({ externalId: String(p.id), name: String(p.name), category: p.category ?? null, token: p.access_token as string | undefined, username: (extra.get(String(p.id))?.username as string | undefined) ?? undefined })),
+    instagram: pages.flatMap((p) => {
+      const ig = extra.get(String(p.id))?.instagram_business_account;
+      return ig?.id && p.access_token ? [{ externalId: String(ig.id), name: ig.username ? `@${ig.username}` : String(ig.name ?? ig.id), username: ig.username ? String(ig.username) : undefined, token: String(p.access_token), pageId: String(p.id) }] : [];
+    }),
   };
+}
+/** Trang nằm trong Business Manager (owned_pages / client_pages) — mỗi nhánh lỗi riêng thì bỏ nhánh đó. */
+async function businessPages(token: string): Promise<any[]> {
+  const out: any[] = [];
+  const businesses = await graphAll(token, "me/businesses", { fields: "id,name", limit: 25 }, 2).catch(() => [] as any[]);
+  for (const b of businesses.slice(0, 10)) {
+    for (const edge of ["owned_pages", "client_pages"]) {
+      out.push(...(await graphAll(token, `${b.id}/${edge}`, { fields: "id,name,category,access_token", limit: 100 }, 3).catch(() => [] as any[])));
+    }
+  }
+  return out;
 }
 /** Recent Page posts with an ads-os fitness verdict per objective (Tin nhắn / Tương tác / Chuyển đổi). */
 export async function metaPagePosts(pageId: string, pageToken: string, limit = 25) {
@@ -82,6 +114,15 @@ export async function metaPagePosts(pageId: string, pageToken: string, limit = 2
     fitness: Object.fromEntries(Object.entries(p.fitness.byObjective).map(([k, v]) => [k, { verdict: v.verdict, label: FIT_LABEL[v.verdict], reason: v.reason }])),
     pageNote: note, medianEngagement,
   }));
+}
+/** True when this token can read every given Graph id (ad account "act_…", Page id…). Read-only, used to pick the right token. */
+export async function metaCanAccess(token: string, ids: string[]): Promise<boolean> {
+  try {
+    for (const id of ids) await graphGet(token, id, { fields: "id" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 export { CONVERSION_EVENTS, OBJECTIVE as META_OBJECTIVES, buildTargeting, templateTargeting, estimateReach, searchInterests, searchLocations, listPixels, validateBoost };
 
@@ -153,6 +194,38 @@ export function metaConnector(c: MetaCreds, config: { result_action?: string }):
       const now = await readDailyBudget(token, owner);
       if (now != null && now !== value) throw new ConnectorError("InvalidRequest", `Meta: đã gửi ngân sách ${value} nhưng đọc lại thấy ${now}`);
       return { ok: true };
+    },
+    async createCampaignFromPosts(spec): Promise<CreatedCampaign> {
+      if (!spec.accountExternalId || !spec.pageExternalId) throw new ConnectorError("InvalidRequest", "Thiếu tài khoản quảng cáo hoặc Fanpage");
+      const t: any = spec.template ?? {};
+      const objective = toObjective(t.objective);
+      const pageId = spec.pageExternalId;
+      const structure = {
+        adAccountId: spec.accountExternalId, pageId, campaignName: spec.name, minorFactor: minorFactor(spec.currency),
+        objective, pixelId: t.pixelId ?? null, conversionEvent: t.conversionEvent ?? null,
+        postIds: spec.posts.map((p) => storyIdOf(pageId, p.postExternalId)),
+        adsets: spec.adsets.map((a) => ({ name: a.name, dailyBudget: a.dailyBudget, targeting: templateTargeting(a.template ?? spec.template ?? {}) })),
+      };
+      let created: CreatedStructure;
+      try {
+        created = await createCampaignStructure(token, structure);
+      } catch (e) {
+        if (e instanceof StructureCreateError) await cleanupStructure(token, e.created);
+        throw e;
+      }
+      const meta: Record<string, unknown> = { objective, currency: spec.currency ?? "VND" };
+      let status: "active" | "paused" = "paused";
+      if (!spec.startPaused) {
+        // The whole structure exists (paused); switch it on. A failure leaves it paused — reported, not hidden.
+        try { status = (await activateStructure(token, created)) === "PAUSED" ? "paused" : "active"; } catch (e) { meta.activationError = e instanceof Error ? e.message : String(e); }
+      }
+      return {
+        campaignExternalId: created.campaignId, status, meta,
+        adsets: created.adsets.map((a, i) => ({
+          externalId: a.adsetId, name: spec.adsets[i].name?.trim() || `${spec.name} — nhóm ${i + 1}`, dailyBudget: a.dailyBudget,
+          ads: a.ads.map((ad, j) => ({ externalId: ad.adId, postExternalId: spec.posts[j].postExternalId, name: `${spec.adsets[i].name?.trim() || `${spec.name} — nhóm ${i + 1}`} — bài ${j + 1}` })),
+        })),
+      };
     },
     async createAdFromPost(spec) {
       if (!spec.accountExternalId || !spec.pageExternalId) throw new ConnectorError("InvalidRequest", "Thiếu tài khoản quảng cáo hoặc Fanpage");
@@ -345,8 +418,147 @@ export async function pancakeTest(c: PancakeCreds) {
   return shops.map((s) => ({ externalId: String(s.id), name: String(s.name ?? s.id) }));
 }
 export async function pancakeOrders(c: PancakeCreds, shopId: string, limit = 30) {
-  const r = await http(`${POS}/shops/${shopId}/orders?api_key=${encodeURIComponent(c.api_key)}&page_size=${limit}&page_number=1`, { label: "Pancake POS" });
-  return ((r.data ?? []) as any[]).map((o) => ({ id: String(o.id), customer: o.bill_full_name ?? o.customer?.name ?? null, total: Number(o.total_price ?? o.total ?? 0), status: o.status_name ?? o.status, createdAt: o.inserted_at ?? o.created_at }));
+  // Sắp theo lần đổi gần nhất → đồng bộ trạng thái (đơn đã đẩy từ TAKI) thấy đơn vừa đổi trước.
+  const r = await pancake(c, `/shops/${encodeURIComponent(shopId)}/orders`, { page_size: limit, page_number: 1, option_sort: "last_updated_order_desc" });
+  return ((r.data ?? []) as any[]).map(pancakeOrderOf);
+}
+
+/*
+ * ---- Tạo đơn / tìm mẫu mã (Pancake POS Open API — https://docs.pancake.biz/pos/api/, spec ./openapi.json) ----
+ *  GET  /shops                                   → { shops: [{ id, name }] }
+ *  GET  /shops/{SHOP_ID}/products/variations     ?search=&page_size= → { data: [{ id, product_id, display_id, retail_price, fields[], product: { name } }] }
+ *  GET  /shops/{SHOP_ID}/orders                  ?search= (SĐT, tên khách, GHI CHÚ…) → { data: [order] }
+ *  GET  /shops/{SHOP_ID}/orders/{ORDER_ID}       → order (một số bản bọc trong { data })
+ *  POST /shops/{SHOP_ID}/orders                  body = order (xem pancakeOrderBody) → order
+ * Xác thực: ?api_key=… trên mọi yêu cầu. Lỗi nghiệp vụ có thể về HTTP 200 kèm { success: false, message }.
+ */
+async function pancake(c: PancakeCreds, path: string, query: Record<string, string | number | undefined> = {}, body?: unknown): Promise<any> {
+  const qs = new URLSearchParams({ api_key: c.api_key });
+  for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== "") qs.set(k, String(v));
+  const r = await http(`${POS}${path}?${qs}`, {
+    label: "Pancake POS", method: body ? "POST" : "GET",
+    ...(body ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}),
+  });
+  if (r && typeof r === "object" && r.success === false) {
+    const msg = String(r.message ?? r.error ?? "yêu cầu bị từ chối");
+    throw new ConnectorError(/api.?key|unauthor|token|permission|quyền/i.test(msg) ? "AuthError" : "InvalidRequest", `Pancake POS: ${msg}`);
+  }
+  return r;
+}
+
+/** Mã trạng thái đơn của Pancake POS (enum `status` trong spec) → nhãn tiếng Việt cho Sếp. */
+export const PANCAKE_STATUS: Record<number, string> = {
+  0: "Mới", 17: "Chờ xác nhận", 11: "Chờ hàng", 12: "Chờ in", 13: "Đã in", 20: "Đã đặt hàng", 1: "Đã xác nhận",
+  8: "Đang đóng hàng", 9: "Chờ lấy hàng", 2: "Đang giao", 3: "Đã nhận hàng", 16: "Đã thu tiền", 4: "Đang hoàn",
+  15: "Hoàn một phần", 5: "Đã hoàn", 6: "Đã huỷ", 7: "Đã xoá",
+};
+export type PancakeOrder = { id: string; displayId: string | null; customer: string | null; total: number; status: string; statusCode: number | null; note: string; createdAt: string | null };
+function pancakeOrderOf(o: any): PancakeOrder {
+  const code = typeof o.status === "number" ? o.status : Number.isFinite(Number(o.status)) && o.status !== null && o.status !== "" ? Number(o.status) : null;
+  return {
+    id: String(o.id), displayId: o.display_id != null ? String(o.display_id) : null, customer: o.bill_full_name ?? o.customer?.name ?? null,
+    total: Number(o.total_price ?? o.total ?? 0), status: (code != null ? PANCAKE_STATUS[code] : undefined) ?? o.status_name ?? String(o.status ?? ""),
+    statusCode: code, note: String(o.note ?? ""), createdAt: o.inserted_at ?? o.created_at ?? null,
+  };
+}
+
+export type PancakeVariation = { id: string; productId: string | null; name: string; sku: string | null; price: number | null; stock: number | null };
+/** Tìm mẫu mã (variation) để ghép với sản phẩm trong DNA. */
+export async function pancakeFindVariations(c: PancakeCreds, shopId: string, search: string, limit = 20): Promise<PancakeVariation[]> {
+  const r = await pancake(c, `/shops/${encodeURIComponent(shopId)}/products/variations`, { search: search.trim() || undefined, page_size: limit, page_number: 1 });
+  return ((r.data ?? []) as any[]).map((v) => {
+    const attrs = ((v.fields ?? []) as any[]).map((f) => f?.value).filter(Boolean).join(" / ");
+    const base = String(v.product?.name ?? v.name ?? v.display_id ?? v.id);
+    return {
+      id: String(v.id), productId: v.product_id != null ? String(v.product_id) : null, name: attrs ? `${base} — ${attrs}` : base,
+      sku: v.display_id != null ? String(v.display_id) : null, price: v.retail_price != null ? Number(v.retail_price) : null,
+      stock: v.remain_quantity != null ? Number(v.remain_quantity) : null,
+    };
+  });
+}
+
+/** Danh sách shop của API key (dùng chọn shop đẩy đơn). */
+export async function pancakeShops(c: PancakeCreds) {
+  return pancakeTest(c);
+}
+
+/** Đơn TAKI cần tạo trên Pancake (đã qua cổng duyệt [ĐỎ] của Sếp). */
+export type PancakeOrderSpec = {
+  /** Mã chống trùng, ghi vào ghi chú đơn: "TAKI-<id đơn nội bộ>" — dùng để tìm lại đơn khi lần gửi trước hết giờ chờ. */
+  marker: string;
+  fullName: string; phone: string;
+  /** Hàng cần giao: địa chỉ dạng chữ. Pancake tự tách tỉnh/huyện/xã khi không gửi province_id (theo tài liệu). */
+  address?: string | null; provinceId?: string | null; districtId?: string | null; communeId?: string | null;
+  items: { variationId: string; productId?: string | null; name: string; quantity: number; unitPrice: number }[];
+  discount: number; shippingFee: number; cod: number; note?: string | null; warehouseId?: string | null;
+};
+
+/**
+ * ÁNH XẠ TRƯỜNG DUY NHẤT TAKI → Pancake POS (POST /shops/{SHOP_ID}/orders). Nếu Pancake đổi tên trường, chỉ sửa ở đây.
+ *  - bill_full_name / bill_phone_number: người mua.
+ *  - shipping_address: { full_name, phone_number, address, province_id?, district_id?, commune_id? } — để trống
+ *    province_id thì Pancake tự phân tích `address` dạng chữ (mô tả trường `address` trong spec).
+ *  - items[]: { variation_id (bắt buộc), quantity (bắt buộc), product_id?, discount_each_product, variation_info.retail_price }
+ *    — gửi retail_price để giá dòng hàng đúng giá đã báo khách (spec khuyến nghị).
+ *  - total_discount, shipping_fee, cod (tiền thu hộ), note (ghi chú nội bộ, chứa mã chống trùng), warehouse_id?.
+ */
+export function pancakeOrderBody(shopId: string, s: PancakeOrderSpec): Record<string, unknown> {
+  const ship: Record<string, unknown> = { full_name: s.fullName, phone_number: s.phone };
+  if (s.address) ship.address = s.address;
+  if (s.provinceId) ship.province_id = s.provinceId;
+  if (s.districtId) ship.district_id = s.districtId;
+  if (s.communeId) ship.commune_id = s.communeId;
+  const note = [s.note?.trim(), `[${s.marker}]`].filter(Boolean).join("\n");
+  return {
+    shop_id: /^\d+$/.test(shopId) ? Number(shopId) : shopId,
+    bill_full_name: s.fullName,
+    bill_phone_number: s.phone,
+    shipping_address: ship,
+    items: s.items.map((it) => ({
+      variation_id: it.variationId,
+      ...(it.productId ? { product_id: it.productId } : {}),
+      quantity: it.quantity,
+      discount_each_product: 0, is_bonus_product: false, is_discount_percent: false, is_wholesale: false, one_time_product: false,
+      variation_info: { name: it.name, retail_price: it.unitPrice },
+    })),
+    total_discount: s.discount,
+    shipping_fee: s.shippingFee,
+    cod: s.cod,
+    received_at_shop: false,
+    note,
+    ...(s.warehouseId ? { warehouse_id: s.warehouseId } : {}),
+  };
+}
+
+/** Tạo đơn thật trên Pancake POS. `idempotencyKey` = mã chống trùng (đã nằm trong ghi chú) — Pancake không có header idempotency. */
+export async function pancakeCreateOrder(c: PancakeCreds, shopId: string, spec: PancakeOrderSpec, idempotencyKey = spec.marker): Promise<PancakeOrder> {
+  const body = pancakeOrderBody(shopId, { ...spec, marker: idempotencyKey });
+  const r = await pancake(c, `/shops/${encodeURIComponent(shopId)}/orders`, {}, body);
+  const o = r?.data && typeof r.data === "object" && !Array.isArray(r.data) ? r.data : r;
+  if (!o || o.id == null) throw new ConnectorError("InvalidRequest", "Pancake POS: tạo đơn không trả về mã đơn");
+  return pancakeOrderOf(o);
+}
+
+/** Tìm đơn đã tạo bằng mã chống trùng trong ghi chú (tìm theo ghi chú; dự phòng tìm theo SĐT rồi lọc ghi chú). */
+export async function pancakeFindOrderByMarker(c: PancakeCreds, shopId: string, marker: string, phone?: string): Promise<PancakeOrder | null> {
+  for (const search of [marker, phone].filter(Boolean) as string[]) {
+    const r = await pancake(c, `/shops/${encodeURIComponent(shopId)}/orders`, { search, page_size: 50, page_number: 1 });
+    const hit = ((r.data ?? []) as any[]).map(pancakeOrderOf).find((o) => o.note.includes(marker));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** 1 đơn theo mã Pancake (đồng bộ trạng thái). */
+export async function pancakeGetOrder(c: PancakeCreds, shopId: string, orderId: string): Promise<PancakeOrder | null> {
+  try {
+    const r = await pancake(c, `/shops/${encodeURIComponent(shopId)}/orders/${encodeURIComponent(orderId)}`);
+    const o = r?.data && typeof r.data === "object" && !Array.isArray(r.data) ? r.data : r;
+    return o?.id != null ? pancakeOrderOf(o) : null;
+  } catch (e) {
+    if (e instanceof ConnectorError && e.kind === "InvalidRequest" && /not.?found|không tìm thấy|404/i.test(e.message)) return null;
+    throw e;
+  }
 }
 
 // =====================================================================================

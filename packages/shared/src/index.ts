@@ -64,11 +64,15 @@ export const logger = {
 };
 
 // ---------- Envelope-style token encryption (local key stands in for KMS) ----------
+/** Khóa hợp lệ = 64 ký tự hex (32 byte). Trống / sai định dạng → khóa dev công khai trong mã nguồn (KHÔNG an toàn). */
+export const isValidEncryptionKey = (hex: string | undefined | null) => Boolean(hex && /^[0-9a-f]{64}$/i.test(hex));
+/** Khóa dev cũ (dùng khi chưa đặt TOKEN_ENCRYPTION_KEY) — chỉ để đọc / chuyển các bí mật đã lưu bằng khóa này. */
+export const legacyDevKey = (): Buffer => createHash("sha256").update("dotaka-dev-only-key").digest();
 function dataKey(): Buffer {
   const hex = process.env.TOKEN_ENCRYPTION_KEY;
-  if (hex && /^[0-9a-f]{64}$/i.test(hex)) return Buffer.from(hex, "hex");
+  if (hex && isValidEncryptionKey(hex)) return Buffer.from(hex, "hex");
   // Dev fallback: derived key. Production must set TOKEN_ENCRYPTION_KEY from KMS/vault.
-  return createHash("sha256").update("dotaka-dev-only-key").digest();
+  return legacyDevKey();
 }
 export function encryptSecret(plain: string): string {
   const iv = randomBytes(12);
@@ -76,9 +80,9 @@ export function encryptSecret(plain: string): string {
   const enc = Buffer.concat([c.update(plain, "utf8"), c.final()]);
   return Buffer.concat([iv, c.getAuthTag(), enc]).toString("base64");
 }
-export function decryptSecret(blob: string): string {
+export function decryptSecret(blob: string, key?: Buffer): string {
   const raw = Buffer.from(blob, "base64");
-  const d = createDecipheriv("aes-256-gcm", dataKey(), raw.subarray(0, 12));
+  const d = createDecipheriv("aes-256-gcm", key ?? dataKey(), raw.subarray(0, 12));
   d.setAuthTag(raw.subarray(12, 28));
   return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString("utf8");
 }

@@ -3,12 +3,14 @@ import { ConnectorError, type MessengerSyncMessage, type MessengerThread } from 
 import { AppError, logger, nowIso, uuidv7 } from "@dotaka/shared";
 import { connectorForChannel } from "./connections.ts";
 import { enqueue, type Handler } from "./queue.ts";
+import { queueChatMedia } from "./chat-media.ts";
+import { chatVisionEnabled } from "@dotaka/chat-engine";
 
 /**
  * Đồng bộ Messenger: kéo hội thoại/tin nhắn Messenger của Fanpage về trang Hội thoại — dùng được cả khi KHÔNG có
  * webhook công khai (Cloudflare Tunnel).
  *  - backfill: kéo lịch sử (mặc định 30 ngày) → CHỈ LƯU, không bao giờ để bot trả lời / chăm khách / lên đơn tin cũ.
- *  - incremental (mỗi 3 phút): tin mới từ con trỏ channel.meta.messengerSyncedAt. Tin khách MỚI (≤ 15 phút) mà webhook
+ *  - incremental (mỗi 1 phút): tin mới từ con trỏ channel.meta.messengerSyncedAt. Tin khách MỚI (≤ 15 phút) mà webhook
  *    chưa nhận → đi ĐÚNG đường webhook (job chat.ingest) để bot trả lời + bắt SĐT; tin cũ hơn → lưu, đánh dấu chưa đọc.
  * Cùng khoá với webhook & chăm khách: hội thoại = (messenger, PSID); tin = external_id mid; chống trùng raw_event `meta:<mid>`.
  * Chỉ Fanpage THẬT (kết nối live có page token) — không có Trang mô phỏng: chưa kết nối thì báo rõ, không giả dữ liệu.
@@ -34,7 +36,11 @@ const NO_PAGE = "Chưa có Fanpage thật kết nối";
 const maskPhonesInText = (t: string) => t.replace(/(?:\+?84|0)(?:[\s.-]?\d){8,10}/g, (m) => `${m.slice(0, 3)}***${m.slice(-2)}`);
 const running = new Set<string>(); // chống 2 lượt đồng bộ cùng 1 doanh nghiệp chạy chồng (cùng tiến trình)
 const statusKey = (bizId: string) => `messengerSync:${bizId}`;
-/** Bot tự trả lời khách thật trên Messenger: TẮT mặc định — Sếp bật ở trang Hội thoại. Tắt = chỉ lưu + chấm lead, người trả lời. */
+/**
+ * Bot tự trả lời khách thật trên Messenger: TẮT mặc định — Sếp bật ở trang Hội thoại. Tắt = chỉ lưu + chấm lead, người trả lời.
+ * Ngoại lệ không gửi gì: sản phẩm có Kịch bản chốt đơn ở chế độ "Gợi ý cho nhân viên" → tin vẫn đi kèm `suggestOnly`,
+ * bot soạn gợi ý ghim ở trang Hội thoại (nhân viên bấm gửi); không có kịch bản "Gợi ý" thì như `noReply` thường.
+ */
 const botKey = (bizId: string) => `messengerBot:${bizId}`;
 export const messengerBotEnabled = (bizId: string) => Boolean(getAppSetting<{ enabled?: boolean }>(botKey(bizId))?.enabled);
 export function setMessengerBot(bizId: string, enabled: boolean, actor: string) {
@@ -205,16 +211,20 @@ function storeThread(bizId: string, ch: Row, t: MessengerThread, asc: MessengerS
         conv.id, m.text, new Date(t0 - 10 * 60_000).toISOString(), new Date(t0 + 10 * 60_000).toISOString());
       if (same) { if (!same.external_id) update("message", same.id, { external_id: m.mid }); continue; }
       // Trả lời gõ ở Meta Business Suite / hộp thư Trang (không qua app).
-      insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "out", sender: "page", body: { text: m.text }, external_id: m.mid, meta: { source: "messenger_sync", via: "facebook", attachment: m.hasAttachment || undefined }, sent_at: m.createdTime });
+      const out = insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "out", sender: "page", body: { text: m.text }, external_id: m.mid, meta: { source: "messenger_sync", via: "facebook", attachment: m.hasAttachment || undefined, ...(m.attachments?.length ? { attachments: m.attachments } : {}) }, sent_at: m.createdTime });
+      if (m.attachments?.length) queueChatMedia(bizId, out.id);
       newMessages++; touched = true; bump(m);
       continue;
     }
     const fresh = mode === "incremental" && now.getTime() - new Date(m.createdTime).getTime() <= FRESH_MS && (!lastPageAt || m.createdTime > lastPageAt);
-    if (fresh && !m.hasAttachment) {
+    // Tin chỉ có tệp/video (hoặc tắt "bot xem ảnh" / tắt bot Messenger): chỉ lưu cho nhân viên. Chỉ có ẢNH + bật xem ảnh + bật bot
+    // → đi đường webhook (bot xem ảnh rồi trả lời). Có chữ kèm ảnh → bot đọc phần chữ (+ mô tả ảnh nếu được phép).
+    const imageOnlyForBot = Boolean(m.attachmentOnly && m.attachments?.some((a) => a.type === "image" || a.type === "sticker") && messengerBotEnabled(bizId) && chatVisionEnabled(bizId));
+    if (fresh && (!m.attachmentOnly || imageOnlyForBot)) {
       if (claimMid(m.mid, pageId, psid, m.text)) {
         // Tin khách mới mà webhook chưa nhận → ĐÚNG đường webhook: bot trả lời, bắt SĐT, chăm khách, kill switch, trạng thái hội thoại.
         enqueue("chat", "chat.ingest", {
-          bizId, msg: { channel: "messenger", externalConversationId: psid, customerName: conv.customer_name, text: m.text.slice(0, 4000), messageId: m.mid, pageExternalId: pageId, sentAt: m.createdTime, ...(messengerBotEnabled(bizId) ? {} : { noReply: true }) },
+          bizId, msg: { channel: "messenger", externalConversationId: psid, customerName: conv.customer_name, text: m.text.slice(0, 4000), messageId: m.mid, pageExternalId: pageId, sentAt: m.createdTime, ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.attachmentOnly ? { attachmentOnly: true } : {}), ...(messengerBotEnabled(bizId) ? {} : { noReply: true, suggestOnly: true }) },
         }, { bizId, idempotencyKey: `ingest:messenger:${m.mid}`, lockKey: `conv:messenger:${psid}`, maxAttempts: 3 });
         routed++; touched = true;
         continue;
@@ -224,7 +234,8 @@ function storeThread(bizId: string, ch: Row, t: MessengerThread, asc: MessengerS
       continue; // webhook đang xử lý tin này
     }
     // Lịch sử (backfill) / tin cũ hơn 15 phút / ảnh-tệp: CHỈ LƯU — không bot, không chăm khách, không lên đơn.
-    insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "in", sender: "customer", body: { text: m.text }, external_id: m.mid, meta: { source: "messenger_sync", ...(m.hasAttachment ? { attachment: true } : {}) }, sent_at: m.createdTime });
+    const saved = insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "in", sender: "customer", body: { text: m.text }, external_id: m.mid, meta: { source: "messenger_sync", ...(m.hasAttachment ? { attachment: true } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }, sent_at: m.createdTime });
+    if (m.attachments?.length) queueChatMedia(bizId, saved.id);
     newMessages++; touched = true; bump(m);
     if (!lastCustomer || m.createdTime > lastCustomer) lastCustomer = m.createdTime;
     if (mode === "incremental") unreadAdd++;
@@ -281,12 +292,12 @@ export function messengerSyncStatus(bizId: string) {
 }
 
 export const MESSENGER_HANDLERS: Record<string, Handler> = {
-  // Lịch nền mỗi 3 phút (incremental, chỉ Trang thật) + job kéo tin cũ (backfill) khi vừa kết nối Trang / Sếp bấm.
+  // Lịch nền mỗi 1 phút (incremental, chỉ Trang thật) + job kéo tin cũ (backfill) khi vừa kết nối Trang / Sếp bấm.
   "messenger.sync": async (p, job) => {
     const bizId = (p.bizId ?? job.biz_id) as string;
     const mode: MessengerSyncMode = p.mode === "backfill" ? "backfill" : "incremental";
     const r = await syncMessenger(bizId, { mode, days: p.days, channelIds: p.channelIds });
-    if (mode !== "backfill") return; // incremental: lỗi đã ghi theo Trang, lượt 3 phút sau tự thử lại — không ném lỗi
+    if (mode !== "backfill") return; // incremental: lỗi đã ghi theo Trang, lượt 1 phút sau tự thử lại — không ném lỗi
     if (r.skipped === SYNC_BUSY) throw new Error(SYNC_BUSY); // hàng đợi thử lại sau
     if (r.transient > 0) throw new Error(`Kéo tin cũ chưa xong: ${r.errors.join("; ")}`); // lỗi tạm → thử lại (đã có thì bỏ qua theo mid)
   },

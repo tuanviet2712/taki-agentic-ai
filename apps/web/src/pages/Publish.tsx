@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clapperboard, Clock, ExternalLink, Eye, Send } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Clapperboard, Clock, ExternalLink, Eye, ListChecks, RotateCcw, Send, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../lib/api";
 import { CONTENT_STATUS, KIND_LABEL, ddmm, hhmm, num, timeAgo, type Tone } from "../lib/format";
 import { Badge, Button, Card, Empty, JevBadge, Loading, Modal, PageHeader, PlatformIcon, cx, platformName, useToast } from "../components/ui";
+import { ExistingPostLinkCard, LinkCommentCell, LinkCommentSettingsCard } from "../components/LinkComment";
 
 const PLATFORMS = ["facebook", "instagram", "tiktok", "zalo", "website"];
 const CH_LABEL: Record<string, string> = { zalo: "Zalo OA", website: "Website" };
@@ -20,51 +21,141 @@ const COMMENT_LABEL: Record<string, { label: string; tone: Tone }> = {
 const JOB_STATUS: Record<string, { label: string; tone: Tone }> = {
   scheduled: { label: "Đã lên lịch", tone: "blue" }, queued: { label: "Trong hàng đợi", tone: "blue" }, running: { label: "Đang đăng", tone: "violet" },
   done: { label: "Đã đăng", tone: "green" }, failed: { label: "Lỗi", tone: "red" }, cancelled: { label: "Đã hủy", tone: "gray" },
+  posting: { label: "Đang đăng", tone: "violet" }, verifying: { label: "Đang xác minh", tone: "violet" },
+  needs_check: { label: "Cần kiểm tra kênh", tone: "amber" }, // có thể ĐÃ lên bài — không tự đăng lại
+  needs_setup: { label: "Chờ kết nối kênh", tone: "amber" }, // kênh chưa kết nối — CHƯA đăng gì
 };
+/** Lượt đăng cần Sếp xử lý: hiện lỗi + nút "Đăng lại" (đăng lại đúng lượt đó, không tạo bài trùng). */
+const RETRYABLE = ["needs_check", "failed", "needs_setup"];
 const scoreTone = (s: number): Tone => (s >= 70 ? "green" : s >= 40 ? "amber" : "gray");
 const chName = (p: string) => CH_LABEL[p] ?? platformName(p);
 
-type QueueItem = { key: string; contentId: string; kind?: string; title: string; channel: string; body?: string; at?: string | null; status: { label: string; tone: Tone } };
+type QueueItem = { key: string; contentId: string; kind?: string; title: string; channel: string; body?: string; at?: string | null; status: { label: string; tone: Tone }; jobId?: string; jobStatus?: string; mode?: string; error?: string | null; contentStatus?: string };
+
+/** Một dòng trong "Bài chờ / sắp đăng": kênh · tiêu đề · trạng thái + giờ · hành động; lỗi/chờ kết nối hiện thành khối riêng bên dưới. */
+/** Lượt chưa lên bài (chờ kết nối / lỗi chắc chắn chưa đăng / chờ giờ đăng) → Sếp đổi được kênh đăng. */
+const MOVABLE = ["needs_setup", "failed", "scheduled"];
+
+function QueueRow({ q, onPublish, onMove, onDelete }: { q: QueueItem; onPublish: () => void; onMove: () => void; onDelete: () => void }) {
+  const [more, setMore] = useState(false);
+  const retry = RETRYABLE.includes(q.jobStatus ?? "");
+  const failed = q.jobStatus === "failed";
+  const note = retry ? q.error : null;
+  const longNote = (note?.length ?? 0) > 120 || (note?.split("\n").length ?? 0) > 2;
+  const busyNow = q.jobStatus === "posting" || q.jobStatus === "verifying";
+  return (
+    <li className={cx("rounded-2xl border bg-card p-3.5 transition hover:shadow-sm sm:p-4", note ? (failed ? "border-danger/30" : "border-warn/40") : "border-line hover:border-line-strong")}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-soft"><PlatformIcon p={q.channel} size={28} /></span>
+        <div className="min-w-0 flex-1 basis-56">
+          <p className="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-ink" title={q.title}>{q.title}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted">
+            <Badge tone={q.status.tone} dot>{q.status.label}</Badge>
+            {q.at && <span className="inline-flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" aria-hidden />{hhmm(q.at)} · {ddmm(q.at)}</span>}
+            <span>{chName(q.channel)}</span>
+          </div>
+        </div>
+        {busyNow ? null : (
+          <div className="ml-auto flex shrink-0 flex-wrap gap-2">
+            <Button size="sm" variant="dangerSoft" icon={Trash2} onClick={onDelete} title="Xóa khỏi hàng đăng" aria-label={`Xóa "${q.title}"`}>Xóa</Button>
+            {q.jobId && MOVABLE.includes(q.jobStatus ?? "") && <Button size="sm" variant="ghost" icon={ArrowLeftRight} onClick={onMove}>Đổi kênh</Button>}
+            {q.kind === "video_script" && !retry
+              ? <Link to={`/video-flow?from=${q.contentId}`}><Button size="sm" variant="soft" icon={Clapperboard}>Tạo video</Button></Link>
+              : <Button size="sm" variant={retry ? "secondary" : "soft"} icon={retry ? RotateCcw : Send} onClick={onPublish}>{retry ? "Đăng lại" : "Đăng ngay"}</Button>}
+          </div>
+        )}
+      </div>
+      {note && (
+        <div role="alert" className={cx("mt-3 flex items-start gap-2.5 rounded-xl border p-3 text-xs leading-relaxed", failed ? "border-danger/30 bg-danger-soft" : "border-warn/30 bg-warn-soft")}>
+          <AlertTriangle className={cx("mt-0.5 h-4 w-4 shrink-0", failed ? "text-danger-ink" : "text-warn-ink")} aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className={cx("whitespace-pre-line break-words text-ink", !more && "line-clamp-2")}>{note}</p>
+            {longNote && <button type="button" onClick={() => setMore(!more)} className={cx("mt-1 font-medium hover:underline", failed ? "text-danger-ink" : "text-warn-ink")}>{more ? "Thu gọn" : "Xem đầy đủ"}</button>}
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
 
 export function Publish() {
   const toast = useToast();
   const { data: channels } = useApi<any[]>("channels");
-  const { data: posts, loading } = useApi<any[]>("posts", ["post."]);
+  const { data: posts, loading, reload: reloadPosts } = useApi<any[]>("posts", ["post."]);
   const { data: jobs, reload: reloadJobs } = useApi<any[]>("publish-jobs", ["post.", "task.", "approval."]);
   const { data: approved, reload: reloadApproved } = useApi<any[]>("content?status=approved", ["task.", "approval.", "post."]);
+  // Video đã duyệt và đã lên NHÁP trên Fanpage (chưa công khai) vẫn phải nằm trong hàng đăng để Sếp bấm "Đăng ngay".
+  const { data: drafted, reload: reloadDrafted } = useApi<any[]>("content?status=draft_on_channel", ["task.", "approval.", "post.", "creative."]);
   const { data: cal } = useApi<any>("calendar", ["post.", "task.", "approval."]);
   const { data: sys } = useApi<any>("system");
   const [confirm, setConfirm] = useState<QueueItem | null>(null);
+  const [move, setMove] = useState<QueueItem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [del, setDel] = useState<QueueItem | null>(null);
+  const [delPost, setDelPost] = useState<any | null>(null);
+  const moveTo = async (channel: any) => {
+    if (!move?.jobId) return;
+    setBusy(true);
+    try {
+      await api.post(`publish-jobs/${move.jobId}/channel`, { channelId: channel.id });
+      toast(move.jobStatus === "scheduled" ? `Đã chuyển sang ${channel.name} — đăng đúng giờ đã hẹn` : `Đã chuyển sang ${channel.name} và đưa vào hàng đăng`);
+      setMove(null);
+      reloadJobs(); reloadApproved(); reloadDrafted();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  };
+  // Xóa nội dung khỏi hàng đăng (chưa lên bài): bỏ nội dung + lượt đăng chờ. Xóa bài đã đăng: chỉ ẨN khỏi danh sách, bài thật trên kênh giữ nguyên.
+  const deleteQueued = async () => {
+    if (!del) return;
+    setBusy(true);
+    try {
+      await api.del(`content/${del.contentId}`);
+      toast(`Đã xóa "${del.title}"`);
+      setDel(null);
+      reloadJobs(); reloadApproved(); reloadDrafted();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  };
+  const deletePostRow = async () => {
+    if (!delPost) return;
+    setBusy(true);
+    try {
+      await api.del(`posts/${delPost.id}`);
+      toast(`Đã xóa "${delPost.title}" khỏi danh sách`);
+      setDelPost(null);
+      reloadPosts();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  };
   const [detailId, setDetailId] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   // Chỉ bài HỆ THỐNG đã đăng công khai thành công (không gồm bài có sẵn trên Fanpage / bài mô phỏng), mới nhất trước.
-  const published = (posts ?? []).filter((p) => p.content_item_id && !p.simulated && p.permalink);
+  const published = (posts ?? []).filter((p) => p.content_item_id && !p.simulated && p.permalink && !p.meta?.draft); // bài nháp trên website chưa công khai
   const shown = showAll ? published : published.slice(0, 1);
 
   const queue = useMemo<QueueItem[]>(() => {
     const out: QueueItem[] = [];
     const seen = new Set<string>();
-    for (const j of jobs ?? []) if (["scheduled", "queued", "running", "failed"].includes(j.status)) {
+    for (const j of jobs ?? []) if (["scheduled", "queued", "running", "posting", "verifying", "failed", "needs_check", "needs_setup"].includes(j.status)) {
       seen.add(j.content_item_id);
-      out.push({ key: j.id, contentId: j.content_item_id, kind: j.kind, title: j.title, channel: j.channel, body: j.body, at: j.scheduled_at, status: j.simulated && (j.status === "done" || j.status === "draft_uploaded") ? { label: "Mô phỏng · chưa đăng thật", tone: "amber" } : JOB_STATUS[j.status] ?? { label: j.status, tone: "gray" } });
+      out.push({ key: j.id, contentId: j.content_item_id, kind: j.kind, title: j.title, channel: j.channel, body: j.body, at: j.scheduled_at, status: j.simulated && (j.status === "done" || j.status === "draft_uploaded") ? { label: "Mô phỏng · chưa đăng thật", tone: "amber" } : JOB_STATUS[j.status] ?? { label: j.status, tone: "gray" }, jobId: j.id, jobStatus: j.status, mode: j.mode, error: j.error });
     }
-    for (const c of approved ?? []) if (!seen.has(c.id)) out.push({ key: c.id, contentId: c.id, kind: c.kind, title: c.title, channel: c.channel, body: c.body, at: c.scheduled_at ?? null, status: CONTENT_STATUS.approved });
+    for (const c of [...(approved ?? []), ...(drafted ?? [])]) if (!seen.has(c.id)) out.push({ key: c.id, contentId: c.id, kind: c.kind, title: c.title, channel: c.channel, body: c.body, at: c.scheduled_at ?? null, status: CONTENT_STATUS[c.status] ?? CONTENT_STATUS.approved, contentStatus: c.status });
     return out;
-  }, [jobs, approved]);
+  }, [jobs, approved, drafted]);
 
   const publishNow = async () => {
     if (!confirm) return;
     setBusy(true);
     try {
-      await api.post(`content/${confirm.contentId}/publish-now`);
+      // Lượt đăng lỗi / "Cần kiểm tra" / chờ kết nối kênh → Đăng lại đúng lượt đó (Sếp đã kiểm tra kênh chưa có bài).
+      if (confirm.jobId && RETRYABLE.includes(confirm.jobStatus ?? "")) await api.post(`publish-jobs/${confirm.jobId}/retry`);
+      else await api.post(`content/${confirm.contentId}/publish-now`);
       toast(`Đã đưa "${confirm.title}" vào hàng đăng ngay`);
       setConfirm(null);
-      reloadJobs(); reloadApproved();
+      reloadJobs(); reloadApproved(); reloadDrafted();
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   };
 
+  const queueAttention = queue.filter((q) => RETRYABLE.includes(q.jobStatus ?? "")).length;
   const postCount = (p: string) => (posts ?? []).filter((x) => x.channel === p).length;
   const jevSource = sys?.jev?.enabled ? "jev" : null;
 
@@ -72,7 +163,7 @@ export function Publish() {
     <div className="space-y-6">
       <PageHeader title="Trung tâm Đăng bài" subtitle="Lên lịch, quản lý và đăng nội dung đa kênh với Agentic AI." />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {PLATFORMS.map((p) => {
           const ch = (channels ?? []).find((c) => c.platform === p);
           return (
@@ -88,9 +179,20 @@ export function Publish() {
         })}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
+      <div className="min-w-0 space-y-6">
         <MonthCalendar cal={cal} jobs={jobs ?? []} />
-        <div className="space-y-6">
+        <Card title="Bài chờ / sắp đăng" icon={ListChecks} description="Nội dung đã duyệt đang chờ tới giờ đăng hoặc cần bạn xử lý."
+          action={<span className="flex items-center gap-2">
+            {queueAttention > 0 && <Badge tone="amber" dot>{queueAttention} cần xử lý</Badge>}
+            <Badge tone="blue">{queue.length}</Badge>
+          </span>}>
+          {!jobs && !approved ? <Loading /> : queue.length === 0 ? <Empty icon={ListChecks} title="Chưa có bài nào chờ đăng">Nội dung đã duyệt sẽ xuất hiện ở đây.</Empty> : (
+            <ul className="space-y-2.5">
+              {queue.map((q) => <QueueRow key={q.key} q={q} onPublish={() => setConfirm(q)} onMove={() => setMove(q)} onDelete={() => setDel(q)} />)}
+            </ul>
+          )}
+        </Card>
+        <div className="grid items-start gap-6 lg:grid-cols-2">
           <Card title={<span className="flex items-center gap-2"><Clock className="h-4 w-4 text-blue-600" />Khung giờ đăng gợi ý</span>}>
             <div className="space-y-3">
               {WINDOWS.map((w) => (
@@ -102,25 +204,7 @@ export function Publish() {
             </div>
             <p className="mt-3 text-xs text-muted">Gợi ý chung theo thói quen đọc của chủ doanh nghiệp — CHƯA phải số đo từ kênh của Sếp (chưa có kênh thật nào được nối).</p>
           </Card>
-
-          <Card title="Bài chờ / sắp đăng" action={<Badge tone="blue">{queue.length}</Badge>}>
-            {!jobs && !approved ? <Loading /> : queue.length === 0 ? <Empty>Không có bài nào chờ đăng. Nội dung đã duyệt sẽ xuất hiện ở đây.</Empty> : (
-              <div className="divide-y divide-line">
-                {queue.map((q) => (
-                  <div key={q.key} className="flex items-center gap-3 py-3">
-                    <PlatformIcon p={q.channel} size={24} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-ink">{q.title}</p>
-                      <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted"><Badge tone={q.status.tone}>{q.status.label}</Badge>{q.at && <span>{ddmm(q.at)} {hhmm(q.at)}</span>}</p>
-                    </div>
-                    {q.kind === "video_script"
-                      ? <Link to={`/video-flow?from=${q.contentId}`}><Button size="sm" variant="soft" icon={Clapperboard}>Tạo video</Button></Link>
-                      : <Button size="sm" variant="soft" icon={Send} onClick={() => setConfirm(q)}>Đăng ngay</Button>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+          <LinkCommentSettingsCard />
         </div>
       </div>
 
@@ -134,10 +218,10 @@ export function Publish() {
         <p className="-mt-1 mb-3 text-xs text-muted">Bình luận được Jev phân loại (ý định mua, câu hỏi, khen, tiêu cực, spam).</p>
         {loading ? <Loading /> : !published.length ? <Empty>Chưa có bài nào được hệ thống đăng công khai thành công.</Empty> : (
           <div className="overflow-x-auto scroll-thin">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-[900px] text-sm">
               <thead><tr className="border-b border-line text-left text-xs text-muted">
                 <th className="py-2 pr-3 font-medium">Bài viết</th><th className="px-3 font-medium">Đăng lúc</th><th className="px-3 font-medium">Tiếp cận</th>
-                <th className="px-3 font-medium">Điểm</th><th className="px-3 font-medium">Bình luận (Jev)</th><th className="px-3" />
+                <th className="px-3 font-medium">Điểm</th><th className="px-3 font-medium">Bình luận (Jev)</th><th className="px-3 font-medium">Link dưới bình luận</th><th className="px-3" />
               </tr></thead>
               <tbody>
                 {shown.map((p) => {
@@ -145,7 +229,7 @@ export function Publish() {
                   const s = p.score;
                   const isOpen = open === p.id;
                   return (
-                    <PostRow key={p.id} p={p} m={m} s={s} isOpen={isOpen} onToggle={() => setOpen(isOpen ? null : p.id)} onDetail={() => setDetailId(p.id)} />
+                    <PostRow key={p.id} p={p} m={m} s={s} isOpen={isOpen} onToggle={() => setOpen(isOpen ? null : p.id)} onDetail={() => setDetailId(p.id)} onDelete={() => setDelPost(p)} onChanged={reloadPosts} />
                   );
                 })}
               </tbody>
@@ -154,16 +238,68 @@ export function Publish() {
         )}
       </Card>
 
+      <ExistingPostLinkCard onChanged={reloadPosts} />
+
       <Modal open={!!confirm} onClose={() => setConfirm(null)} title="Xác nhận đăng ngay"
         footer={<><Button onClick={() => setConfirm(null)}>Hủy</Button><Button variant="primary" icon={Send} loading={busy} onClick={publishNow}>Đăng lên {confirm && chName(confirm.channel)}</Button></>}>
         {confirm && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2"><PlatformIcon p={confirm.channel} size={24} /><span className="text-sm text-muted">Sẽ đăng công khai lên <b className="text-ink">{chName(confirm.channel)}</b> ngay bây giờ</span></div>
+            <div className="flex items-center gap-2"><PlatformIcon p={confirm.channel} size={24} />{confirm.channel === "website" && confirm.contentStatus === "draft_on_channel"
+              ? <span className="text-sm text-muted">Bài đang là <b className="text-ink">bản nháp trên website</b> — sẽ chuyển chính bài đó sang <b className="text-ink">công khai</b> ngay bây giờ</span>
+              : confirm.mode === "draft"
+              ? <span className="text-sm text-muted">Sẽ tải lại <b className="text-ink">bản nháp video</b> lên <b className="text-ink">{chName(confirm.channel)}</b> (chưa đăng công khai)</span>
+              : <span className="text-sm text-muted">Sẽ đăng công khai lên <b className="text-ink">{chName(confirm.channel)}</b> ngay bây giờ</span>}</div>
             <div className="rounded-xl border border-line bg-soft p-4">
               <p className="font-semibold text-ink">{confirm.title}</p>
               <p className="mt-2 max-h-60 overflow-auto whitespace-pre-line text-sm text-muted scroll-thin">{confirm.body || "(không có nội dung xem trước)"}</p>
             </div>
+            {confirm.jobStatus === "needs_check" && <p className="rounded-lg border border-amber-600/30 bg-amber-500/[0.08] p-2 text-xs text-amber-700 dark:text-amber-300">Lần trước có thể ĐÃ đăng. Mở kênh {chName(confirm.channel)} kiểm tra — chỉ bấm Đăng lại khi chắc chắn chưa có bài (tránh đăng trùng).</p>}
             <p className="text-xs text-muted">Bài đăng lên kênh thật không thể thu hồi tự động. Hãy kiểm tra kỹ nội dung trước khi xác nhận.</p>
+          </div>
+        )}
+      </Modal>
+      <Modal open={!!del} onClose={() => setDel(null)} title="Xóa nội dung khỏi hàng đăng"
+        footer={<><Button onClick={() => setDel(null)}>Hủy</Button><Button variant="danger" icon={Trash2} loading={busy} onClick={deleteQueued}>Xóa</Button></>}>
+        {del && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2"><PlatformIcon p={del.channel} size={24} /><span className="text-sm text-muted">{chName(del.channel)} · {del.status.label}</span></div>
+            <div className="rounded-xl border border-line bg-soft p-4">
+              <p className="font-semibold text-ink">{del.title}</p>
+              <p className="mt-2 max-h-40 overflow-auto whitespace-pre-line text-sm text-muted scroll-thin">{del.body || "(không có nội dung xem trước)"}</p>
+            </div>
+            <p className="text-sm text-ink">Nội dung và lượt đăng đang chờ của nó sẽ bị <b>xóa khỏi hệ thống</b> — hệ thống sẽ không đăng bài này nữa. Không thể hoàn tác.</p>
+            {(del.mode === "draft" || del.contentStatus === "draft_on_channel") && <p className="rounded-lg border border-amber-600/30 bg-amber-500/[0.08] p-2 text-xs text-amber-700 dark:text-amber-300">Bản nháp đã tải lên {chName(del.channel)} (nếu có) vẫn còn trên kênh — hệ thống không xóa giúp, bạn tự xóa nháp đó trên kênh.</p>}
+            {del.jobStatus === "needs_check" && <p className="rounded-lg border border-amber-600/30 bg-amber-500/[0.08] p-2 text-xs text-amber-700 dark:text-amber-300">Lượt đăng này "Cần kiểm tra" — bài có thể ĐÃ lên {chName(del.channel)}. Xóa ở đây không gỡ bài trên kênh.</p>}
+          </div>
+        )}
+      </Modal>
+      <Modal open={!!delPost} onClose={() => setDelPost(null)} title="Xóa bài khỏi danh sách"
+        footer={<><Button onClick={() => setDelPost(null)}>Hủy</Button><Button variant="danger" icon={Trash2} loading={busy} onClick={deletePostRow}>Xóa khỏi danh sách</Button></>}>
+        {delPost && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2"><PlatformIcon p={delPost.channel} size={24} /><span className="text-sm text-muted">{delPost.channel_name ?? chName(delPost.channel)} · đăng {timeAgo(delPost.published_at)}</span></div>
+            <div className="rounded-xl border border-line bg-soft p-4"><p className="font-semibold text-ink">{delPost.title}</p></div>
+            <p className="text-sm text-ink">Bài sẽ biến mất khỏi bảng này. <b>Bài thật trên {chName(delPost.channel)} vẫn còn</b> — muốn gỡ bài thật, bạn xóa trực tiếp trên kênh{delPost.permalink ? <> (<a href={delPost.permalink} target="_blank" rel="noreferrer" className="text-blue-600 underline">mở bài</a>)</> : null}.</p>
+            <p className="text-xs text-muted">Số liệu, điểm bài và truy vết đơn hàng của bài này vẫn được giữ trong báo cáo.</p>
+          </div>
+        )}
+      </Modal>
+      <Modal open={!!move} onClose={() => setMove(null)} title="Đổi kênh đăng" footer={<Button onClick={() => setMove(null)}>Hủy</Button>}>
+        {move && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted"><b className="text-ink">{move.title}</b> · đang để {chName(move.channel)}. Chọn kênh mới{move.mode === "draft" ? " để tải bản nháp video" : ""}{move.jobStatus === "scheduled" ? " (giữ nguyên giờ đã hẹn)" : " — hệ thống đăng lại ngay trên kênh mới"}.</p>
+            <ul className="space-y-2">
+              {(channels ?? []).filter((c) => ["facebook", "instagram", "tiktok", "zalo", "website"].includes(c.platform)).map((c) => (
+                <li key={c.id}>
+                  <button type="button" disabled={busy} onClick={() => moveTo(c)} className="flex w-full items-center gap-3 rounded-xl border border-line p-3 text-left hover:border-blue-500 hover:bg-blue-500/5 disabled:opacity-50">
+                    <PlatformIcon p={c.platform} size={22} />
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-ink">{c.name}</span><span className="text-xs text-muted">{chName(c.platform)}</span></span>
+                    <Badge tone={c.publishLive ? "green" : "amber"}>{c.publishLive ? "Đăng được" : "Chưa nối đăng"}</Badge>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted">Kênh "Chưa nối đăng" vẫn chọn được, nhưng bài sẽ lại chờ kết nối — nối kênh ở trang <Link to="/channels" className="underline">Kênh đăng</Link>.</p>
           </div>
         )}
       </Modal>
@@ -172,7 +308,7 @@ export function Publish() {
   );
 }
 
-function PostRow({ p, m, s, isOpen, onToggle, onDetail }: { p: any; m: any; s: any; isOpen: boolean; onToggle: () => void; onDetail: () => void }) {
+function PostRow({ p, m, s, isOpen, onToggle, onDetail, onDelete, onChanged }: { p: any; m: any; s: any; isOpen: boolean; onToggle: () => void; onDetail: () => void; onDelete: () => void; onChanged: () => void }) {
   return (
     <>
       <tr className="border-b border-line align-top hover:bg-soft/50">
@@ -200,11 +336,12 @@ function PostRow({ p, m, s, isOpen, onToggle, onDetail }: { p: any; m: any; s: a
             ))}
           </div>
         </td>
-        <td className="px-3 py-3 text-right"><Button size="sm" variant="ghost" icon={Eye} onClick={onDetail}>Chi tiết</Button></td>
+        <td className="px-3 py-3"><LinkCommentCell p={p} onChanged={onChanged} /></td>
+        <td className="px-3 py-3 text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" icon={Eye} onClick={onDetail}>Chi tiết</Button><Button size="sm" variant="dangerSoft" icon={Trash2} onClick={onDelete} title="Xóa khỏi danh sách" aria-label={`Xóa "${p.title}" khỏi danh sách`}>Xóa</Button></div></td>
       </tr>
       {isOpen && s && (
         <tr className="border-b border-line bg-soft/40">
-          <td colSpan={6} className="px-4 py-3">
+          <td colSpan={7} className="px-4 py-3">
             <p className="mb-1 text-xs font-semibold text-ink">Vì sao bài được {Math.round(s.score)} điểm:</p>
             <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted">{(s.reasons ?? []).map((r: string) => <li key={r}>{r}</li>)}</ul>
             {s.components && (
@@ -296,6 +433,16 @@ function PostDetail({ id, onClose }: { id: string | null; onClose: () => void })
               <span className="min-w-0"><b>Bài công khai trên {p.channel_name ?? "kênh"}</b><span className="block truncate text-xs opacity-80">{p.permalink}</span></span>
               <ExternalLink className="h-4 w-4 shrink-0" />
             </a>
+          )}
+          {p.link?.state && p.link.state !== "none" && (
+            <div className="rounded-xl border border-line p-3 text-sm">
+              <p className="font-semibold text-ink">Link dưới bình luận</p>
+              <p className="mt-1 text-xs text-muted">
+                {p.link.state === "attached" ? "Đã gắn" : p.link.state === "pending" ? "Đang gắn…" : p.link.state === "needs_check" ? "Cần kiểm tra" : p.link.state === "skipped" ? "Bỏ qua" : "Lỗi"}
+                {p.link.product?.name ? ` · ${p.link.product.name}` : ""} · <b className="text-ink">{num(p.clicks ?? 0)}</b> lượt bấm (khách thật{p.clicks ? "" : "; chỉ đo được khi cổng công khai đang chạy"})
+              </p>
+              {p.link.text && <p className="mt-1 whitespace-pre-line text-xs text-muted">{p.link.text}</p>}
+            </div>
           )}
           <div>
             <p className="mb-2 text-sm font-semibold text-ink">Chỉ số theo mốc thời gian</p>

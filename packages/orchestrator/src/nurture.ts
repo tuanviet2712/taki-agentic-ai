@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { activeDna, audit, bizSettings, byId, emit, insert, isKilled, q, update, type Row } from "@dotaka/db";
 import { ConnectorError, live, type FeedComment } from "@dotaka/connectors";
-import { applyBannedChars, configureNurtureHook, sendBotMessage } from "@dotaka/chat-engine";
+import { applyBannedChars, configureNurtureHook, conversationOptedOut, findOptOut, sendBotMessage, type OptOutKey } from "@dotaka/chat-engine";
 import { AppError, decryptSecret, encryptSecret, extractVnPhone, logger, maskPhone, normalizeVnPhone, nowIso } from "@dotaka/shared";
 import { connectorForChannel, credsOf } from "./connections.ts";
+import { fixUrl } from "./link-product.ts";
+import { trackedUrlFor } from "./tracking.ts";
 import { classifyComments } from "./publishing.ts";
 import { enqueue, type Handler } from "./queue.ts";
 import { activeZl, planFollowUp, zaloSettings } from "./zalo-followup.ts";
@@ -25,14 +27,30 @@ import { activeZl, planFollowUp, zaloSettings } from "./zalo-followup.ts";
  * Stage: new → (replied | asked_contact | dm_sent) → has_phone → friend_requesting → friend_requested → friend_accepted
  *   → following_up → ordered; nhánh dừng: skipped, failed, no_response, no_zalo, stopped,
  *   needs_check ("Cần Sếp kiểm tra" — không chắc đã gửi trả lời/inbox; hệ thống KHÔNG tự gửi lại).
+ *   awaiting_review ("Chờ Sếp duyệt" — chế độ duyệt trước N khách đầu: đã soạn sẵn câu trả lời + tin inbox, CHƯA gửi,
+ *   chưa giữ chỗ; Sếp duyệt ở hộp Duyệt → gửi đúng đường thường; từ chối → skipped).
+ *
+ * Khách trong danh sách "không nhận tin" (contact_optout) không bao giờ được trả lời/nhắn/nhắc/kết bạn tự động.
+ *
+ * Bật/tắt + hạn mức theo nền tảng (`platforms`, `capsFor`): hiện CHỈ Facebook có connector. Phần Instagram giữ lại cho đủ khung
+ * (mặc định TẮT, bản này không có connector Instagram → không kênh Instagram nào được quét/gửi).
  *
  * Chỉ chạy THẬT: Fanpage có page token (kết nối live) + ZL-CRM live. Không có thì báo rõ, không giả kết quả.
  */
+export const NURTURE_PLATFORMS = ["facebook", "instagram"] as const;
+export type NurturePlatform = (typeof NURTURE_PLATFORMS)[number];
+export const isNurturePlatform = (p: unknown): p is NurturePlatform => NURTURE_PLATFORMS.includes(p as NurturePlatform);
+/** Tên hiển thị nền tảng (nhật ký / thông báo cho Sếp). */
+export const platformLabel = (p: unknown) => (p === "instagram" ? "Instagram" : "Facebook");
 export const NURTURE_DEFAULTS = {
   enabled: false, // Sếp bật ở trang "Chăm khách từ bình luận" (trả lời công khai = gần cổng ĐỎ)
   steps: { replyComment: true, privateReply: true, askContact: true, zaloFriend: true, zaloFollowUp: true },
-  /** Nhãn bình luận được chăm (spam/negative/praise không bao giờ nhắn). */
-  labels: ["purchase_intent", "question"] as string[],
+  /** Nhãn bình luận được chăm: mặc định MỌI bình luận thật (muốn mua / hỏi / khen). Spam và chê KHÔNG BAO GIỜ được trả lời tự động. */
+  labels: ["purchase_intent", "question", "praise"] as string[],
+  /** true = trả lời + inbox ngay cả ban đêm (bỏ qua giờ yên lặng của doanh nghiệp). Kết bạn Zalo / nhắc SĐT vẫn theo giờ yên lặng. */
+  replyAllDay: true,
+  /** Lúc bật chăm khách (hệ tự ghi): bình luận viết TRƯỚC lúc này và quá 24 giờ thì bỏ (quét bù); bình luận viết SAU lúc này luôn được trả lời (trong 7 ngày của Private Reply). */
+  enabledAt: null as string | null,
   replyTemplates: [
     "Dạ em đã inbox {ten} rồi ạ, {ten} kiểm tra tin nhắn giúp em nhé!",
     "Em vừa nhắn riêng cho {ten} thông tin {san_pham} rồi ạ, {ten} xem tin nhắn chờ giúp em nha.",
@@ -55,14 +73,22 @@ export const NURTURE_DEFAULTS = {
   reminderAfterHours: 4,
   /** Quá N giờ không có SĐT (sau khi nhắn/nhắc) → dừng chăm. */
   giveUpAfterHours: 48,
-  maxPublicRepliesPerDay: 80,
-  maxPrivateRepliesPerDay: 50,
+  maxPublicRepliesPerDay: 300,
+  maxPrivateRepliesPerDay: 200,
   maxFriendRequestsPerNickPerDay: 20,
   /** Giãn cách ngẫu nhiên trước khi gửi lời mời kết bạn (phút) — tránh Zalo coi là spam. */
   friendDelayMinMinutes: 3,
   friendDelayMaxMinutes: 20,
   /** Nick Zalo (ZL-CRM zaloAccountId) dùng để kết bạn; trống = nick đầu tiên. */
   zaloAccountId: null as string | null,
+  /** Chế độ duyệt trước: N khách đầu tiên sau khi bật, mỗi lượt trả lời + inbox chờ Sếp duyệt (0 = tắt). */
+  reviewFirst: 10,
+  /** Đã duyệt bao nhiêu khách (hệ tự đếm; đủ reviewFirst thì chạy tự động). */
+  reviewApproved: 0,
+  /** Bật theo nền tảng: Facebook như trước; Instagram mặc định TẮT (chưa có connector Instagram trong bản này). */
+  platforms: { facebook: true, instagram: false } as Record<NurturePlatform, boolean>,
+  /** Hạn mức riêng của Instagram (chặt hơn Facebook). Facebook dùng 2 hạn mức ở trên. */
+  instagram: { maxPublicRepliesPerDay: 40, maxPrivateRepliesPerDay: 30 },
 };
 export type NurtureSettings = typeof NURTURE_DEFAULTS;
 
@@ -78,21 +104,85 @@ export const NurtureSettingsPatch = z.object({
   maxFriendRequestsPerNickPerDay: z.number().int().min(0).max(60),
   friendDelayMinMinutes: z.number().min(0).max(240), friendDelayMaxMinutes: z.number().min(0).max(24 * 60),
   zaloAccountId: z.string().min(1).nullable(),
+  reviewFirst: z.number().int().min(0).max(100),
+  replyAllDay: z.boolean(),
+  platforms: z.object({ facebook: z.boolean(), instagram: z.boolean() }).partial(),
+  instagram: z.object({ maxPublicRepliesPerDay: z.number().int().min(0).max(200), maxPrivateRepliesPerDay: z.number().int().min(0).max(200) }).partial(),
 }).partial();
 
 export function nurtureSettings(bizId: string): NurtureSettings {
   const saved = ((bizSettings(bizId) as unknown as Row).nurture ?? {}) as Partial<NurtureSettings>;
-  return { ...NURTURE_DEFAULTS, ...saved, steps: { ...NURTURE_DEFAULTS.steps, ...(saved.steps ?? {}) } };
+  const out = { ...NURTURE_DEFAULTS, ...saved, ...mergeNested(NURTURE_DEFAULTS, saved) };
+  // Doanh nghiệp đã BẬT từ trước khi có chế độ duyệt trước → coi như đã duyệt xong (không tự dưng dừng luồng đang chạy).
+  if (saved.reviewApproved === undefined && saved.enabled) out.reviewApproved = out.reviewFirst;
+  return out;
+}
+/** Các nhóm cài đặt lồng nhau (bước, nền tảng, hạn mức Instagram): gộp từng khoá, không ghi đè cả nhóm. */
+function mergeNested(base: NurtureSettings, p: Partial<NurtureSettings>) {
+  return {
+    steps: { ...base.steps, ...(p.steps ?? {}) },
+    platforms: { ...base.platforms, ...(p.platforms ?? {}) },
+    instagram: { ...base.instagram, ...(p.instagram ?? {}) },
+  };
+}
+/** Hạn mức/ngày theo nền tảng của kênh (mỗi kênh đếm riêng). */
+export function capsFor(s: NurtureSettings, platform: unknown) {
+  return platform === "instagram"
+    ? { publicReplies: s.instagram.maxPublicRepliesPerDay, privateReplies: s.instagram.maxPrivateRepliesPerDay }
+    : { publicReplies: s.maxPublicRepliesPerDay, privateReplies: s.maxPrivateRepliesPerDay };
 }
 export function saveNurtureSettings(bizId: string, patch: unknown, actor: string): NurtureSettings {
   const p = NurtureSettingsPatch.parse(patch);
   const cur = nurtureSettings(bizId);
-  const next: NurtureSettings = { ...cur, ...p, steps: { ...cur.steps, ...(p.steps ?? {}) } } as NurtureSettings;
+  const next: NurtureSettings = { ...cur, ...p, ...mergeNested(cur, p as Partial<NurtureSettings>) } as NurtureSettings;
+  next.reviewApproved = cur.reviewApproved; // bộ đếm do hệ tự tăng khi Sếp duyệt — không nhận từ form
+  next.enabledAt = cur.enabledAt; // hệ tự ghi, không nhận từ form
+  if (p.enabled === true && !cur.enabled) next.enabledAt = nowIso();
   if (next.friendDelayMaxMinutes < next.friendDelayMinMinutes) next.friendDelayMaxMinutes = next.friendDelayMinMinutes;
   const biz = q.get<Row>("SELECT settings FROM biz WHERE id = ?", bizId);
   update("biz", bizId, { settings: { ...(biz?.settings ?? {}), nurture: next } });
   audit(bizId, actor, "nurture.settings_changed", { type: "biz", id: bizId }, { changed: Object.keys(p) });
   return next;
+}
+
+// ---------------- Chế độ duyệt trước (N khách đầu) ----------------
+export function reviewActive(s: NurtureSettings) {
+  return s.reviewFirst > 0 && s.reviewApproved < s.reviewFirst;
+}
+/** Trạng thái hiển thị: còn bao nhiêu khách cần Sếp duyệt, đang chờ duyệt mấy mục. */
+export function nurtureReviewStatus(bizId: string) {
+  const s = nurtureSettings(bizId);
+  return {
+    active: reviewActive(s), first: s.reviewFirst, approved: Math.min(s.reviewApproved, s.reviewFirst),
+    remaining: Math.max(0, s.reviewFirst - s.reviewApproved),
+    pending: q.scalar<number>("SELECT COUNT(*) FROM approval WHERE biz_id = ? AND subject_type = 'nurture_send' AND status = 'pending'", bizId),
+  };
+}
+function setReviewApproved(bizId: string, n: number) {
+  const biz = q.get<Row>("SELECT settings FROM biz WHERE id = ?", bizId);
+  const cur = nurtureSettings(bizId);
+  const saved = (biz?.settings ?? {}) as Row;
+  update("biz", bizId, { settings: { ...saved, nurture: { ...(saved.nurture ?? {}), reviewFirst: cur.reviewFirst, reviewApproved: n } } });
+}
+/**
+ * Sếp bỏ qua chế độ duyệt trước: tắt (reviewFirst = 0). Các khách đang chờ duyệt quay về hàng đợi tự động
+ * (vẫn qua đủ luật: hạn mức, giờ yên lặng, dừng khẩn cấp, danh sách không nhận tin).
+ */
+export function skipNurtureReview(bizId: string, actor: string) {
+  saveNurtureSettings(bizId, { reviewFirst: 0 }, actor);
+  let released = 0;
+  for (const ap of q.all<Row>("SELECT * FROM approval WHERE biz_id = ? AND subject_type = 'nurture_send' AND status = 'pending'", bizId)) {
+    update("approval", ap.id, { status: "expired", decided_by: actor, decision_note: "Sếp bỏ qua chế độ duyệt trước", decided_at: nowIso() });
+    const lead = byId<Row>("nurture_lead", ap.subject_id);
+    if (lead?.stage === "awaiting_review") {
+      const { review: _r, ...meta } = (lead.meta ?? {}) as Row;
+      logLead(lead, "review_skipped", `Sếp bỏ qua chế độ duyệt trước — chuyển sang tự động (${actor})`, { stage: "new", next_check_at: nowIso(), meta });
+      released++;
+    }
+  }
+  audit(bizId, actor, "nurture.review_skipped", { type: "biz", id: bizId }, { released });
+  emit(bizId, "nurture.review_skipped", { released });
+  return { ok: true, released };
 }
 
 // ---------------- Thời gian (giờ Việt Nam) ----------------
@@ -130,6 +220,23 @@ export function fillTemplate(tpl: string, v: { ten: string; san_pham: string; li
     .replace(/[ \t]+([,.!?])/g, "$1").replace(/[ \t]{2,}/g, " ").replace(/[ \t]*\n[ \t]*/g, "\n").trim();
 }
 const pick = (list: string[], seed: number) => list[Math.abs(seed) % list.length];
+
+/** Biến mẫu để Sếp xem trước: khách "Lan", sản phẩm có link đầu tiên (DNA), tên Trang Facebook đầu tiên. */
+export function sampleTemplateVars(bizId: string) {
+  const products = (activeDna(bizId)?.data?.products ?? []) as Row[];
+  const prod = products.find((p) => p.link) ?? products[0];
+  const ch = q.get<Row>("SELECT name FROM channel WHERE biz_id = ? AND platform = 'facebook' AND enabled = 1 ORDER BY created_at LIMIT 1", bizId);
+  return {
+    ten: "Lan", san_pham: String(prod?.name ?? "chương trình (ví dụ)"),
+    link: String(prod?.shortLink || prod?.link || "https://shop.vn/san-pham-vi-du"), shop: String(ch?.name ?? "Shop của Sếp"), example: !(prod?.shortLink || prod?.link),
+  };
+}
+/** Xem trước mẫu câu: điền đúng như lúc gửi thật (fillTemplate + ký tự cấm trong DNA), giữ xuống dòng. */
+export function previewTemplates(bizId: string, templates: string[]) {
+  const v = sampleTemplateVars(bizId);
+  const dna = activeDna(bizId);
+  return { vars: v, items: templates.map((t) => applyBannedChars(fillTemplate(String(t ?? ""), v), dna)) };
+}
 const hashOf = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
 
 /** Biến cho mẫu câu của 1 lead: tên khách, sản phẩm (khớp tên/alias trong bài + bình luận, theo DNA), link sản phẩm / CTA chính. */
@@ -139,9 +246,13 @@ function varsFor(lead: Row, post?: Row, channel?: Row) {
   const hay = vn(`${p?.title ?? ""} ${p?.body ?? ""} ${lead.comment_text ?? ""}`);
   const prod = products.find((x) => [x.name, ...((x.aliases ?? []) as string[])].some((a) => a && hay.includes(vn(String(a)))))
     ?? products.find((x) => x.verified) ?? products[0];
-  const raw = String(prod?.link || activeDna(lead.biz_id)?.data?.cta?.link || "").trim();
-  const link = raw ? (/^https?:\/\//.test(raw) ? raw : `https://${raw}`) : null;
+  const raw = String(prod?.shortLink || prod?.link || activeDna(lead.biz_id)?.data?.cta?.link || "").trim();
   const ch = channel ?? (p ? byId<Row>("channel", p.channel_id) : undefined);
+  // Link có UTM / mã đo — cùng bài + cùng sản phẩm với link dưới bình luận nên click từ inbox và từ bình luận quy về cùng 1 bài.
+  const link = raw ? trackedUrlFor({
+    bizId: lead.biz_id, url: fixUrl(raw), postId: p?.id ?? lead.post_id ?? null, contentItemId: p?.content_item_id ?? null,
+    productKey: prod ? String(prod.key || prod.name) : null, channel: String(ch?.platform ?? "facebook"),
+  }) : null;
   return { ten: givenName(lead.author_name), san_pham: String(prod?.name ?? "sản phẩm"), link, shop: String(ch?.name ?? "") };
 }
 const vn = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
@@ -154,15 +265,56 @@ function logLead(lead: Row, event: string, text: string, patch: Row = {}) {
   Object.assign(lead, patch, { log });
 }
 
+/** Nền tảng của lead (theo kênh của bài). */
+function leadPlatform(lead: Row): NurturePlatform {
+  return byId<Row>("channel", lead.channel_id)?.platform === "instagram" ? "instagram" : "facebook";
+}
+
+// ---------------- Khách không nhận tin ----------------
+/** Lead này thuộc khách đã báo không nhận tin? (id người bình luận, PSID, hội thoại inbox/Zalo, SĐT) */
+export function leadOptedOut(lead: Row): Row | undefined {
+  const ig = leadPlatform(lead) === "instagram";
+  // Instagram: id người bình luận = IGSID (cũng là người nhận DM). Thêm tay từ lead / hội thoại ghi dưới khoá "facebook"/"messenger"
+  // (chat-engine dùng chung cho mọi lead) → kiểm cả các khoá đó.
+  const keys: OptOutKey[] = ig
+    ? [{ channel: "instagram", externalId: lead.author_external_id }, { channel: "instagram", externalId: lead.psid },
+      { channel: "facebook", externalId: lead.author_external_id }, { channel: "messenger", externalId: lead.psid }]
+    : [{ channel: "facebook", externalId: lead.author_external_id }, { channel: "messenger", externalId: lead.psid }];
+  let phone: string | null = null;
+  if (lead.phone_cipher) { try { phone = decryptSecret(lead.phone_cipher); } catch { /* khoá đổi → bỏ qua */ } }
+  const hit = findOptOut(lead.biz_id, keys, [phone]);
+  if (hit) return hit;
+  for (const cid of [lead.conversation_id, lead.zalo_conversation_id]) {
+    if (!cid) continue;
+    const conv = byId<Row>("conversation", cid);
+    if (conv?.state === "opted_out") return { reason: "Hội thoại: khách từ chối nhận tin" };
+    const h = conv ? conversationOptedOut(conv) : undefined;
+    if (h) return h;
+  }
+  return undefined;
+}
+function stopOptedOut(bizId: string, lead: Row) {
+  logLead(lead, "opted_out", "Khách đã báo không muốn nhận tin (danh sách khách không nhận tin) — không trả lời/nhắn/kết bạn tự động", { stage: "stopped", next_check_at: null });
+  audit(bizId, "nurture", "nurture.opted_out", { type: "nurture_lead", id: lead.id }, {});
+  return { stage: "stopped" as const, skipped: "opted_out" as const };
+}
+
 // ---------------- 1) Nhận bình luận thật ----------------
 /** Tên thay thế khi Facebook không trả người viết (thiếu quyền pages_read_user_content) — KHÔNG dùng để chống trùng theo tên. */
 export const GENERIC_AUTHOR = "Khách Facebook";
+export const GENERIC_AUTHOR_IG = "Khách Instagram";
 /** Private Reply chỉ được trong 7 ngày kể từ lúc khách viết bình luận (giờ Facebook). */
 const PRIVATE_REPLY_WINDOW_MS = 7 * 24 * 3600_000;
 /** Bình luận viết quá 24 giờ trước lúc tạo lead (quét bù khi mới bật / quét lại 14 ngày) → không trả lời (trông như spam). */
 const MAX_COMMENT_AGE_ON_START_MS = 24 * 3600_000;
-/** Một người đã được chăm ở bài khác trong N ngày → không nhắn lại. */
-const SAME_AUTHOR_DAYS = 30;
+/** Thời điểm bật chăm khách. Doanh nghiệp bật từ trước khi có mốc này: lấy lúc xử lý đầu tiên (rồi lưu lại) để không trả lời dồn bình luận cũ. */
+function enabledSince(bizId: string, s: NurtureSettings, now: Date): number {
+  if (s.enabledAt) return new Date(s.enabledAt).getTime();
+  const biz = q.get<Row>("SELECT settings FROM biz WHERE id = ?", bizId);
+  const saved = (biz?.settings ?? {}) as Row;
+  update("biz", bizId, { settings: { ...saved, nurture: { ...(saved.nurture ?? {}), enabledAt: now.toISOString() } } });
+  return now.getTime();
+}
 
 /** Bài CÓ SẴN trên Fanpage (không do hệ thống đăng) → tạo bản ghi bài để quét bình luận. */
 export function importExternalPost(bizId: string, channelId: string, p: { externalId: string; text?: string | null; permalink?: string | null; createdAt?: string | null }) {
@@ -176,49 +328,95 @@ export function importExternalPost(bizId: string, channelId: string, p: { extern
   });
 }
 
-/** Bình luận từ webhook feed / quét: tìm bài (tự nhập bài có sẵn trên Fanpage), bỏ bình luận của Trang, chống trùng. */
-export function ingestFeedComment(bizId: string, c: FeedComment & { pageId?: string }, source: "webhook" | "poll", channelHint?: Row) {
+/**
+ * Bình luận từ webhook feed / quét: tìm bài (tự nhập bài có sẵn trên Fanpage / Instagram), bỏ bình luận của Trang/tài khoản, chống trùng.
+ * Instagram: platform "instagram", pageId = id tài khoản Instagram (entry.id), postId = id media, fromName = username.
+ */
+export function ingestFeedComment(bizId: string, c: FeedComment & { pageId?: string; platform?: NurturePlatform }, source: "webhook" | "poll", channelHint?: Row, scanOnly = false) {
+  const platform: NurturePlatform = c.platform ?? (channelHint?.platform === "instagram" ? "instagram" : "facebook");
   const pageId = c.pageId ?? channelHint?.external_id ?? c.postId.split("_")[0];
-  const channel = channelHint ?? q.get<Row>("SELECT * FROM channel WHERE biz_id = ? AND platform = 'facebook' AND external_id = ? ORDER BY created_at LIMIT 1", bizId, pageId);
+  const channel = channelHint ?? q.get<Row>("SELECT * FROM channel WHERE biz_id = ? AND platform = ? AND external_id = ? ORDER BY created_at LIMIT 1", bizId, platform, pageId);
   if (!channel) return { skipped: "unknown_page" as const };
   if (c.fromId && c.fromId === channel.external_id) return { skipped: "page_comment" as const };
+  // Instagram: bình luận của chính tài khoản (trả lời tự động / link) có thể đến với username thay vì id.
+  if (platform === "instagram" && c.fromName && c.fromName.replace(/^@/, "").toLowerCase() === String(channel.name ?? "").replace(/^@/, "").toLowerCase()) return { skipped: "page_comment" as const };
   const suffix = c.postId.includes("_") ? c.postId.split("_").slice(1).join("_") : c.postId;
   let post = q.get<Row>("SELECT * FROM post WHERE channel_id = ? AND external_id IN (?, ?, ?) ORDER BY created_at LIMIT 1", channel.id, c.postId, suffix, `${channel.external_id}_${suffix}`);
   if (!post) post = importExternalPost(bizId, channel.id, { externalId: c.postId, text: "", createdAt: c.createdTime ?? nowIso() });
   if (q.get("SELECT id FROM post_comment WHERE post_id = ? AND external_id = ?", post.id, c.commentId)) return { skipped: "duplicate" as const };
   const row = insert("post_comment", {
-    biz_id: bizId, post_id: post.id, author: (c.fromName || (c.fromId ? `Khách FB ${c.fromId.slice(-6)}` : GENERIC_AUTHOR)).slice(0, 120),
+    biz_id: bizId, post_id: post.id,
+    author: (c.fromName || (c.fromId ? `Khách ${platform === "instagram" ? "IG" : "FB"} ${c.fromId.slice(-6)}` : platform === "instagram" ? GENERIC_AUTHOR_IG : GENERIC_AUTHOR)).slice(0, 120),
     author_external_id: c.fromId ?? null, external_id: c.commentId, parent_external_id: c.parentId ?? null, source,
     text: c.message.slice(0, 2000), hidden: 0,
     external_created_at: c.createdTime ?? null, // giờ khách viết theo Facebook (không phải giờ hệ thống nhận được)
   });
-  enqueue("chat", "nurture.classify", { postId: post.id }, { bizId, idempotencyKey: `nurture:classify:${row.id}`, lockKey: `nurture:post:${post.id}` });
+  enqueue("chat", "nurture.classify", { postId: post.id, ...(scanOnly ? { scanOnly: true } : {}) }, { bizId, idempotencyKey: `nurture:classify:${row.id}`, lockKey: `nurture:post:${post.id}` });
   emit(bizId, "nurture.comment_in", { postId: post.id });
   return { commentId: row.id, postId: post.id };
 }
 
-/** Quét bình luận mới của 1 bài (Graph GET /{post-id}/comments, filter=stream) kể từ lần quét trước. */
-export async function pollPostComments(post: Row): Promise<number> {
+/** Quét bình luận mới của 1 bài (Facebook GET /{post-id}/comments filter=stream; Instagram GET /{media-id}/comments) kể từ lần quét trước. */
+export async function pollPostComments(post: Row, scanOnly = false): Promise<number> {
   const channel = byId<Row>("channel", post.channel_id);
-  if (!channel || channel.platform !== "facebook") return 0;
+  if (!channel || !isNurturePlatform(channel.platform)) return 0;
   const c = connectorForChannel(channel);
   if (c.mode !== "live" || !c.listComments || !post.external_id) return 0;
   const since = (post.meta?.commentsCheckedAt as string | undefined) ?? post.published_at;
   const startedAt = nowIso();
   const list = await c.listComments({ postExternalId: post.external_id, since });
-  let added = 0;
-  for (const cm of list.sort((a, b) => String(a.createdTime).localeCompare(String(b.createdTime)))) {
-    if (!cm.message?.trim()) continue;
-    const r = ingestFeedComment(post.biz_id, { ...cm, postId: post.external_id, pageId: channel.external_id }, "poll", channel);
-    if ("commentId" in r) added++;
-  }
+  const added = ingestPolled(post, channel, list, scanOnly);
   // Lùi 2 phút để không lọt bình luận đến đúng lúc quét (trùng đã được chặn theo id).
   update("post", post.id, { meta: { ...(post.meta ?? {}), commentsCheckedAt: new Date(new Date(startedAt).getTime() - 120_000).toISOString() } });
   return added;
 }
 
+/** Đưa danh sách bình luận vừa đọc vào hệ thống (cũ → mới; trùng đã chặn theo mã bình luận). */
+function ingestPolled(post: Row, channel: Row, list: FeedComment[], scanOnly = false): number {
+  let added = 0;
+  for (const cm of [...list].sort((a, b) => String(a.createdTime).localeCompare(String(b.createdTime)))) {
+    if (!cm.message?.trim()) continue;
+    const r = ingestFeedComment(post.biz_id, { ...cm, postId: post.external_id, pageId: channel.external_id, platform: channel.platform }, "poll", channel, scanOnly);
+    if ("commentId" in r) added++;
+  }
+  return added;
+}
+
+/**
+ * Quét NHANH: 1 lệnh Graph / Trang lấy bình luận mới nhất của 10 bài gần nhất (kèm bài mới Sếp đăng ngoài hệ thống) — chạy mỗi 15 giây
+ * chỉ tốn ~4 lệnh/phút/Trang (quét riêng từng bài tốn 6+ lệnh mỗi lượt). Trả về các Trang chưa hỗ trợ để quét kiểu cũ.
+ */
+const FAST_POST_LIMIT = 10;
+const FAST_COMMENT_LIMIT = 25;
+async function pollHotPages(bizId: string, scanOnly: boolean | undefined, errors: string[]): Promise<{ posts: Row[]; added: number; fallback: Set<string> }> {
+  const out = { posts: [] as Row[], added: 0, fallback: new Set<string>() };
+  const pages = q.all<Row>(`SELECT ch.* FROM channel ch JOIN connection c ON c.id = ch.connection_id
+    WHERE ch.biz_id = ? AND ch.platform = 'facebook' AND ch.enabled = 1 AND ch.secret_ciphertext IS NOT NULL AND c.mode = 'live' AND c.status NOT IN ('revoked','expired')`, bizId);
+  const oldest = Date.now() - 14 * 24 * 3600_000;
+  for (const ch of pages) {
+    const c = connectorForChannel(ch);
+    if (c.mode !== "live") continue;
+    if (!c.listRecentPageComments) { out.fallback.add(ch.id); continue; }
+    try {
+      for (const rp of await c.listRecentPageComments({ pageId: String(ch.external_id), postLimit: FAST_POST_LIMIT, commentLimit: FAST_COMMENT_LIMIT })) {
+        if (rp.createdTime && new Date(rp.createdTime).getTime() < oldest) continue; // bài quá 14 ngày: lượt quét đủ bài lo
+        const post = importExternalPost(bizId, ch.id, { externalId: rp.id, text: rp.message, permalink: rp.permalink, createdAt: rp.createdTime });
+        out.added += ingestPolled(post, ch, rp.comments, scanOnly);
+        out.posts.push(post);
+      }
+    } catch (e) {
+      const error = `${ch.name}: ${e instanceof Error ? e.message : String(e)}`;
+      errors.push(error);
+      logger.warn("nurture.fast_poll_failed", { channel: ch.id, error });
+      out.fallback.add(ch.id); // lỗi lệnh gộp → thử kiểu cũ ngay lượt này
+    }
+  }
+  return out;
+}
+
 /** Bài trên Fanpage thật trong 14 ngày (kể cả bài Sếp tự đăng ngoài hệ thống) → có bản ghi bài để quét bình luận. */
 async function discoverPagePosts(bizId: string, since: string) {
+  const errors: string[] = [];
   const pages = q.all<Row>(`SELECT ch.* FROM channel ch JOIN connection c ON c.id = ch.connection_id
     WHERE ch.biz_id = ? AND ch.platform = 'facebook' AND ch.enabled = 1 AND ch.secret_ciphertext IS NOT NULL AND c.mode = 'live' AND c.status NOT IN ('revoked','expired')`, bizId);
   for (const ch of pages) {
@@ -227,34 +425,102 @@ async function discoverPagePosts(bizId: string, since: string) {
     try {
       for (const p of await c.listPagePosts({ pageId: String(ch.external_id), since, limit: 30 }))
         importExternalPost(bizId, ch.id, { externalId: p.id, text: p.message, permalink: p.permalink, createdAt: p.createdTime });
-    } catch (e) { logger.warn("nurture.discover_failed", { channel: ch.id, error: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) {
+      const error = `${ch.name}: ${e instanceof Error ? e.message : String(e)}`;
+      errors.push(error);
+      logger.warn("nurture.discover_failed", { channel: ch.id, error });
+    }
   }
+  return errors;
 }
 
-/** Quét định kỳ: bài Facebook (Trang kết nối thật) đăng trong 14 ngày gần đây. */
-export async function pollBizComments(bizId: string) {
-  if (!nurtureSettings(bizId).enabled) return { posts: 0, added: 0 };
-  const since = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
-  await discoverPagePosts(bizId, since);
-  const posts = q.all<Row>(`SELECT p.* FROM post p JOIN channel ch ON ch.id = p.channel_id
-    WHERE p.biz_id = ? AND ch.platform = 'facebook' AND ch.enabled = 1 AND ch.secret_ciphertext IS NOT NULL AND p.simulated = 0 AND p.published_at >= ? ORDER BY p.published_at DESC LIMIT 30`, bizId, since);
+/**
+ * Quét 2 tầng để bình luận được trả lời nhanh mà không đốt hạn mức gọi API của Facebook (lịch chạy mỗi phút):
+ *  - mỗi lượt: chỉ bài MỚI (đăng trong 48 giờ, tối đa 6 bài) — nơi bình luận mới xuất hiện nhiều nhất;
+ *  - 5 phút/lần (hoặc khi Sếp bấm "Quét ngay" → full): quét đủ bài 14 ngày gần đây (tối đa 40 bài) như trước.
+ */
+const HOT_WINDOW_MS = 48 * 3600_000;
+const HOT_LIMIT = 6;
+const FULL_SWEEP_MS = 5 * 60_000;
+const lastFullSweep = new Map<string, number>();
+
+/** Quét định kỳ: bài Facebook / Instagram (kênh kết nối thật, nền tảng đang bật) đăng trong 14 ngày gần đây. */
+export async function pollBizComments(bizId: string, opts: { full?: boolean; scanOnly?: boolean } = {}) {
+  const s = nurtureSettings(bizId);
+  if (!s.enabled && !opts.scanOnly) return { posts: 0, added: 0, errors: [], skipped: "Chăm khách từ bình luận đang tắt" };
+  const plats = NURTURE_PLATFORMS.filter((p) => s.platforms[p]);
+  if (!plats.length) return { posts: 0, added: 0, errors: [], skipped: "Chưa bật nền tảng cần quét" };
+  const now = Date.now();
+  const full = opts.full ?? now - (lastFullSweep.get(bizId) ?? 0) >= FULL_SWEEP_MS;
+  if (full) lastFullSweep.set(bizId, now);
+  // Lượt nhanh (mỗi 15 giây): 1 lệnh gộp/Trang, đã gồm bài mới → không cần dò bài riêng. Lượt đủ bài (5 phút/lần): dò bài + quét từng bài.
+  const errors: string[] = full && plats.includes("facebook") ? await discoverPagePosts(bizId, new Date(now - 14 * 24 * 3600_000).toISOString()) : [];
   let added = 0, scanned = 0;
-  for (const p of posts) {
-    try { added += await pollPostComments(p); scanned++; } catch (e) { logger.warn("nurture.poll_failed", { post: p.id, error: e instanceof Error ? e.message : String(e) }); }
+  let fast: Awaited<ReturnType<typeof pollHotPages>> | null = null;
+  if (!full && plats.includes("facebook")) {
+    fast = await pollHotPages(bizId, opts.scanOnly, errors);
+    added += fast.added;
+    scanned += fast.posts.length;
+    if (!opts.scanOnly) for (const p of fast.posts) enqueueNurtureComments(p, s);
   }
-  return { posts: scanned, added };
+  const since = new Date(now - (full ? 14 * 24 * 3600_000 : HOT_WINDOW_MS)).toISOString();
+  const onlyChannels = fast ? fast.fallback : null; // lượt nhanh: chỉ Trang không có lệnh gộp mới quét kiểu cũ (Instagram luôn kiểu cũ)
+  const posts = q.all<Row>(`SELECT p.* FROM post p JOIN channel ch ON ch.id = p.channel_id
+    WHERE p.biz_id = ? AND ch.platform IN (${plats.map(() => "?").join(",")}) AND ch.enabled = 1 AND ch.secret_ciphertext IS NOT NULL AND p.simulated = 0 AND p.published_at >= ?
+    ORDER BY p.published_at DESC LIMIT ?`, bizId, ...plats, since, full ? 40 : HOT_LIMIT)
+    .filter((p) => !onlyChannels || (onlyChannels.has(p.channel_id) || byId<Row>("channel", p.channel_id)?.platform !== "facebook"));
+  for (const p of posts) {
+    try {
+      added += await pollPostComments(p, opts.scanOnly); scanned++;
+      if (!opts.scanOnly) enqueueNurtureComments(p, s); // includes comments collected while replies were off
+    } catch (e) {
+      const error = `${p.title || "Bài đăng"}: ${e instanceof Error ? e.message : String(e)}`;
+      errors.push(error);
+      logger.warn("nurture.poll_failed", { post: p.id, error });
+    }
+  }
+  return { posts: scanned, added, errors };
+}
+
+/**
+ * Phân loại lại bình luận đã gán nhãn bằng heuristic (nhãn cũ có thể sai sau khi sửa bộ phân loại, vd. câu hỏi "…ko ạ" bị coi là khen)
+ * rồi đưa vào hàng chăm khách. Chỉ đụng bình luận chưa có lead và chưa được trả lời/nhắn; bình luận quá 24 giờ vẫn bị chặn như thường.
+ */
+export async function reclassifyComments(bizId: string) {
+  const rows = q.all<Row>(`SELECT c.id, c.post_id FROM post_comment c WHERE c.biz_id = ? AND c.source IN ('poll','webhook') AND c.label_source = 'heuristic'
+    AND c.replied_at IS NULL AND c.dm_sent_at IS NULL AND c.id NOT IN (SELECT comment_id FROM nurture_lead)`, bizId);
+  const s = nurtureSettings(bizId);
+  const changed: { text: string; from: string | null; to: string | null }[] = [];
+  for (const postId of new Set(rows.map((r) => r.post_id as string))) {
+    const post = byId<Row>("post", postId);
+    if (!post) continue;
+    const ids = rows.filter((r) => r.post_id === postId).map((r) => r.id as string);
+    const before = new Map(ids.map((id) => [id, byId<Row>("post_comment", id)!.label as string | null]));
+    for (const id of ids) update("post_comment", id, { label: null, label_source: null, label_confidence: null });
+    await classifyComments(post);
+    for (const id of ids) { const c = byId<Row>("post_comment", id)!; if (c.label !== before.get(id)) changed.push({ text: String(c.text).slice(0, 60), from: before.get(id) ?? null, to: c.label }); }
+    if (s.enabled) enqueueNurtureComments(post, s);
+  }
+  return { checked: rows.length, changed };
+}
+
+function enqueueNurtureComments(post: Row, s: NurtureSettings) {
+  for (const c of q.all<Row>("SELECT id, label FROM post_comment WHERE post_id = ? AND source IN ('poll','webhook') AND label IS NOT NULL AND id NOT IN (SELECT comment_id FROM nurture_lead)", post.id)) {
+    if (s.labels.includes(c.label))
+      enqueue("chat", "nurture.comment", { commentId: c.id }, { bizId: post.biz_id, idempotencyKey: `nurture:cmt:${c.id}`, lockKey: `nurture:post:${post.id}` });
+  }
 }
 
 // ---------------- 2) Trả lời công khai + Private Reply ----------------
 function countToday(bizId: string, col: string, where: string, ...args: unknown[]) {
   return q.scalar<number>(`SELECT COUNT(*) FROM nurture_lead WHERE biz_id = ? AND ${col} >= ? ${where}`, bizId, vnDayStart(new Date()).toISOString(), ...args);
 }
-function gate(bizId: string, now: Date): { until: Date; reason: string } | null {
+function gate(bizId: string, now: Date, manual = false): { until: Date; reason: string } | null {
   if (isKilled(bizId, "chat")) return { until: new Date(now.getTime() + 30 * 60_000), reason: "Đang bật dừng khẩn cấp chat" };
-  if (inQuiet(bizId, now)) return { until: quietEndAfter(bizId, now), reason: "Giờ yên lặng — để sáng mai" };
+  if (!manual && inQuiet(bizId, now)) return { until: quietEndAfter(bizId, now), reason: "Giờ yên lặng — để sáng mai" };
   return null;
 }
-const retryable = (e: unknown) => e instanceof ConnectorError ? e.kind === "Transient" || e.kind === "RateLimited" : !(e instanceof AppError);
+const retryable = (e: unknown) => e instanceof ConnectorError ? e.kind === "Transient" || e.kind === "RateLimited" || Boolean((e as { requestNotSent?: boolean }).requestNotSent) : !(e instanceof AppError);
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
 /**
@@ -270,6 +536,8 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).sli
  */
 export function sendOutcome(e: unknown): "not_sent" | "unknown" {
   if (e instanceof AppError) return "not_sent";
+  // Ghi (POST) bị hết thời gian chờ / mất kết nối SAU khi gửi: Facebook có thể đã nhận (meta/graph.ts#graphPost đánh dấu).
+  if ((e as { outcomeUnknown?: boolean } | null)?.outcomeUnknown) return "unknown";
   if (e instanceof ConnectorError) {
     if (e.kind === "Transient") return (e as ConnectorError & { requestNotSent?: boolean }).requestNotSent ? "not_sent" : "unknown";
     return "not_sent";
@@ -286,7 +554,7 @@ function deferNew(leadId: string, until: Date, reason?: string) {
 /** Không rõ đã gửi hay chưa → cần Sếp kiểm tra trên Facebook; hệ thống không tự gửi lại. */
 function markNeedsCheck(bizId: string, lead: Row, step: "reply" | "dm", why: string) {
   const what = step === "dm" ? "nhắn inbox (Private Reply)" : "trả lời công khai dưới bình luận";
-  logLead(lead, "needs_check", `Không chắc đã ${what}: ${why}. Hệ thống KHÔNG tự gửi lại để tránh nhắn trùng — Sếp mở bình luận trên Facebook kiểm tra; nếu chưa có thì bấm "Gửi lại inbox".`,
+  logLead(lead, "needs_check", `Không chắc đã ${what}: ${why}. Hệ thống KHÔNG tự gửi lại để tránh nhắn trùng — Sếp mở bình luận trên ${platformLabel(leadPlatform(lead))} kiểm tra; nếu chưa có thì bấm "Gửi lại inbox".`,
     { stage: "needs_check", next_check_at: null, last_error: why.slice(0, 300) });
   audit(bizId, "nurture", "nurture.needs_check", { type: "nurture_lead", id: lead.id }, { step, reason: why.slice(0, 300) });
   emit(bizId, "nurture.needs_check", { leadId: lead.id });
@@ -320,43 +588,43 @@ export async function processNurtureComment(bizId: string, commentId: string, no
   if (!post || !channel) return { skipped: "no_post" };
   if (c.hidden || c.label === "spam" || c.label === "negative" || !s.labels.includes(c.label)) return { skipped: "label" };
   if (c.author_external_id && c.author_external_id === channel.external_id) return { skipped: "page_comment" };
-  if (channel.platform !== "facebook") {
+  if (!isNurturePlatform(channel.platform)) {
     audit(bizId, "nurture", "nurture.skipped", { type: "post", id: post.id }, { reason: `Kênh ${channel.platform} chưa hỗ trợ trả lời + inbox tự động`, commentId });
     return { skipped: "platform" };
   }
+  if (!s.platforms[channel.platform]) {
+    audit(bizId, "nurture", "nurture.skipped", { type: "post", id: post.id }, { reason: `Đang tắt chăm khách trên ${platformLabel(channel.platform)}`, commentId });
+    return { skipped: "platform_off" };
+  }
   let lead = q.get<Row>("SELECT * FROM nurture_lead WHERE comment_id = ?", c.id);
   if (!lead) {
-    // Mỗi người chỉ được chăm 1 lần trên 1 bài (bình luận nhiều lần không bị nhắn nhiều lần).
-    // Không có id người viết mà tên chỉ là "Khách Facebook" (thiếu quyền đọc người dùng) → KHÔNG gộp theo tên
-    // (nếu gộp, mọi người bình luận sẽ thành 1 lead/bài) — khi đó chỉ chống trùng theo bình luận.
-    const genericName = !c.author_external_id && (!c.author || c.author === GENERIC_AUTHOR);
-    const dup = c.author_external_id
-      ? q.get<Row>("SELECT id FROM nurture_lead WHERE post_id = ? AND author_external_id = ?", post.id, c.author_external_id)
+    // MỌI bình luận thật đều được trả lời + inbox — dù cùng người bình luận bao nhiêu lần, trên bài nào (mỗi bình luận = 1 lead,
+    // chống trùng theo MÃ BÌNH LUẬN ở nurture_lead.comment_id). Người đã được chăm trước đó (bất kỳ bài nào) chỉ nhận trả lời công khai +
+    // inbox cho bình luận mới, KHÔNG lặp chuỗi xin SĐT / nhắc / kết bạn Zalo (meta.repeat) để không làm phiền cùng một người.
+    const genericName = !c.author_external_id && (!c.author || c.author === GENERIC_AUTHOR || c.author === GENERIC_AUTHOR_IG);
+    const before = c.author_external_id
+      ? q.get<Row>("SELECT id FROM nurture_lead WHERE biz_id = ? AND author_external_id = ? AND comment_id != ? AND stage NOT IN ('skipped','failed') ORDER BY created_at LIMIT 1", bizId, c.author_external_id, c.id)
       : genericName ? undefined
-      : q.get<Row>("SELECT id FROM nurture_lead WHERE post_id = ? AND author_external_id IS NULL AND author_name = ?", post.id, c.author);
-    if (dup) return { skipped: "duplicate_author", leadId: dup.id };
-    // Cùng người (theo id Facebook) đã được chăm ở bài KHÁC trong 30 ngày → không trả lời/nhắn lại.
-    const other = c.author_external_id
-      ? q.get<Row>(`SELECT id FROM nurture_lead WHERE biz_id = ? AND author_external_id = ? AND post_id != ? AND created_at >= ?
-          AND stage NOT IN ('skipped','failed') ORDER BY created_at DESC LIMIT 1`, bizId, c.author_external_id, post.id, new Date(now.getTime() - SAME_AUTHOR_DAYS * 24 * 3600_000).toISOString())
-      : undefined;
+      : q.get<Row>("SELECT id FROM nurture_lead WHERE biz_id = ? AND author_external_id IS NULL AND author_name = ? AND comment_id != ? AND stage NOT IN ('skipped','failed') ORDER BY created_at LIMIT 1", bizId, c.author, c.id);
+    // Bình luận cũ: chỉ bỏ khi viết TRƯỚC lúc bật chăm khách và quá 24 giờ (quét bù — trông như spam). Bình luận viết SAU lúc bật luôn được
+    // trả lời, kể cả khi hệ thống tắt/nghẽn một lúc (Private Reply còn hiệu lực 7 ngày; quá 7 ngày bị chặn ở bước gửi).
     const writtenAt = new Date(c.external_created_at ?? c.created_at).getTime();
-    const skipReason = other ? "Đã chăm ở bài khác (cùng người trong 30 ngày) — không trả lời/nhắn lại"
-      : now.getTime() - writtenAt > MAX_COMMENT_AGE_ON_START_MS ? "Bình luận cũ (viết hơn 24 giờ trước) — không trả lời/nhắn để tránh trông như spam"
+    const since = enabledSince(bizId, s, now);
+    const skipReason = now.getTime() - writtenAt > MAX_COMMENT_AGE_ON_START_MS && writtenAt < since ? "Bình luận cũ (viết trước khi bật chăm khách, hơn 24 giờ) — không trả lời/nhắn để tránh trông như spam"
       : null;
     lead = insert("nurture_lead", {
       biz_id: bizId, post_id: post.id, comment_id: c.id, channel_id: channel.id, author_name: c.author, author_external_id: c.author_external_id ?? null,
       comment_text: String(c.text).slice(0, 500), label: c.label, stage: skipReason ? "skipped" : "new", next_check_at: skipReason ? null : now.toISOString(),
       log: [
-        { at: nowIso(), event: "comment", text: `Bình luận (${c.label === "purchase_intent" ? "muốn mua" : c.label === "question" ? "hỏi" : c.label})` },
+        { at: nowIso(), event: "comment", text: `Bình luận (${c.label === "purchase_intent" ? "muốn mua" : c.label === "question" ? "hỏi" : "khen / quan tâm"})${before ? " — khách đã được chăm trước đó, chỉ trả lời + inbox, không lặp xin SĐT" : ""}` },
         ...(skipReason ? [{ at: nowIso(), event: "skipped", text: skipReason }] : []),
       ],
-      meta: other ? { sameAuthorLeadId: other.id } : {},
+      meta: before ? { repeat: true, previousLeadId: before.id } : {},
     });
     emit(bizId, "nurture.lead_created", { leadId: lead.id });
     if (skipReason) {
       audit(bizId, "nurture", "nurture.skipped", { type: "nurture_lead", id: lead.id }, { reason: skipReason, commentId });
-      return { skipped: other ? "other_post" : "old_comment", leadId: lead.id, stage: "skipped" };
+      return { skipped: "old_comment", leadId: lead.id, stage: "skipped" };
     }
   }
   return runNewLead(bizId, lead, now);
@@ -373,8 +641,11 @@ function releaseSend(commentId: string, col: "replied_at" | "dm_sent_at") {
   q.run(`UPDATE post_comment SET ${col} = NULL WHERE id = ?`, commentId);
 }
 
-/** Bước trả lời công khai + Private Reply cho lead ở stage "new". Tự hoãn khi bị chặn bởi giờ yên lặng / hạn mức / kill switch. */
-export async function runNewLead(bizId: string, lead: Row, now = new Date()) {
+/**
+ * Bước trả lời công khai + Private Reply cho lead ở stage "new". Tự hoãn khi bị chặn bởi giờ yên lặng / hạn mức / kill switch.
+ * opts.manual = Sếp vừa duyệt (chế độ duyệt trước) → không chờ hết giờ yên lặng (vẫn theo dừng khẩn cấp + hạn mức).
+ */
+export async function runNewLead(bizId: string, lead: Row, now = new Date(), opts: { manual?: boolean } = {}) {
   lead = byId<Row>("nurture_lead", lead.id) ?? lead; // đọc lại: lượt khác có thể vừa xử lý xong
   if (lead.stage !== "new") return { stage: lead.stage };
   const s = nurtureSettings(bizId);
@@ -382,17 +653,27 @@ export async function runNewLead(bizId: string, lead: Row, now = new Date()) {
   const c = byId<Row>("post_comment", lead.comment_id)!;
   const busy = pendingClaim(bizId, lead, c, now);
   if (busy) return busy;
-  const g = gate(bizId, now);
+  // Khách đã báo không nhận tin (vd ở bài khác / Messenger) → không trả lời, không nhắn.
+  if (!c.replied_at && !c.dm_sent_at && leadOptedOut(lead)) return stopOptedOut(bizId, lead);
+  const g = gate(bizId, now, opts.manual || s.replyAllDay); // replyAllDay: trả lời + inbox cả ban đêm (dừng khẩn cấp vẫn chặn)
   if (g) { update("nurture_lead", lead.id, { next_check_at: g.until.toISOString(), last_error: g.reason }); return { deferred: g.reason }; }
   const post = byId<Row>("post", lead.post_id)!;
   const channel = byId<Row>("channel", lead.channel_id)!;
+  const platform: NurturePlatform = channel.platform === "instagram" ? "instagram" : "facebook";
+  const plat = platformLabel(platform);
+  if (!s.platforms[platform] && !opts.manual) {
+    // Sếp tắt nền tảng này khi khách còn chờ → hoãn (bật lại thì chạy tiếp; quá 7 ngày thì bước dưới tự bỏ).
+    update("nurture_lead", lead.id, { next_check_at: new Date(now.getTime() + hours(1)).toISOString(), last_error: `Đang tắt chăm khách trên ${plat}` });
+    return { deferred: "platform_off" };
+  }
+  const caps = capsFor(s, platform);
   const conn = connectorForChannel(channel);
   if (conn.mode !== "live") {
-    logLead(lead, "skipped", "Trang chưa kết nối thật (page token) — không trả lời/nhắn được", { stage: "skipped", next_check_at: null });
+    logLead(lead, "skipped", `${plat} chưa kết nối thật (token) — không trả lời/nhắn được`, { stage: "skipped", next_check_at: null });
     return { stage: "skipped" };
   }
   if (!c.external_id) {
-    logLead(lead, "skipped", "Bình luận không có mã trên Facebook — không trả lời được", { stage: "skipped" });
+    logLead(lead, "skipped", `Bình luận không có mã trên ${plat} — không trả lời được`, { stage: "skipped" });
     return { stage: "skipped" };
   }
   const commentExt = String(c.external_id);
@@ -402,26 +683,37 @@ export async function runNewLead(bizId: string, lead: Row, now = new Date()) {
   // Tuổi bình luận theo giờ Facebook (created_time), không theo giờ hệ thống nhận được: quá 7 ngày thì Private Reply
   // bị từ chối → bỏ CẢ trả lời công khai (trả lời bình luận cũ trông như spam) lẫn inbox. Kiểm TRƯỚC khi trả lời công khai.
   if (now.getTime() - new Date(c.external_created_at ?? c.created_at).getTime() > PRIVATE_REPLY_WINDOW_MS) {
-    logLead(lead, "skipped", "Bình luận quá 7 ngày — Facebook không cho nhắn inbox từ bình luận cũ; không trả lời công khai", { stage: "skipped", next_check_at: null });
+    logLead(lead, "skipped", `Bình luận quá 7 ngày — ${plat} không cho nhắn inbox từ bình luận cũ; không trả lời công khai`, { stage: "skipped", next_check_at: null });
     return { stage: "skipped" };
+  }
+
+  // Câu đã được Sếp duyệt (chế độ duyệt trước) — gửi đúng câu này, không chọn mẫu lại.
+  const approved = (lead.meta?.review?.approvedAt ? lead.meta.review : null) as { replyText?: string | null; dmText?: string | null } | null;
+  const replyStep = s.steps.replyComment && !lead.public_replied_at && Boolean(conn.replyToComment);
+  const dmStep = s.steps.privateReply && Boolean(conn.privateReply);
+  if (!approved && reviewActive(s) && (replyStep || dmStep)) {
+    // Chế độ duyệt trước: soạn sẵn ĐÚNG câu sẽ gửi, mở mục Duyệt — chưa gửi, chưa giữ chỗ.
+    const replyText = replyStep ? applyBannedChars(fillTemplate(pick(s.replyTemplates, countToday(bizId, "public_replied_at", "AND channel_id = ?", channel.id) + hashOf(c.id)), v), dna) : null;
+    const dmText = dmStep ? applyBannedChars(fillTemplate(pick(s.dmTemplates, countToday(bizId, "dm_sent_at", "AND channel_id = ?", channel.id) + hashOf(c.id)), v), dna) : null;
+    return openReview(bizId, lead, s, { post, c, replyText, dmText });
   }
 
   // a) Trả lời công khai dưới bình luận
   if (s.steps.replyComment && !lead.public_replied_at && conn.replyToComment) {
     const used = countToday(bizId, "public_replied_at", "AND channel_id = ?", channel.id);
-    if (used >= s.maxPublicRepliesPerDay) {
-      update("nurture_lead", lead.id, { next_check_at: tomorrowMorning(bizId, now).toISOString(), last_error: `Đủ ${s.maxPublicRepliesPerDay} trả lời công khai hôm nay — để mai` });
+    if (used >= caps.publicReplies) {
+      update("nurture_lead", lead.id, { next_check_at: tomorrowMorning(bizId, now).toISOString(), last_error: `Đủ ${caps.publicReplies} trả lời công khai trên ${plat} hôm nay — để mai` });
       return { deferred: "public_cap" };
     }
     if (claimSend(c.id, "replied_at")) {
       update("nurture_lead", lead.id, { reply_claimed_at: nowIso() }); // cùng nhịp đồng bộ với claimSend (chưa có await)
-      const text = applyBannedChars(fillTemplate(pick(s.replyTemplates, used + hashOf(c.id)), v), dna);
+      const text = approved?.replyText ? applyBannedChars(approved.replyText, dna) : applyBannedChars(fillTemplate(pick(s.replyTemplates, used + hashOf(c.id)), v), dna);
       try {
         const r = await conn.replyToComment({ commentExternalId: commentExt, text }, `nurture:reply:${c.id}`);
         lead = byId<Row>("nurture_lead", lead.id) ?? lead;
         logLead(lead, "public_reply", `Đã trả lời dưới bình luận: "${text}"`, { public_replied_at: nowIso(), last_error: null, meta: { ...(lead.meta ?? {}), publicReplyId: r.externalId } });
       } catch (e) {
-        if (sendOutcome(e) === "unknown") return markNeedsCheck(bizId, lead, "reply", `lỗi khi trả lời công khai (${errText(e)}) — Facebook có thể đã nhận`);
+        if (sendOutcome(e) === "unknown") return markNeedsCheck(bizId, lead, "reply", `lỗi khi trả lời công khai (${errText(e)}) — ${plat} có thể đã nhận`);
         releaseSend(c.id, "replied_at");
         update("nurture_lead", lead.id, { reply_claimed_at: null });
         if (retryable(e)) { deferNew(lead.id, new Date(now.getTime() + 10 * 60_000), errText(e)); throw e; }
@@ -436,8 +728,8 @@ export async function runNewLead(bizId: string, lead: Row, now = new Date()) {
     return { stage: "replied" };
   }
   const usedDm = countToday(bizId, "dm_sent_at", "AND channel_id = ?", channel.id);
-  if (usedDm >= s.maxPrivateRepliesPerDay) {
-    update("nurture_lead", lead.id, { next_check_at: tomorrowMorning(bizId, now).toISOString(), last_error: `Đủ ${s.maxPrivateRepliesPerDay} tin inbox hôm nay — để mai` });
+  if (usedDm >= caps.privateReplies) {
+    update("nurture_lead", lead.id, { next_check_at: tomorrowMorning(bizId, now).toISOString(), last_error: `Đủ ${caps.privateReplies} tin inbox trên ${plat} hôm nay — để mai` });
     return { deferred: "dm_cap" };
   }
   if (!claimSend(c.id, "dm_sent_at")) { // lượt khác đang/đã nhắn → dời lịch, không để tick chọn lại liên tục
@@ -445,12 +737,12 @@ export async function runNewLead(bizId: string, lead: Row, now = new Date()) {
     return { stage: lead.stage, skipped: "dm_in_progress" };
   }
   update("nurture_lead", lead.id, { dm_claimed_at: nowIso() });
-  const dmText = applyBannedChars(fillTemplate(pick(s.dmTemplates, usedDm + hashOf(c.id)), v), dna);
+  const dmText = approved?.dmText ? applyBannedChars(approved.dmText, dna) : applyBannedChars(fillTemplate(pick(s.dmTemplates, usedDm + hashOf(c.id)), v), dna);
   let r: { recipientId: string; messageId: string };
   try {
     r = await conn.privateReply({ commentExternalId: commentExt, text: dmText }, `nurture:dm:${c.id}`);
   } catch (e) {
-    if (sendOutcome(e) === "unknown") return markNeedsCheck(bizId, lead, "dm", `lỗi khi nhắn inbox (${errText(e)}) — Facebook có thể đã nhận`);
+    if (sendOutcome(e) === "unknown") return markNeedsCheck(bizId, lead, "dm", `lỗi khi nhắn inbox (${errText(e)}) — ${plat} có thể đã nhận`);
     releaseSend(c.id, "dm_sent_at");
     update("nurture_lead", lead.id, { dm_claimed_at: null });
     if (retryable(e)) { deferNew(lead.id, new Date(now.getTime() + 10 * 60_000), errText(e)); throw e; }
@@ -458,45 +750,134 @@ export async function runNewLead(bizId: string, lead: Row, now = new Date()) {
     audit(bizId, "nurture", "nurture.dm_failed", { type: "nurture_lead", id: lead.id }, { error: errText(e) });
     return { stage: "failed" };
   }
-  const stage = s.steps.askContact ? "asked_contact" : "dm_sent";
+  // Người bình luận lặp (đã được chăm trước đó): xong trả lời công khai + inbox là dừng — không hẹn nhắc SĐT / kết bạn Zalo lần nữa.
+  const repeat = Boolean(lead.meta?.repeat);
+  const stage = repeat ? "replied" : s.steps.askContact ? "asked_contact" : "dm_sent";
+  const nextCheck = repeat ? null : new Date(now.getTime() + hours(s.reminderAfterHours)).toISOString();
   if (!r.recipientId) {
-    // Trang thật mà Facebook không trả PSID: KHÔNG tạo hội thoại với người nhận giả "cmt:…" (hội thoại ma, nhắn không tới ai).
+    // Trang thật mà Facebook/Instagram không trả PSID/IGSID: KHÔNG tạo hội thoại với người nhận giả "cmt:…" (hội thoại ma, nhắn không tới ai).
     update("post_comment", c.id, { dm_sent_at: nowIso() });
-    logLead(lead, "dm", `Đã nhắn inbox: "${dmText}" (Facebook không trả mã người nhận — tin khách trả lời sẽ hiện ở Hội thoại)`, { stage, dm_sent_at: nowIso(), last_error: null, next_check_at: new Date(now.getTime() + hours(s.reminderAfterHours)).toISOString() });
+    logLead(lead, "dm", `Đã nhắn inbox: "${dmText}" (${plat} không trả mã người nhận — tin khách trả lời sẽ hiện ở Hội thoại)`, { stage, dm_sent_at: nowIso(), last_error: null, next_check_at: nextCheck });
     audit(bizId, "nurture", "nurture.dm_sent", { type: "nurture_lead", id: lead.id }, { postId: post.id, via: conn.mode, noPsid: true });
     return { stage };
   }
   const psid = r.recipientId;
-  let conv = q.get<Row>("SELECT * FROM conversation WHERE biz_id = ? AND channel = 'messenger' AND external_id = ?", bizId, psid);
+  // Instagram: hội thoại kênh "instagram", external_id = IGSID, ext.pageId = id tài khoản IG (để gửi đúng tài khoản, cửa sổ 24h).
+  const convChannel = platform === "instagram" ? "instagram" : "messenger";
+  let conv = q.get<Row>("SELECT * FROM conversation WHERE biz_id = ? AND channel = ? AND external_id = ?", bizId, convChannel, psid);
   if (!conv) {
     conv = insert("conversation", {
-      biz_id: bizId, channel: "messenger", external_id: psid, customer_ref: `cust_${psid}`, customer_name: lead.author_name, state: "awaiting_customer",
+      biz_id: bizId, channel: convChannel, external_id: psid, customer_ref: `cust_${psid}`, customer_name: lead.author_name, state: "awaiting_customer",
       tags: ["Từ bình luận"], unread: 0, ext: { pageId: channel.external_id, nurtureLeadId: lead.id }, last_customer_at: null,
     });
   } else {
-    update("conversation", conv.id, { ext: { ...(conv.ext ?? {}), pageId: conv.ext?.pageId ?? channel.external_id, nurtureLeadId: lead.id } });
+    // Lead lặp không chiếm hội thoại: tin khách trả lời vẫn gắn với lead gốc (đang xin SĐT) nếu còn.
+    update("conversation", conv.id, { ext: { ...(conv.ext ?? {}), pageId: conv.ext?.pageId ?? channel.external_id, nurtureLeadId: repeat && conv.ext?.nurtureLeadId ? conv.ext.nurtureLeadId : lead.id } });
   }
   insert("message", { biz_id: bizId, conversation_id: conv.id, direction: "out", sender: "bot", body: { text: dmText }, external_id: r.messageId || null, meta: { kind: "nurture_dm", leadId: lead.id, via: conn.mode }, sent_at: nowIso() });
   update("conversation", conv.id, { last_message_at: nowIso(), last_preview: dmText.slice(0, 140) });
+  // (hội thoại còn mở: Private Reply vẫn vào đúng luồng chat hiện có của khách)
   if (!q.get("SELECT id FROM attribution_link WHERE conversation_id = ? AND post_id = ?", conv.id, post.id))
     insert("attribution_link", { biz_id: bizId, conversation_id: conv.id, post_id: post.id, source: "comment", method: "tag", confidence: 0.9 });
   update("post_comment", c.id, { dm_sent_at: nowIso() });
-  logLead(lead, "dm", `Đã nhắn inbox: "${dmText}"`, { stage, psid, conversation_id: conv.id, dm_sent_at: nowIso(), last_error: null, next_check_at: new Date(now.getTime() + hours(s.reminderAfterHours)).toISOString() });
+  logLead(lead, "dm", `Đã nhắn inbox: "${dmText}"`, { stage, psid, conversation_id: conv.id, dm_sent_at: nowIso(), last_error: null, next_check_at: nextCheck });
   audit(bizId, "nurture", "nurture.dm_sent", { type: "nurture_lead", id: lead.id }, { postId: post.id, via: conn.mode });
   emit(bizId, "nurture.dm_sent", { leadId: lead.id, conversationId: conv.id });
   return { stage, conversationId: conv.id };
 }
 
+// ---------------- Chế độ duyệt trước: mở mục Duyệt / Sếp quyết định ----------------
+/** Mở mục duyệt "nurture_send" cho lead (không giữ chỗ gửi). Hạn duyệt = hết cửa sổ 7 ngày của Private Reply. */
+function openReview(bizId: string, lead: Row, s: NurtureSettings, x: { post: Row; c: Row; replyText: string | null; dmText: string | null }) {
+  const writtenAt = new Date(x.c.external_created_at ?? x.c.created_at);
+  const deadline = new Date(writtenAt.getTime() + PRIVATE_REPLY_WINDOW_MS);
+  let ap = q.get<Row>("SELECT * FROM approval WHERE biz_id = ? AND subject_type = 'nurture_send' AND subject_id = ? AND status = 'pending'", bizId, lead.id);
+  if (!ap) {
+    ap = insert("approval", {
+      biz_id: bizId, subject_type: "nurture_send", subject_id: lead.id, agent_key: "chat",
+      title: `Chăm khách từ bình luận: ${lead.author_name}`, risk: "medium", status: "pending",
+      preview: {
+        kind: "nurture_send", channel: byId<Row>("channel", lead.channel_id)?.platform ?? "facebook", leadId: lead.id, author: lead.author_name, comment: String(lead.comment_text ?? x.c.text ?? ""),
+        postTitle: x.post.title ?? null, permalink: x.post.permalink ?? null, replyText: x.replyText, dmText: x.dmText,
+        text: x.dmText ?? x.replyText ?? "", // ô "Chỉnh sửa" sửa tin inbox
+        reviewNo: Math.min(s.reviewApproved + 1, s.reviewFirst), reviewFirst: s.reviewFirst, deadline: deadline.toISOString(),
+      },
+      expires_at: deadline.toISOString(),
+    });
+    emit(bizId, "approval.created", { approvalId: ap.id, title: ap.title });
+  }
+  logLead(lead, "awaiting_review", `Chờ Sếp duyệt (chế độ duyệt trước — còn ${Math.max(0, s.reviewFirst - s.reviewApproved)}/${s.reviewFirst} khách cần duyệt). Hệ CHƯA trả lời/nhắn khách.`, {
+    stage: "awaiting_review", next_check_at: null, last_error: null,
+    meta: { ...(lead.meta ?? {}), review: { approvalId: ap.id, replyText: x.replyText, dmText: x.dmText, createdAt: nowIso() } },
+  });
+  audit(bizId, "nurture", "nurture.review_requested", { type: "nurture_lead", id: lead.id }, { approvalId: ap.id });
+  return { stage: "awaiting_review" as const, approvalId: ap.id as string };
+}
+
+/**
+ * Sếp quyết định mục duyệt "nurture_send" (gọi từ decideApproval — mục duyệt đã chuyển approved/edited/rejected):
+ * - duyệt → gửi đúng đường thường (giữ chỗ nguyên tử, hạn mức, dừng khẩn cấp, danh sách không nhận tin) + tăng bộ đếm;
+ * - "Chỉnh sửa" → tin inbox dùng bản Sếp sửa;
+ * - từ chối → lead "Bỏ qua";
+ * - duyệt quá 7 ngày kể từ lúc khách bình luận → failed (Facebook không cho nhắn inbox nữa).
+ */
+export async function decideNurtureSend(bizId: string, ap: Row, decision: "approve" | "edit" | "reject", edited: string | undefined, actor: string, now = new Date()) {
+  const lead = byId<Row>("nurture_lead", ap.subject_id);
+  if (!lead || lead.biz_id !== bizId) return { skipped: "not_found" };
+  if (lead.stage !== "awaiting_review") return { skipped: "stage", stage: lead.stage };
+  const reopen = (code: string, msg: string): never => {
+    update("approval", ap.id, { status: "pending", decided_at: null, decided_by: null });
+    throw new AppError(code, msg);
+  };
+  if (decision === "reject") {
+    logLead(lead, "skipped", `Sếp không duyệt — không trả lời/nhắn khách này (${actor})`, { stage: "skipped", next_check_at: null });
+    audit(bizId, actor, "nurture.review_rejected", { type: "nurture_lead", id: lead.id }, {});
+    return { stage: "skipped" };
+  }
+  const c = byId<Row>("post_comment", lead.comment_id);
+  const writtenAt = new Date(c?.external_created_at ?? c?.created_at ?? lead.created_at).getTime();
+  if (now.getTime() - writtenAt > PRIVATE_REPLY_WINDOW_MS) {
+    logLead(lead, "failed", `Duyệt muộn: bình luận đã quá 7 ngày — ${platformLabel(leadPlatform(lead))} không cho nhắn inbox từ bình luận cũ nữa, hệ không gửi`, { stage: "failed", next_check_at: null, last_error: "Duyệt quá 7 ngày sau bình luận" });
+    return { stage: "failed" };
+  }
+  if (leadOptedOut(lead)) return stopOptedOut(bizId, lead);
+  const s = nurtureSettings(bizId);
+  if (!s.enabled) reopen("NURTURE_OFF", "Chăm khách từ bình luận đang TẮT — bật lại ở trang Chăm khách rồi duyệt");
+  if (isKilled(bizId, "chat")) reopen("KILLED", "Đang bật dừng khẩn cấp chat — tắt dừng khẩn cấp rồi duyệt");
+  const pv = (ap.preview ?? {}) as Row;
+  let dmText = (pv.dmText ?? null) as string | null;
+  if (decision === "edit" && edited?.trim()) {
+    const t = edited.replace(/\r\n/g, "\n").trim();
+    if (t.length < 3 || t.length > 1500) reopen("BAD_TEXT", "Tin inbox phải từ 3 đến 1500 ký tự");
+    if (dmText) dmText = t;
+  }
+  const already = Boolean(lead.meta?.review?.approvedAt);
+  logLead(lead, "review_approved", `Sếp đã duyệt${decision === "edit" ? " (có sửa tin inbox)" : ""} — gửi ngay (${actor})`, {
+    stage: "new", next_check_at: now.toISOString(), last_error: null,
+    meta: { ...(lead.meta ?? {}), review: { ...(lead.meta?.review ?? {}), approvalId: ap.id, replyText: pv.replyText ?? null, dmText, approvedAt: nowIso(), approvedBy: actor, edited: decision === "edit" } },
+  });
+  if (!already) setReviewApproved(bizId, s.reviewApproved + 1);
+  audit(bizId, actor, "nurture.review_approved", { type: "nurture_lead", id: lead.id }, { edited: decision === "edit" });
+  try {
+    return await runNewLead(bizId, lead, now, { manual: true });
+  } catch (e) {
+    // Lỗi tạm thời: runNewLead đã dời lịch — tick tự gửi lại đúng câu đã duyệt (vẫn chống trùng bằng giữ chỗ).
+    logger.warn("nurture.review_send_deferred", { lead: lead.id, error: errText(e) });
+    return { deferred: errText(e) };
+  }
+}
+
 // ---------------- 3) Bắt SĐT trong Messenger ----------------
-/** Hook của chat-engine: tin khách trên hội thoại đến từ bình luận. Có SĐT → lưu (mã hoá) + xác nhận + lên lịch kết bạn Zalo. */
+/** Hook của chat-engine: tin khách trên hội thoại (Messenger / Instagram DM) đến từ bình luận. Có SĐT → lưu (mã hoá) + xác nhận + lên lịch kết bạn Zalo. */
 export async function onNurtureMessage(bizId: string, conv: Row, text: string): Promise<{ reply?: string; meta?: Row } | null> {
-  if (conv.channel !== "messenger") return null;
+  if (conv.channel !== "messenger" && conv.channel !== "instagram") return null;
   const lead = q.get<Row>("SELECT * FROM nurture_lead WHERE biz_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 1", bizId, conv.id);
   if (!lead) return null;
   if (!lead.customer_replied_at) logLead(lead, "customer_reply", "Khách trả lời inbox", { customer_replied_at: nowIso() });
   if (!["asked_contact", "dm_sent", "no_response"].includes(lead.stage) || lead.phone_cipher) return null;
   const phone = extractVnPhone(text);
   if (!phone) return null;
+  if (leadOptedOut(lead)) return null; // khách đã báo không nhận tin → không xác nhận, không kết bạn
   const s = nurtureSettings(bizId);
   if (!s.enabled || isKilled(bizId, "chat")) {
     // Đã tắt chăm khách / dừng khẩn cấp: không lưu SĐT, không xác nhận, không lên lịch kết bạn (tin vẫn ở Hội thoại cho nhân viên).
@@ -606,6 +987,10 @@ export async function tryFriendRequest(bizId: string, leadId: string, opts: { fo
   if (!opts.force && (lead.stage !== "has_phone" || !s.steps.zaloFriend)) return { skipped: "stage" };
   if (opts.force && !["has_phone", "no_zalo", "failed"].includes(lead.stage)) throw new AppError("BAD_STAGE", "Khách đã được gửi kết bạn hoặc đã dừng");
   if (!opts.force && lead.next_check_at && new Date(lead.next_check_at) > now) return { skipped: "not_due" };
+  if (leadOptedOut(lead)) {
+    if (opts.force) throw new AppError("OPTED_OUT", "Khách đã báo không muốn nhận tin — không gửi lời mời kết bạn (bỏ khách khỏi danh sách \"không nhận tin\" nếu khách đổi ý)");
+    return stopOptedOut(bizId, lead);
+  }
   if (isKilled(bizId, "chat")) { update("nurture_lead", lead.id, { last_error: "Đang bật dừng khẩn cấp chat" }); if (opts.force) throw new AppError("KILLED", "Đang bật dừng khẩn cấp chat"); return { deferred: "killed" }; }
   if (!opts.force && inQuiet(bizId, now)) { update("nurture_lead", lead.id, { next_check_at: quietEndAfter(bizId, now).toISOString(), last_error: "Giờ yên lặng — kết bạn sáng mai" }); return { deferred: "quiet" }; }
   const zl0 = liveZl(bizId);
@@ -733,10 +1118,12 @@ export async function maybeRemind(bizId: string, lead: Row, s: NurtureSettings, 
     return;
   }
   if (lead.reminder_sent_at || !s.steps.askContact || !lastCustomer || lastAny?.sender === "customer") return; // chờ bot/nhân viên trả lời trước
+  if (!s.platforms[leadPlatform(lead)]) return; // Sếp đã tắt chăm khách trên nền tảng này → không tự nhắc
   const since = now.getTime() - new Date(lastCustomer.sent_at).getTime();
   if (since < hours(s.reminderAfterHours) || since > hours(23)) return; // ngoài cửa sổ 24h thì không nhắn
   const conv = byId<Row>("conversation", lead.conversation_id);
   if (!conv || ["human_active", "opted_out", "handoff_pending"].includes(conv.state)) return;
+  if (leadOptedOut(lead)) { stopOptedOut(bizId, lead); return; }
   // Đọc lại ngay trước khi gửi: Sếp có thể vừa tắt chăm khách / bật dừng khẩn cấp trong lúc tick đang chạy.
   if (!nurtureSettings(bizId).enabled || isKilled(bizId, "chat")) { logger.info("nurture.reminder_skipped", { lead: lead.id }); return; }
   // Giữ chỗ NGUYÊN TỬ: tick định kỳ + "Chạy ngay" (POST /v1/nurture/run) chạy chồng nhau → chỉ 1 lượt được nhắc.
@@ -754,7 +1141,7 @@ export async function maybeRemind(bizId: string, lead: Row, s: NurtureSettings, 
   logLead(lead, "reminder", `Đã nhắc xin SĐT: "${text}"`, { reminder_sent_at: at });
 }
 
-/** Lịch nurture.tick (5 phút): chạy tiếp lead bị hoãn, nhắc SĐT, gửi kết bạn đến hạn, kiểm tra đồng ý kết bạn, đánh dấu có đơn. */
+/** Lịch nurture.tick (1 phút): chạy tiếp lead bị hoãn, nhắc SĐT, gửi kết bạn đến hạn, kiểm tra đồng ý kết bạn, đánh dấu có đơn. */
 /** Biz đang chạy tick (trong tiến trình): tick định kỳ và "Chạy ngay" không chạy chồng nhau. */
 const ticking = new Set<string>();
 
@@ -780,6 +1167,12 @@ async function tickOnce(bizId: string, s: NurtureSettings, now: Date, out: { sta
       deferNew(l.id, new Date(now.getTime() + 10 * 60_000), errText(e));
     }
   }
+  // Chờ duyệt mà mục duyệt đã hết hạn / bị huỷ (Sếp không duyệt kịp 7 ngày) → dừng, ghi rõ lý do.
+  for (const l of q.all<Row>(`SELECT * FROM nurture_lead l WHERE biz_id = ? AND stage = 'awaiting_review'
+      AND NOT EXISTS (SELECT 1 FROM approval a WHERE a.subject_type = 'nurture_send' AND a.subject_id = l.id AND a.status = 'pending' AND (a.expires_at IS NULL OR a.expires_at > ?))`, bizId, due)) {
+    q.run("UPDATE approval SET status = 'expired' WHERE subject_type = 'nurture_send' AND subject_id = ? AND status = 'pending'", l.id);
+    logLead(l, "failed", "Mục duyệt hết hạn (quá 7 ngày sau bình luận, Facebook không cho nhắn inbox nữa) — hệ không gửi", { stage: "failed", next_check_at: null, last_error: "Hết hạn duyệt" });
+  }
   // Giữ chỗ kết bạn quá hạn (tiến trình chết giữa chừng) → trả về has_phone để thử lại (đã tính 1 lần thử).
   for (const l of q.all<Row>("SELECT * FROM nurture_lead WHERE biz_id = ? AND stage = 'friend_requesting' AND next_check_at <= ?", bizId, due)) {
     logLead(l, "error", "Lần gửi kết bạn trước bị gián đoạn — sẽ thử lại", { stage: "has_phone", next_check_at: due });
@@ -790,13 +1183,13 @@ async function tickOnce(bizId: string, s: NurtureSettings, now: Date, out: { sta
       try { await maybeRemind(bizId, l, s, now); if (!before && l.reminder_sent_at) out.reminded++; } catch (e) { out.errors++; update("nurture_lead", l.id, { last_error: errText(e) }); }
     }
   }
-  // Kết bạn: tối đa 1 lời mời / nick / lượt tick (5 phút) — giãn cách tự nhiên.
+  // Kết bạn: tối đa 1 lời mời / nick / lượt tick — cộng với độ trễ ngẫu nhiên 3–20 phút của từng khách nên giãn cách tự nhiên.
   const nicksUsed = new Set<string>();
   for (const l of q.all<Row>("SELECT * FROM nurture_lead WHERE biz_id = ? AND stage = 'has_phone' AND (next_check_at IS NULL OR next_check_at <= ?) ORDER BY phone_at LIMIT 20", bizId, due)) {
     const conn = liveZl(bizId);
     const nick = conn ? pickNick(bizId, conn) : null;
     if (nick && nicksUsed.has(nick.id)) continue;
-    try { const r = await tryFriendRequest(bizId, l.id, { now }); if ("stage" in r && r.stage !== "no_zalo") { out.friendRequests++; if (nick) nicksUsed.add(nick.id); } } catch (e) { out.errors++; }
+    try { const r = await tryFriendRequest(bizId, l.id, { now }); if ("stage" in r && r.stage !== "no_zalo" && r.stage !== "stopped") { out.friendRequests++; if (nick) nicksUsed.add(nick.id); } } catch (e) { out.errors++; }
   }
   for (const l of q.all<Row>("SELECT * FROM nurture_lead WHERE biz_id = ? AND stage = 'friend_requested' AND (next_check_at IS NULL OR next_check_at <= ?) LIMIT 50", bizId, due)) {
     try { if (await checkFriendAccepted(bizId, l, now)) out.accepted++; } catch (e) { out.errors++; }
@@ -858,6 +1251,7 @@ export function setPhoneManual(bizId: string, id: string, raw: string, actor: st
 export function stopLead(bizId: string, id: string, actor: string) {
   const lead = mustLead(bizId, id);
   logLead(lead, "stopped", `Dừng chăm (${actor})`, { stage: "stopped", next_check_at: null });
+  q.run("UPDATE approval SET status = 'expired' WHERE subject_type = 'nurture_send' AND subject_id = ? AND status = 'pending'", lead.id);
   if (lead.zalo_conversation_id) {
     q.run("UPDATE follow_up_plan SET status = 'stopped' WHERE conversation_id = ? AND status IN ('active','awaiting_approval')", lead.zalo_conversation_id);
     q.run("UPDATE approval SET status = 'expired' WHERE subject_type = 'follow_up' AND status = 'pending' AND subject_id IN (SELECT id FROM follow_up_plan WHERE conversation_id = ?)", lead.zalo_conversation_id);
@@ -872,7 +1266,7 @@ export function nurtureFunnel(bizId: string, days = 30) {
   const n = (col: string) => q.scalar<number>(`SELECT COUNT(*) FROM nurture_lead WHERE biz_id = ? AND created_at >= ? AND ${col} IS NOT NULL`, bizId, since);
   return {
     days,
-    comments: q.scalar<number>("SELECT COUNT(*) FROM post_comment WHERE biz_id = ? AND created_at >= ?", bizId, since),
+    comments: q.scalar<number>("SELECT COUNT(*) FROM post_comment WHERE biz_id = ? AND created_at >= ? AND COALESCE(label_source, '') != 'system'", bizId, since),
     leads: q.scalar<number>("SELECT COUNT(*) FROM nurture_lead WHERE biz_id = ? AND created_at >= ?", bizId, since),
     replied: n("public_replied_at"),
     dm: n("dm_sent_at"),
@@ -887,6 +1281,14 @@ export function nurtureFunnel(bizId: string, days = 30) {
     today: {
       replied: countToday(bizId, "public_replied_at", ""), dm: countToday(bizId, "dm_sent_at", ""), friendRequested: countToday(bizId, "friend_requested_at", ""),
     },
+    /** Hôm nay theo nền tảng (so với hạn mức riêng của từng nền tảng — mỗi kênh đếm riêng). */
+    byPlatform: Object.fromEntries(NURTURE_PLATFORMS.map((pl) => {
+      const w = "AND channel_id IN (SELECT id FROM channel WHERE platform = ?)";
+      return [pl, {
+        leads: q.scalar<number>("SELECT COUNT(*) FROM nurture_lead WHERE biz_id = ? AND created_at >= ? AND channel_id IN (SELECT id FROM channel WHERE platform = ?)", bizId, since, pl),
+        repliedToday: countToday(bizId, "public_replied_at", w, pl), dmToday: countToday(bizId, "dm_sent_at", w, pl),
+      }];
+    })) as Record<NurturePlatform, { leads: number; repliedToday: number; dmToday: number }>,
     stages: q.all<Row>("SELECT stage, COUNT(*) n FROM nurture_lead WHERE biz_id = ? GROUP BY stage", bizId),
   };
 }
@@ -895,8 +1297,9 @@ export function nurtureFunnel(bizId: string, days = 30) {
 export function listNurtureLeads(bizId: string, opts: { stage?: string; limit?: number } = {}) {
   return q.all<Row>(`SELECT l.id, l.post_id, l.author_name, l.comment_text, l.label, l.stage, l.conversation_id, l.zalo_conversation_id, l.phone_masked,
       l.zalo_account_id, l.public_replied_at, l.dm_sent_at, l.customer_replied_at, l.reminder_sent_at, l.phone_at, l.friend_requested_at, l.friend_accepted_at,
-      l.followup_at, l.ordered_at, l.next_check_at, l.last_error, l.friend_attempts, l.created_at, l.updated_at, p.title post_title, p.permalink post_permalink
-    FROM nurture_lead l LEFT JOIN post p ON p.id = l.post_id WHERE l.biz_id = ? ${opts.stage ? "AND l.stage = ?" : ""} ORDER BY l.updated_at DESC LIMIT ?`,
+      l.followup_at, l.ordered_at, l.next_check_at, l.last_error, l.friend_attempts, l.created_at, l.updated_at, p.title post_title, p.permalink post_permalink,
+      COALESCE(ch.platform, 'facebook') platform, ch.name channel_name
+    FROM nurture_lead l LEFT JOIN post p ON p.id = l.post_id LEFT JOIN channel ch ON ch.id = l.channel_id WHERE l.biz_id = ? ${opts.stage ? "AND l.stage = ?" : ""} ORDER BY l.updated_at DESC LIMIT ?`,
   bizId, ...(opts.stage ? [opts.stage] : []), opts.limit ?? 200);
 }
 export function nurtureLeadDetail(bizId: string, id: string) {
@@ -916,11 +1319,9 @@ export const NURTURE_HANDLERS: Record<string, Handler> = {
     if (!post) return;
     await classifyComments(post);
     const s = nurtureSettings(post.biz_id);
-    if (!s.enabled) return;
-    for (const c of q.all<Row>("SELECT id, label FROM post_comment WHERE post_id = ? AND source IN ('poll','webhook') AND label IS NOT NULL AND id NOT IN (SELECT comment_id FROM nurture_lead)", post.id)) {
-      if (s.labels.includes(c.label))
-        enqueue("chat", "nurture.comment", { commentId: c.id }, { bizId: post.biz_id, idempotencyKey: `nurture:cmt:${c.id}`, lockKey: `nurture:post:${post.id}` });
-    }
+    emit(post.biz_id, "nurture.comments_classified", { postId: post.id });
+    if (!s.enabled || p.scanOnly) return;
+    enqueueNurtureComments(post, s);
   },
   "nurture.comment": async (p, job) => void (await processNurtureComment(job.biz_id, p.commentId)),
   "nurture.zalo_friend": async (p, job) => void (await tryFriendRequest(job.biz_id, p.leadId)),

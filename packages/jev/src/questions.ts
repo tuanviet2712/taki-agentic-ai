@@ -168,13 +168,34 @@ export const guardQuestions = {
   ]),
 } satisfies Questions;
 
+/** Các số tiền (VND) trong chuỗi đã chuẩn hoá vn(): "12.000.000d", "12 trieu", "12tr", "350k", "1,5 trieu" → số nguyên. */
+export function moneyValues(s: string): number[] {
+  const out: number[] = [];
+  const re = /(\d[\d.,]*)\s*(trieu|tr|k|nghin|ngan|d|dong|vnd)\b/g;
+  for (const m of s.matchAll(re)) {
+    const unit = m[2];
+    const raw = m[1];
+    let n: number;
+    if (unit === "d" || unit === "dong" || unit === "vnd") n = Number(raw.replace(/[.,]/g, ""));
+    else n = Number(raw.replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".")) * (unit === "k" || unit === "nghin" || unit === "ngan" ? 1_000 : 1_000_000);
+    if (Number.isFinite(n) && n > 0) out.push(Math.round(n));
+  }
+  // Số có dấu chấm nghìn đứng riêng ("12.000.000") trong kho tri thức cũng là giá.
+  for (const m of s.matchAll(/\b\d{1,3}(?:\.\d{3}){2,}\b/g)) out.push(Number(m[0].replace(/\./g, "")));
+  return out;
+}
+
 export function guardHeuristic(state: any) {
   const r: string = state.draft_reply ?? "";
   const facts = vn((state.approved_facts ?? []).join(" "));
-  const nums = (r.match(/\d[\d.,]*\s*(k|tr|triệu|trieu|đ|d|vnd|%)/gi) ?? []).map((n) => vn(n).replace(/\s/g, ""));
-  const unsupported = nums.some((n) => !facts.replace(/\s/g, "").includes(n.replace(/(k|tr|trieu|d|vnd)$/, "")));
+  // Giá: quy về số tiền thật để so ("12 triệu" = "12.000.000đ" = "12tr") — giá bịa vẫn bị chặn.
+  const factMoney = new Set(moneyValues(facts));
+  const unsupported = moneyValues(vn(r)).some((v) => !factMoney.has(v))
+    || (r.match(/\d+(?:[.,]\d+)?\s*%/g) ?? []).some((p) => !/100\s*%\s*(offline|online|truc tiep|thuc hanh)/.test(vn(r)) && !facts.replace(/\s/g, "").includes(vn(p).replace(/\s/g, "")));
+  // "100%" chỉ là cam kết khi đi với kết quả ("100% hiệu quả", "100% ra đơn") — "100% offline" là mô tả hình thức.
+  const guarantee100 = /100\s*%\s*(hieu qua|thanh cong|ket qua|ra don|co don|tang|dam bao|hoan tien|dau ra)/.test(vn(r));
   return {
-    guarantees_outcome: hNoul(hasAny(r, ["cam kết", "đảm bảo", "chắc chắn", "100%", "x2 doanh thu", "gấp đôi doanh thu", "hoàn tiền nếu không"]) ? 0.8 : 0.05),
+    guarantees_outcome: hNoul(guarantee100 || hasAny(r, ["cam kết", "đảm bảo", "chắc chắn", "x2 doanh thu", "gấp đôi doanh thu", "hoàn tiền nếu không"]) ? 0.8 : 0.05),
     unsupported_fact: hNoul(unsupported ? 0.75 : 0.08),
     leaks_internal: hNoul(hasAny(r, ["system prompt", "hướng dẫn nội bộ", "prompt", "khách hàng khác"]) ? 0.8 : 0.02),
     answers_question: hNoul(r.length > 20 ? 0.8 : 0.3),
@@ -276,10 +297,13 @@ export function commentHeuristic(state: any) {
   const out: any = {};
   (state.comments ?? []).forEach((c: any, i: number) => {
     const t: string = c.text;
-    const label: CommentLabel = hasAny(t, ["giá", "học phí", "inbox", "ib", "đăng ký", "khi nào khai giảng", "xin link", "cho xin", "tư vấn"]) ? "purchase_intent"
+    // Khách Việt hiếm khi gõ dấu "?": "có hướng dẫn ko ạ", "bao nhiêu vậy shop" — nhận diện theo cụm hỏi thường gặp.
+    const asks = /\?/.test(t) || hasAny(t, ["hướng dẫn", "như thế nào", "thế nào", "ở đâu", "làm sao", "làm thế nào", "cách nào", "vậy ạ", "không ạ", "ko ạ", "hông ạ", "chưa ạ", "sao ạ", "thế ạ", "nhỉ", "ai biết"])
+      || /\bco\b.{0,40}\b(khong|ko|hong|chua)\b/.test(vn(t));
+    const label: CommentLabel = hasAny(t, ["giá", "học phí", "inbox", "ib", "đăng ký", "khi nào khai giảng", "xin link", "cho xin", "tư vấn", "bao nhiêu", "mua", "đặt hàng", "còn hàng", "ship", "gửi link", "địa chỉ", "số điện thoại", "sđt"]) ? "purchase_intent"
       : hasAny(t, ["lừa", "chán", "vô dụng", "tệ", "lùa gà"]) ? "negative"
       : hasAny(t, ["http", "vay tiền", "kiếm tiền online", "sđt zalo"]) ? "spam"
-      : /\?/.test(t) ? "question" : "praise";
+      : asks ? "question" : "praise";
     out[`c${i}`] = hChoice(Object.keys(COMMENT_LABELS) as CommentLabel[], label, 0.7);
   });
   return out;

@@ -83,23 +83,24 @@ export function Automations() {
 
   const total = (Object.values(counts) as number[]).reduce((a, b) => a + b, 0);
   return (
-    <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
-      <aside className="h-fit rounded-2xl border border-line bg-card p-5 shadow-sm">
-        <h2 className="mb-4 text-lg font-bold text-ink">Luồng vận hành</h2>
-        <div className="space-y-3">
+    <div className="grid gap-6 items-start lg:grid-cols-[272px_minmax(0,1fr)]">
+      <aside className="h-fit rounded-2xl border border-line bg-card p-4 shadow-sm">
+        <h2 className="mb-3 text-[15px] font-semibold text-ink">Luồng vận hành</h2>
+        <div className="space-y-2">
           {(Object.keys(TYPES) as AType[]).map((t) => {
             const T = TYPES[t];
             return (
-              <button key={t} onClick={() => go(t)} className={cx("flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition", type === t ? "border-blue-400 bg-blue-500/5 ring-2 ring-blue-500/15" : "border-line hover:border-blue-300")}>
-                <span className={cx("grid h-12 w-12 shrink-0 place-items-center rounded-xl", T.bg, T.color)}><T.icon className="h-6 w-6" /></span>
-                <span className="min-w-0 flex-1"><span className="block text-sm text-ink">{T.label}</span><span className={cx("text-3xl font-bold leading-tight", T.color)}>{counts[t] ?? 0}</span></span>
-                <ChevronRight className="h-4 w-4 text-muted" />
+              <button key={t} onClick={() => go(t)} className={cx("flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors", type === t ? "border-blue-400 bg-blue-500/5 ring-2 ring-blue-500/15" : "border-line hover:border-blue-300")}>
+                <span className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-lg", T.bg, T.color)}><T.icon className="h-[18px] w-[18px]" /></span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink" title={T.label}>{T.label}</span>
+                <span className={cx("text-lg font-bold tabular-nums leading-none", T.color)}>{counts[t] ?? 0}</span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted" />
               </button>
             );
           })}
-          <button onClick={() => go(null)} className={cx("flex w-full items-center gap-4 rounded-2xl p-4 text-left transition", !type ? "bg-blue-500/15" : "bg-blue-500/10 hover:bg-blue-500/15")}>
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-500/15 text-blue-600"><FileText className="h-5 w-5" /></span>
-            <span className="flex-1 font-medium text-blue-700 dark:text-blue-300">{total} cấu hình</span>
+          <button onClick={() => go(null)} className={cx("flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors", !type ? "bg-blue-500/15" : "bg-blue-500/10 hover:bg-blue-500/15")}>
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-500/15 text-blue-600"><FileText className="h-[18px] w-[18px]" /></span>
+            <span className="flex-1 text-[13px] font-medium text-blue-700 dark:text-blue-300">{total} cấu hình</span>
             <ChevronRight className="h-4 w-4 text-blue-600" />
           </button>
         </div>
@@ -108,8 +109,8 @@ export function Automations() {
       <div className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ink md:text-3xl">{head?.title ?? "Tất cả luồng vận hành"}{scoped && <span className="text-blue-600"> · {pfLabel(pf)}</span>}</h1>
-          <p className="mt-1 text-sm text-muted md:text-base">{head?.subtitle ?? "Đồng bộ dữ liệu, dừng theo điều kiện, điều chỉnh chi tiêu, khởi chạy theo lịch — qua trần an toàn, whitelist và nhật ký."}</p>
+          <h1 className="text-[26px] font-bold leading-tight tracking-tight text-ink">{head?.title ?? "Tất cả luồng vận hành"}{scoped && <span className="text-blue-600"> · {pfLabel(pf)}</span>}</h1>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted">{head?.subtitle ?? "Đồng bộ dữ liệu, dừng theo điều kiện, điều chỉnh chi tiêu, khởi chạy theo lịch — qua trần an toàn, whitelist và nhật ký."}</p>
         </div>
         {!notReady && <Button variant="primary" icon={Plus} className="h-12 px-6 text-base" onClick={() => setEdit({ type, name: "", config: null, platform: scoped ? pf : null })}>Tạo luồng mới</Button>}
       </div>

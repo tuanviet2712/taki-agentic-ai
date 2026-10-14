@@ -124,7 +124,8 @@ export function removeVault(bizId: string, id: string, actor: string) {
 export function openVaultFolder(bizId: string, id: string, rel = "") {
   const v = vaultOf(bizId, id);
   const target = rel ? safePath(v, rel) : v.path;
-  const p = spawn(process.platform === "darwin" ? "open" : "xdg-open", [existsSync(target) && statSync(target).isFile() ? dirname(target) : target], { detached: true, stdio: "ignore" });
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
+  const p = spawn(opener, [existsSync(target) && statSync(target).isFile() ? dirname(target) : target], { detached: true, stdio: "ignore" });
   p.on("error", () => {});
   p.unref();
 }
@@ -204,8 +205,9 @@ function migrateLayout(v: Row) {
 export function safePath(v: Row, rel: string) {
   const clean = String(rel ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
   if (!clean || clean.split("/").some((s) => s === ".." || s === "")) throw new AppError("BAD_PATH", "Đường dẫn không hợp lệ");
-  const abs = resolve(v.path, clean);
-  if (abs !== v.path && !abs.startsWith(v.path + sep)) throw new AppError("BAD_PATH", "Đường dẫn nằm ngoài bộ não");
+  const root = resolve(v.path); // normalised: a vault typed as "D:/Notes" must compare equal to "D:\Notes\…" on Windows
+  const abs = resolve(root, clean);
+  if (abs !== root && !abs.startsWith(root + sep)) throw new AppError("BAD_PATH", "Đường dẫn nằm ngoài bộ não");
   return abs;
 }
 const relOf = (v: Row, abs: string) => relative(v.path, abs).split(sep).join("/");

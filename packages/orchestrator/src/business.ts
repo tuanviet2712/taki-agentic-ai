@@ -15,6 +15,8 @@ import { ensureAssistantAgent } from "./assistant.ts";
 const isArchived = (b: Row) => Boolean(b.settings?.archived);
 
 /** Bộ lịch nền của 1 doanh nghiệp (giống bản cài mới). Chỉ thêm lịch còn thiếu, không bật lại lịch Sếp đã tắt. */
+/** Nhịp quét khách đang chờ: 15 giây (đơn vị phút; lịch cho phép số lẻ). */
+export const FAST_MIN = 0.25;
 const SCHEDULES: [name: string, queue: string, every: number, label: string][] = [
   ["metrics.sync.ads", "ads", 15, "Đồng bộ chỉ số ads (15 phút)"],
   ["rules.evaluate", "ads", 5, "Chạy rule/cấu hình quảng cáo (5 phút)"],
@@ -28,10 +30,15 @@ const SCHEDULES: [name: string, queue: string, every: number, label: string][] =
   ["automations.tick", "ads", 5, "Chạy cấu hình tự động (5 phút)"],
   ["zalo.sync", "chat", 2, "Đồng bộ hội thoại Zalo từ ZL-CRM (2 phút)"],
   ["research.tick", "agent", 10, "Trinh sát nội dung: cập nhật nguồn quan sát theo lịch"],
-  ["nurture.poll", "chat", 5, "Chăm khách: quét bình luận mới trên Fanpage (5 phút)"],
-  ["nurture.tick", "chat", 5, "Chăm khách: trả lời, nhắc SĐT, kết bạn Zalo (5 phút)"],
-  ["messenger.sync", "chat", 3, "Đồng bộ hội thoại Messenger của Fanpage thật (3 phút)"],
+  // Khách đang chờ trả lời: quét mỗi 15 giây (số phút lẻ). Bình luận: 1 lệnh Graph gộp/Trang cho 10 bài gần nhất, đủ bài 14 ngày 5 phút/lần — xem nurture.pollBizComments.
+  ["nurture.poll", "chat", FAST_MIN, "Chăm khách: quét bình luận mới trên Fanpage (15 giây)"],
+  ["nurture.tick", "chat", FAST_MIN, "Chăm khách: trả lời, nhắc SĐT, kết bạn Zalo (15 giây)"],
+  ["messenger.sync", "chat", FAST_MIN, "Đồng bộ hội thoại Messenger của Fanpage thật (15 giây)"],
+  // Vòng lặp Thấu hiểu khách (kịch bản chốt đơn): bỏ qua nếu doanh nghiệp chưa có kịch bản nào.
+  ["chat.insight", "agent", 7 * 24 * 60, "Vòng lặp Thấu hiểu khách: học từ hội thoại → đề xuất sửa kịch bản chốt đơn (hằng tuần)"],
   ["autopilot.tick", "agent", 15, "Lái tự động: giữ đủ nội dung cho các ngày tới (15 phút)"],
+  // Đơn đã đẩy sang Pancake: kéo trạng thái (đã nhận / đã huỷ…) về để báo cáo doanh thu đúng; không gọi mạng nếu chưa có đơn nào.
+  ["orders.pancake_sync", "agent", 30, "Cập nhật trạng thái đơn đã đẩy sang Pancake (30 phút)"],
 ];
 export function ensureBizSchedules(bizId: string): string[] {
   const added: string[] = [];
@@ -42,6 +49,12 @@ export function ensureBizSchedules(bizId: string): string[] {
   }
   q.run("UPDATE schedule SET label = 'Trinh sát nội dung: cập nhật nguồn quan sát theo lịch' WHERE biz_id = ? AND name = 'research.tick'", bizId);
   q.run("UPDATE schedule SET every_minutes = 5, label = 'Chạy rule/cấu hình quảng cáo (5 phút)' WHERE biz_id = ? AND name = 'rules.evaluate' AND every_minutes > 5", bizId);
+  // Khách đang chờ trả lời: bản cũ quét 1–5 phút/lần → khách chờ quá lâu: nâng lên 15 giây (chỉ lịch còn chậm hơn; không đụng việc bật/tắt).
+  for (const [name, label] of [
+    ["messenger.sync", "Đồng bộ hội thoại Messenger của Fanpage thật (15 giây)"],
+    ["nurture.poll", "Chăm khách: quét bình luận mới trên Fanpage (15 giây)"],
+    ["nurture.tick", "Chăm khách: trả lời, nhắc SĐT, kết bạn Zalo (15 giây)"],
+  ]) q.run("UPDATE schedule SET every_minutes = ?, label = ? WHERE biz_id = ? AND name = ? AND every_minutes > ?", FAST_MIN, label, bizId, name, FAST_MIN);
   ensureAutomations(bizId);
   return added;
 }
@@ -73,7 +86,7 @@ export function archivedBusinesses(): Row[] {
 export function createBusiness(name: string, actor: string, fromBizId?: string): Row {
   const from = fromBizId ? byId<Row>("biz", fromBizId) : undefined;
   const biz = tx(() => {
-    const b = insert("biz", { name: name.trim(), timezone: from?.timezone ?? "Asia/Ho_Chi_Minh", currency: from?.currency ?? "VND", settings: { ...DEFAULT_SETTINGS, llm: from?.settings?.llm ?? DEFAULT_LLM } });
+    const b = insert("biz", { name: name.trim(), timezone: from?.timezone ?? "Asia/Ho_Chi_Minh", currency: from?.currency ?? "VND", settings: { ...DEFAULT_SETTINGS, llm: { ...(from?.settings?.llm ?? DEFAULT_LLM), codexAccountId: null } } });
     insert("dna_profile", { biz_id: b.id, version: 1, status: "active", data: blankDna(), created_by: "doanh nghiệp mới (DNA trống)" });
     for (const c of CATALOG) {
       insert("agent_config", { biz_id: b.id, agent_key: c.key, autonomy: c.autonomy, enabled: 1, tools: c.tools, token_budget_run: 200_000, token_budget_day: c.tokenBudgetDay, limits: {} });

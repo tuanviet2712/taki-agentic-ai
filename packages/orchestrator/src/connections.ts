@@ -1,6 +1,7 @@
 import { audit, byId, defaultBizId, emit, insert, q, tx, update, type Row } from "@dotaka/db";
 import { ConnectorError, configureTelegram, connector, live, platformDef, platformForChannel, type AdRef, type Connector, type PlatformKey } from "@dotaka/connectors";
 import { AppError, decryptSecret, encryptSecret, logger, nowIso } from "@dotaka/shared";
+import { tiktokAccessToken } from "./oauth.ts";
 
 /**
  * Connections hub: add/test/disconnect platform accounts, discover their assets
@@ -33,7 +34,9 @@ export function publicConnection(c: Row) {
 type Discovered = {
   accountId: string; name: string;
   adAccounts?: { externalId: string; name: string; currency: string; active: boolean; meta?: Record<string, unknown> }[];
-  pages?: { externalId: string; name: string; token?: string; category?: string | null }[];
+  pages?: { externalId: string; name: string; token?: string; category?: string | null; username?: string }[];
+  /** Kênh phát sinh từ kết nối: tài khoản Instagram Business (token của Trang gắn kèm) / kênh TikTok. */
+  channels?: { platform: string; kind: string; externalId: string; name: string; token?: string; pageId?: string; username?: string }[];
   config?: Record<string, unknown>;
 };
 
@@ -48,8 +51,14 @@ async function discover(platform: string, mode: "live" | "sandbox", cr: Record<s
   switch (platform) {
     case "meta": {
       const me = await live.metaTest(cr as any);
-      const d = await live.metaDiscover(cr as any);
-      return { ...me, ...d };
+      // Token đăng nhập bằng nút (user token): có thể thiếu quyền quảng cáo — không để việc đó làm hỏng kết nối.
+      const d = await live.metaDiscover(cr as any, { tolerant: cfg.oauth === "facebook" });
+      const { instagram, ...rest } = d;
+      return { ...me, ...rest, channels: instagram.map((i) => ({ platform: "instagram", kind: "business", externalId: i.externalId, name: i.name, token: i.token, pageId: i.pageId, username: i.username })) };
+    }
+    case "tiktok_post": {
+      const u = await live.tiktokPostTest(cr as any);
+      return { accountId: u.openId, name: u.name, channels: [{ platform: "tiktok", kind: "business", externalId: u.openId, name: u.name }] };
     }
     case "tiktok": {
       const ids = (cfg.advertiser_ids ?? cr.advertiser_ids ?? "").split(/[,\s]+/).filter(Boolean);
@@ -79,6 +88,12 @@ async function discover(platform: string, mode: "live" | "sandbox", cr: Record<s
         config: { accounts: accounts.map((a) => ({ id: a.id, name: a.displayName, status: a.status })), hasAccountField: probe.length ? "zaloAccountId" in probe[0] : null },
       };
     }
+    case "wordpress": {
+      const r = await live.wordpressTest({ ...cfg, ...cr } as any);
+      // Kênh "website" của doanh nghiệp: mã kênh = địa chỉ website (nhận kênh website thêm tay sẵn có, nếu chỉ có 1).
+      return { accountId: r.siteUrl, name: `${r.siteName} (WordPress)`, config: { site_url: r.siteUrl, rest_mode: r.restMode, user: r.user },
+        channels: [{ platform: "website", kind: "blog", externalId: r.siteUrl, name: r.siteName }] };
+    }
     case "nhanh": {
       const r = await live.nhanhTest({ ...cfg, ...cr } as any);
       return { accountId: r.accountId, name: r.name, config: { totalOrders: r.totalOrders } };
@@ -93,19 +108,68 @@ function friendly(e: unknown) {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Upsert discovered ad accounts / pages under this connection. */
+const handleOfUrl = (u: unknown) => {
+  try { return decodeURIComponent(new URL(String(u)).pathname.split("/").filter(Boolean)[0] ?? "").replace(/^@/, "").toLowerCase(); } catch { return ""; }
+};
+/** Kênh thêm tay (chưa có kết nối) cùng tài khoản → được "nhận" thay vì tạo kênh trùng. Kênh đã gỡ không được nhận. */
+function adoptable(bizId: string, platform: string, match: (ch: Row) => boolean): Row | undefined {
+  return q.all<Row>("SELECT * FROM channel WHERE biz_id = ? AND platform = ? AND connection_id IS NULL AND json_extract(meta, '$.removedAt') IS NULL ORDER BY created_at", bizId, platform).find(match);
+}
+const handles = (ch: Row) => [String(ch.external_id ?? "").replace(/^@/, "").toLowerCase(), handleOfUrl(ch.meta?.profileUrl), handleOfUrl(ch.meta?.browser?.profileUrl)].filter(Boolean);
+
+/** Upsert discovered ad accounts / pages / Instagram / TikTok channels under this connection. */
 function saveAssets(bizId: string, conn: Row, d: Discovered) {
   const platform = conn.platform as string;
+  // Kết nối bằng nút đăng nhập (token người dùng) KHÔNG giành lại tài khoản quảng cáo đang chạy bằng kết nối khác (token System User).
+  const loginConn = Boolean(conn.config?.oauth);
   for (const a of d.adAccounts ?? []) {
-    const ex = q.get<Row>("SELECT id FROM ad_account WHERE biz_id = ? AND platform = ? AND external_id = ?", bizId, platform, a.externalId);
-    if (ex) update("ad_account", ex.id, { name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled", ...(a.meta ? { meta: a.meta } : {}) });
-    else insert("ad_account", { biz_id: bizId, platform, external_id: a.externalId, name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled", whitelisted: 1, meta: a.meta ?? {} });
+    const ex = q.get<Row>("SELECT id, connection_id FROM ad_account WHERE biz_id = ? AND platform = ? AND external_id = ?", bizId, platform, a.externalId);
+    if (ex) {
+      const other = ex.connection_id && ex.connection_id !== conn.id ? byId<Row>("connection", ex.connection_id) : undefined;
+      const keep = loginConn && other && other.mode === "live" && other.status !== "revoked";
+      update("ad_account", ex.id, keep ? { name: a.name, currency: a.currency } : { name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled", ...(a.meta ? { meta: a.meta } : {}) });
+    } else insert("ad_account", { biz_id: bizId, platform, external_id: a.externalId, name: a.name, currency: a.currency, connection_id: conn.id, status: a.active ? "active" : "disabled", whitelisted: 1, meta: a.meta ?? {} });
   }
   for (const p of d.pages ?? []) {
-    const ex = q.get<Row>("SELECT id FROM channel WHERE biz_id = ? AND platform = 'facebook' AND external_id = ?", bizId, p.externalId);
+    let ex = q.get<Row>("SELECT id, meta FROM channel WHERE biz_id = ? AND platform = 'facebook' AND external_id = ?", bizId, p.externalId);
+    let adopted = false;
+    if (!ex) {
+      // Kênh thêm tay bằng link Trang (mã kênh = đoạn đầu của link, vd "takiacademy") → nhận kênh đó khi trùng tên đường dẫn / mã Trang.
+      const uname = p.username?.toLowerCase();
+      ex = adoptable(bizId, "facebook", (ch) => handles(ch).some((h) => h === uname || h === p.externalId) || String(ch.meta?.profileUrl ?? "").includes(`id=${p.externalId}`));
+      adopted = Boolean(ex);
+    }
     const secret = p.token ? encryptSecret(p.token) : null;
-    if (ex) update("channel", ex.id, { name: p.name, connection_id: conn.id, ...(secret ? { secret_ciphertext: secret } : {}), meta: { category: p.category ?? null } });
-    else insert("channel", { biz_id: bizId, platform: "facebook", kind: "page", name: p.name, external_id: p.externalId, connection_id: conn.id, enabled: 1, whitelisted: 1, secret_ciphertext: secret, meta: { category: p.category ?? null } });
+    // Giữ meta cũ (kênh đăng chính, cách đăng, trạng thái đăng nhập Chrome…) — kiểm tra lại kết nối không được xoá chúng.
+    if (ex) {
+      update("channel", ex.id, {
+        name: p.name, connection_id: conn.id, ...(secret ? { secret_ciphertext: secret } : {}), ...(adopted ? { external_id: p.externalId } : {}),
+        // Kênh thêm tay vừa được nối API: bỏ "Luôn qua Chrome" (Sếp vừa nối API cho chính kênh này); Chrome vẫn là đường dự phòng.
+        meta: { ...(ex.meta ?? {}), category: p.category ?? null, ...(adopted ? { publishVia: "auto" } : {}) },
+      });
+      if (adopted) audit(bizId, "connections", "channel.adopted", { type: "channel", id: ex.id }, { platform: "facebook", externalId: p.externalId, name: p.name });
+    } else insert("channel", { biz_id: bizId, platform: "facebook", kind: "page", name: p.name, external_id: p.externalId, connection_id: conn.id, enabled: 1, whitelisted: 1, secret_ciphertext: secret, meta: { category: p.category ?? null } });
+  }
+  for (const ch of d.channels ?? []) {
+    const secret = ch.token ? encryptSecret(ch.token) : null;
+    let ex = q.get<Row>("SELECT * FROM channel WHERE biz_id = ? AND platform = ? AND external_id = ?", bizId, ch.platform, ch.externalId);
+    let adopted = false;
+    if (!ex) {
+      const uname = ch.username?.replace(/^@/, "").toLowerCase();
+      if (ch.platform === "instagram") ex = adoptable(bizId, "instagram", (c) => Boolean(uname) && handles(c).includes(uname!));
+      else {
+        // TikTok: chỉ nhận khi có đúng 1 kênh thêm tay (không đoán giữa nhiều kênh).
+        const cand = q.all<Row>("SELECT * FROM channel WHERE biz_id = ? AND platform = ? AND connection_id IS NULL AND json_extract(meta, '$.removedAt') IS NULL", bizId, ch.platform);
+        if (cand.length === 1) ex = cand[0];
+      }
+      adopted = Boolean(ex);
+    }
+    const meta = { ...(ex?.meta ?? {}), ...(ch.pageId ? { pageId: ch.pageId } : {}), ...(ch.username ? { username: ch.username } : {}), ...(adopted ? { publishVia: "auto" } : {}) };
+    const patch = { name: ch.name, external_id: ch.externalId, connection_id: conn.id, ...(secret ? { secret_ciphertext: secret } : {}), meta };
+    if (ex) {
+      update("channel", ex.id, patch);
+      if (adopted) audit(bizId, "connections", "channel.adopted", { type: "channel", id: ex.id }, { platform: ch.platform, externalId: ch.externalId, name: ch.name });
+    } else insert("channel", { biz_id: bizId, platform: ch.platform, kind: ch.kind, enabled: 1, whitelisted: 1, ...patch });
   }
 }
 
@@ -135,14 +199,16 @@ export async function createConnection(bizId: string, input: NewConnection, acto
   };
   const conn = existing ? (update("connection", existing.id, data), byId<Row>("connection", existing.id)!) : insert("connection", { biz_id: bizId, platform: input.platform, external_account_id: d.accountId, ...data });
   saveAssets(bizId, conn, d);
-  audit(bizId, actor, existing ? "connection.updated" : "connection.created", { type: "connection", id: conn.id }, { platform: input.platform, mode: input.mode, adAccounts: d.adAccounts?.length ?? 0, pages: d.pages?.length ?? 0 });
+  audit(bizId, actor, existing ? "connection.updated" : "connection.created", { type: "connection", id: conn.id }, { platform: input.platform, mode: input.mode, adAccounts: d.adAccounts?.length ?? 0, pages: d.pages?.length ?? 0, channels: d.channels?.length ?? 0 });
   emit(bizId, "alert.raised", { level: "info", text: `Đã kết nối ${def.name}: ${data.display_name}` });
   return publicConnection(byId<Row>("connection", conn.id)!);
 }
 
 export async function testConnection(bizId: string, id: string, actor: string) {
-  const c = mustConn(bizId, id);
+  let c = mustConn(bizId, id);
   try {
+    // TikTok: token sống 24 giờ — gia hạn bằng refresh token trước khi kiểm tra (không thì kiểm tra nào cũng báo "hết hạn").
+    if (c.platform === "tiktok_post" && c.mode === "live") { await tiktokAccessToken(c.id); c = mustConn(bizId, id); }
     const d = await discover(c.platform, c.mode, credsOf(c), c.config ?? {});
     if (c.mode === "live") saveAssets(bizId, c, d);
     if (c.platform === "zlcrm" && d.config) update("connection", c.id, { config: { ...(c.config ?? {}), ...d.config } });
@@ -195,18 +261,60 @@ export function connectorForConnection(conn: Row | undefined | null, platform: P
   return c;
 }
 /**
- * Publisher for a channel: the live Facebook Page connector when the channel came from a LIVE Meta connection and
- * has its page token; otherwise the platform sandbox (mode "sandbox" — publishing refuses it, see publishing.ts).
+ * Meta: the connector to CREATE ads with. Its token must reach both the ad account and the Page of the post — a personal
+ * token that only sees the ad account fails at the creative step (100/3858759, shown by Facebook as 100/1487390 when the
+ * message button is attached). Several live connections can see the same ad account and whichever refreshed last owns
+ * it, so try: the account's own connection → the Page's connection → any other live Meta connection of the business.
+ * Falls back to the account's connection (old behaviour) when none can reach both. Checks are read-only and cached.
+ */
+const accessCache = new Map<string, { ok: boolean; at: number }>();
+export async function connectorForAdPublish(accountId: string, pageExternalId: string | null | undefined, platform: PlatformKey): Promise<{ c: Connector; conn?: Row; switched: boolean }> {
+  const base = connectorForAccount(accountId, platform);
+  if (platform !== "meta" || !pageExternalId || !base.acc) return { c: base.c, conn: base.conn, switched: false };
+  const acc = base.acc;
+  const act = String(acc.external_id).startsWith("act_") ? String(acc.external_id) : `act_${acc.external_id}`;
+  const page = q.get<Row>("SELECT connection_id FROM channel WHERE biz_id = ? AND platform = 'facebook' AND external_id = ?", acc.biz_id, pageExternalId);
+  const ids = [base.conn?.id, page?.connection_id, ...q.all<Row>("SELECT id FROM connection WHERE biz_id = ? AND platform = 'meta' ORDER BY updated_at DESC", acc.biz_id).map((r) => r.id)]
+    .filter((id, i, all): id is string => !!id && all.indexOf(id) === i);
+  for (const id of ids) {
+    const conn = byId<Row>("connection", id);
+    if (!conn || conn.mode !== "live" || conn.status === "revoked") continue;
+    const token = credsOf(conn).access_token;
+    if (!token) continue;
+    const key = `${conn.id}:${conn.updated_at}:${act}:${pageExternalId}`;
+    let hit = accessCache.get(key);
+    if (!hit || Date.now() - hit.at > 10 * 60_000) { hit = { ok: await live.metaCanAccess(token, [act, pageExternalId]), at: Date.now() }; accessCache.set(key, hit); }
+    if (hit.ok) {
+      if (conn.id !== base.conn?.id) logger.info("ads.publish_token_switched", { account: acc.name, from: base.conn?.display_name ?? base.conn?.id, to: conn.display_name ?? conn.id, page: pageExternalId });
+      return { c: connectorForConnection(conn, platform), conn, switched: conn.id !== base.conn?.id };
+    }
+  }
+  return { c: base.c, conn: base.conn, switched: false };
+}
+
+/**
+ * Publisher for a channel: the live Page connector (Facebook) / Instagram Business connector (with the Page token) / TikTok
+ * Content Posting connector (token of the LIVE `tiktok_post` connection, auto-refreshed) when the channel came from a LIVE
+ * connection; otherwise the platform sandbox (mode "sandbox" — publishing refuses it, see publishing.ts).
  */
 export function connectorForChannel(channel: Row): Connector {
   const conn = channel.connection_id ? byId<Row>("connection", channel.connection_id) : undefined;
-  if (conn?.mode === "live" && conn.status !== "revoked" && channel.platform === "facebook" && channel.secret_ciphertext) {
+  const liveConn = conn?.mode === "live" && conn.status !== "revoked" ? conn : undefined;
+  if (liveConn && (channel.platform === "facebook" || channel.platform === "instagram") && channel.secret_ciphertext) {
     try {
       const pageToken = decryptSecret(channel.secret_ciphertext);
-      if (pageToken && pageToken !== "{}") return live.metaPageConnector(pageToken, channel.external_id);
+      if (pageToken && pageToken !== "{}") return channel.platform === "instagram" ? live.instagramConnector(pageToken, channel.external_id) : live.metaPageConnector(pageToken, channel.external_id);
     } catch (e) {
       logger.warn("page_connector.decrypt_failed", { channel: channel.id, error: String(e) });
     }
+  }
+  if (liveConn && channel.platform === "tiktok" && liveConn.platform === "tiktok_post") {
+    const connId = liveConn.id as string;
+    const audited = ["1", "true"].includes(String(liveConn.config?.audited ?? ""));
+    return live.tiktokPostConnector(() => tiktokAccessToken(connId), { audited }); // tự gia hạn token 24h bằng refresh token
+  }
+  if (liveConn && channel.platform === "website" && liveConn.platform === "wordpress") {
+    return live.wordpressConnector({ ...(liveConn.config ?? {}), ...credsOf(liveConn) } as any);
   }
   return connector(platformForChannel(channel.platform));
 }

@@ -1,6 +1,6 @@
 # TAKI Agentic AI
 
-Hệ thống AI Agent vận hành marketing & bán hàng cho **TAKI Group / TAKI Academy** theo **Đặc tả kỹ thuật tổng hợp Agentic AI & ads-chat-orchestrator**. Agent chạy bằng **tài khoản Claude (Claude Code CLI)**, theo **DNA TAKI + skill của Phòng Marketing**, với **Jev (TypeSafe System One)** làm lớp phán đoán nhanh.
+Hệ thống AI Agent vận hành marketing & bán hàng cho **TAKI Group / TAKI Academy** theo **Đặc tả kỹ thuật tổng hợp Agentic AI & ads-chat-orchestrator**. Agent dùng **tài khoản Claude (Claude Code CLI)** hoặc **hồ sơ tài khoản ChatGPT (Codex CLI)** do người dùng chọn, theo **DNA TAKI + skill của Phòng Marketing**, với **Jev (TypeSafe System One)** làm lớp phán đoán nhanh.
 
 > Tên thư mục/gói (`dotaka-agentic`, `@dotaka/*`) là tên kỹ thuật từ bản đầu, không ảnh hưởng thương hiệu hiển thị.
 
@@ -50,18 +50,71 @@ Không nằm trong repo (sinh riêng cho từng máy, không bao giờ đẩy l�
 | `pnpm mcp` | MCP Server cho Claude Desktop (cần `MCP_KEY`) |
 | `pnpm start` | Build giao diện và chạy một cổng duy nhất 8787 |
 
+## Kết nối ChatGPT qua Codex CLI · nhiều hồ sơ tài khoản
+
+Hệ thống hỗ trợ thêm `codex_cli` bên cạnh `claude_cli` và `sandbox`. Ngân Nguyệt, chat khách (kể cả xem ảnh), agent nội dung/SEO/kịch bản, nghiên cứu/chiến lược qua LLM Gateway dùng kết nối AI đã chọn. Điều khiển Chrome/Flow và Claude in Chrome tiếp tục dùng luồng Claude hiện có.
+
+1. Cài **Codex CLI >= 0.148.0** trên máy chạy hệ thống: `npm install -g @openai/codex`.
+2. Mở **Trung tâm tích hợp → AI** (`/ads/integrations?p=ai`) hoặc **Cài đặt → Model AI**.
+3. **Thêm hồ sơ**, đặt tên theo người dùng hoặc tài khoản công ty. Bấm **Đăng nhập ChatGPT** và tự chọn tài khoản trong trang OpenAI. Khi cần có thể dùng **Đăng nhập bằng mã** (tài khoản/workspace phải cho phép device login).
+4. Hoàn tất đăng nhập, bấm **Dùng hồ sơ này**, sau đó **Thử** model. Thêm nhiều hồ sơ để chuyển tài khoản; mỗi doanh nghiệp lưu lựa chọn riêng. Có thể ngắt kết nối, đăng nhập lại bằng tài khoản khác hoặc xóa hồ sơ.
+
+`default` dùng model mặc định của CLI theo quyền tài khoản; có thể nhập ID model GPT được hỗ trợ. Chuyển Claude ↔ ChatGPT giữ riêng cấu hình model theo nhà cung cấp. Model Claude cũ ở từng agent không được gửi nhầm sang Codex.
+
+Không tự dùng tài khoản `~/.codex` của máy và không sao chép token giữa hồ sơ. Mỗi hồ sơ có `CODEX_HOME` riêng dưới `data/ai-accounts/`, nằm trong `.gitignore`; token do CLI quản lý, không trả qua API và không ghi trong audit. `CODEX_CLI_PATH` tùy chọn trỏ tới binary hoặc launcher `.js`; Windows tự tìm launcher npm để không cần mở terminal. Tác vụ giữ hồ sơ tại thời điểm bắt đầu; không tự chuyển tài khoản khi lỗi/hết hạn mức. Đăng nhập lại/ngắt kết nối bị chặn khi hồ sơ còn tác vụ.
+
+Các lượt gọi tính vào hạn mức Codex của tài khoản ChatGPT. Kiểm tra phiên xác nhận trạng thái CLI; **Thử model** mới xác nhận tài khoản thực sự gọi AI được. Số token do CLI cung cấp được lưu, chi phí tiền của gói ChatGPT không được CLI báo nên không suy ra giá tiền từ token.
+
+Luồng xác thực và tự động hóa dựa trên [tài liệu đăng nhập OpenAI](https://learn.chatgpt.com/docs/auth) và [Codex chạy không tương tác](https://learn.chatgpt.com/docs/non-interactive-mode). Bản localhost hiện vận hành theo một chủ máy; hồ sơ doanh nghiệp là lựa chọn vận hành, không thay cho đăng nhập/phân quyền người dùng của một bản triển khai nhiều người dùng trên Internet.
+
+## Cài trên Windows 11
+
+Chạy được đủ chức năng (agent Claude, Ngân Nguyệt, ZL-CRM, video AI, hậu kỳ video, Chrome Flow). Khác macOS/Linux:
+
+- **Claude CLI**: Node không gọi được shim `claude.cmd`, nên đặt trong `.env` đường dẫn thẳng tới file chạy:
+  `CLAUDE_CLI_PATH=C:/Users/<tên>/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe`.
+- **Prompt dài** (DNA + skill) và cấu hình MCP được đưa cho CLI qua **file** (`--system-prompt-file`, `--mcp-config <file>`), vì dòng lệnh Windows giới hạn ~32 KB.
+- **ZL-CRM** dùng PostgreSQL **riêng** ở cổng **5433** (`services/zl-crm/data/pgdata`, tạo bằng binary PostgreSQL đã cài) — không đụng PostgreSQL hệ thống ở 5432. `pnpm dev` tự bật; dừng: `node scripts/zlcrm-pg.mjs stop`.
+- **Video AI** (`pnpm video-ai:install`) chạy bằng **CPU** (không có GPU Apple): LivePortrait chậm, vài phút cho mỗi giây clip. `albucore` được ghim `0.0.13` để không cần trình biên dịch C++.
+- **Chrome Flow**: copy đăng nhập Google từ profile Chrome thường có thể không được (Chrome mã hóa cookie theo máy/ứng dụng) — khi đó cửa sổ Chrome Flow mở trang đăng nhập, đăng nhập 1 lần.
+- Lệnh agent (`taki-video-finish`, `unzip`…) là script `sh` trong `data/bin`, chạy qua **Git Bash** (cần cài Git for Windows). PowerShell bị chặn để agent luôn dùng Bash.
+- Chạy nhanh: bấm đôi `start-taki.cmd`.
+
 ## Chế độ chạy — điền `.env` để bật dần
+
+### Chọn Chrome Flow hoặc Claude in Chrome
+
+Trang **Sản xuất video** và **Kênh đăng** có mục **Cơ chế trình duyệt**:
+
+- **Chrome Flow** là mặc định: cửa sổ Chrome riêng + Playwright như trước.
+- **Claude in Chrome**: bấm **Dùng Claude in Chrome**, đọc phần xác nhận, chọn profile **Google Chrome có tiện ích Claude**, mở profile, rồi bấm **Ghép Chrome đã chọn**. Nếu CLI yêu cầu thao tác trực tiếp, mở Claude Code → `/chrome` → chọn đúng trình duyệt, sau đó kiểm tra kết nối lại trên giao diện.
+- Ở **Kênh đăng**, bấm **Kiểm tra đăng nhập** lại sau khi đổi cơ chế. Kết quả kiểm tra của cơ chế cũ không cho phép đăng ở cơ chế mới. Các tác vụ nghiên cứu vẫn dùng Chrome Flow.
+- Quyền Chrome được xét bởi `chrome-approver.mjs` theo công cụ, địa chỉ, thiết bị và tệp được phép. Nhật ký nằm trong thư mục tác vụ (`approver.jsonl`). Không mở quyền đọc toàn bộ thư mục Downloads; clip tải về được chép vào thư mục video trước khi xử lý.
+- Dừng quyền Chrome tự động bằng `ALLOW_CHROME_AUTOAPPROVE=0` khi khởi động, hoặc tạo tệp `data/chrome-autoapprove.off` để chặn cả các lượt đang chạy. Xóa tệp này để cho phép lại. Chrome Flow không dùng bộ duyệt đó.
+- **Đổi tài khoản Claude**: tiện ích Claude trong profile Chrome phải đăng nhập đúng tài khoản Claude mà Claude Code trên máy đang dùng; nếu không, Claude Code không thấy Chrome đó. Hệ thống sẽ báo rõ (kèm các bước: mở profile → biểu tượng Claude → Đăng xuất → Đăng nhập tài khoản mới → Connect → Kiểm tra kết nối → Ghép Chrome đã chọn) và không tự sửa `~/.claude.json` hay dữ liệu Chrome.
+- Biến tùy chọn: `TAKI_DOWNLOADS_DIR` (thư mục Tải xuống nếu không phải mặc định), `ALLOW_REMOTE_BROWSER=1` (không khuyến nghị: bỏ kiểm tra Chrome ở máy khác).
+- Mỗi tác vụ video có mục **Nhật ký quyền Chrome** (cho phép/từ chối từng lượt).
+
+Bản ghi tiếp quản và kết quả kiểm tra: [HANDOFF.md](HANDOFF.md).
 
 Sao chép `.env.example` → `.env`.
 
 | Thành phần | Không có key | Có key |
 |---|---|---|
 | **Jev** (`TYPESAFE_API_KEY`) | heuristic cùng định dạng câu trả lời, gắn nhãn "Jev·heuristic" | Jev thật (`jev-latest`) |
-| **Claude** | **Mọi AI agent** (kể cả trợ lý Ngân Nguyệt, Creative Agent video Flow) chạy qua **Claude Code CLI** bằng tài khoản Claude đã đăng nhập (lệnh `claude`) — không dùng API key Anthropic, hệ thống không có đường gọi Claude API. Chỉ Jev dùng API riêng của TypeSafe. Có chế độ sandbox (không gọi AI) để thử quy trình | Chọn model theo tầng (mặc định nhỏ `claude-haiku-4-5`, vừa `claude-sonnet-5`, lớn `claude-opus-5`) và riêng từng agent |
+| **Claude / ChatGPT** | Agent nội dung, chat và Ngân Nguyệt dùng Claude CLI hoặc hồ sơ ChatGPT/Codex CLI đã chọn; Chrome/Flow dùng Claude CLI. Không dùng API key nhà cung cấp. Có chế độ sandbox để thử quy trình | Chọn model theo tầng và riêng từng agent; ChatGPT mặc định theo model khả dụng của CLI/tài khoản |
 | **Meta / TikTok / Google Ads / Pancake / Zalo** | connector sandbox (số liệu mô phỏng) | cần làm connector thật + duyệt ứng dụng từng nền tảng |
 | **Telegram** (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) | ghi log | gửi cảnh báo/báo cáo sáng thật |
 
-Trong sandbox, thời gian được nén: 1 giờ trên nền tảng ≈ 1 phút thật (`TIME_SCALE_SECONDS`).
+### Instagram · TikTok · đăng nhập bằng nút · link dưới bình luận
+
+- **Facebook Login** (Kênh đăng → Cách 1): đặt `FACEBOOK_APP_ID/SECRET` trong `.env` (hoặc nhập ở trang Kênh đăng, được mã hoá), dán Redirect URI `http://localhost:8787/v1/oauth/facebook/callback` vào app (chế độ Development, Sếp là Quản trị viên của app). **Không cần tunnel.** Fanpage + tài khoản Instagram Business gắn kèm tự hiện thành kênh. Quyền quảng cáo là tuỳ chọn (mặc định tắt). Cần `TOKEN_ENCRYPTION_KEY` thật (64 hex) — chưa có thì hệ thống KHÔNG lưu token đăng nhập / App Secret; đặt khoá rồi khởi động lại, các kết nối cũ tự được chuyển sang khoá mới.
+- **Instagram** đăng ảnh / Reels qua API; Instagram chỉ nhận link media công khai nên cần **cổng công khai** (bên dưới). Chưa có thì đăng qua Chrome như trước. Instagram không có bản nháp qua API.
+- **TikTok** (Kênh đăng → Kết nối TikTok): bản nháp video vào hộp thư TikTok qua API (app chưa duyệt vẫn dùng được); **đăng công khai** qua API chỉ khi Sếp bật "App đã được TikTok duyệt" ở thẻ kênh (chưa duyệt thì dùng Chrome — hệ thống không đăng riêng tư âm thầm). Redirect URI của TikTok phải https → cần cổng công khai, chỉ một lần lúc kết nối.
+- **Cổng công khai** (mặc định TẮT): đặt `PUBLIC_PORT=8788` rồi chạy tunnel CHỈ về cổng đó (`cloudflared tunnel --url http://localhost:8788`), `PUBLIC_BASE_URL=https://…`. Cổng này chỉ phục vụ `/r/<mã>` (đo click), `/m/<token>` (media đã duyệt, ký sẵn, hết hạn 3 giờ), callback OAuth và `/healthz`. **Không bao giờ trỏ tunnel về cổng chính 8787** — API chính không có đăng nhập (lớp chặn Host lạ trả 421; `ALLOWED_HOSTS` để thêm tên miền riêng).
+- **Link dưới bình luận**: sản phẩm và link lấy ở Mục tiêu & DNA → Sản phẩm (`Link sản phẩm`, tuỳ chọn `Link gắn dưới bình luận` + `Câu bình luận`). Chọn "Sản phẩm của chiến dịch" ở trang Kế hoạch thì bài Facebook của chiến dịch tự gắn link sau 30–60 giây; gắn tay / gắn lại ở trang Đăng bài. Không có địa chỉ công khai ổn định → link sản phẩm + UTM (không có `/r/`; không dùng tunnel nhanh `*.trycloudflare.com` cho `/r/`).
+
+Thời gian đăng bài / đo số liệu là giờ thật (khung đăng 8h · 11h30 · 20h giờ VN). Chỉ khi chạy thử mới nén thời gian bằng `TIME_SCALE_SECONDS` (vd. 60 → 1 giờ nền tảng ≈ 1 phút).
 
 ## Skill Phòng Marketing trong hệ thống
 
@@ -79,6 +132,8 @@ Nguồn: `~/.claude/skills` (skill) và `~/.claude/agents/mkt-*.md` (nhân viên
 | mkt-kiem-duyet | Review (lớp chấm thứ 3) | content-scorer-social, ai-script-scorer, viral-content-scorer, humanizer, remove-ai-marks |
 | (bán hàng ABS) | Chat | abs-sales-agent, objection-handler-ai-sales, lead-qualifier-taki |
 | (chăm sóc lead) | Follow-up | follow-up-sequence-abs |
+
+Skill phụ gắn thêm (khai báo `extraSkills` trong `packages/skills`, bê từ kho skill TAKI): Content (`taki-landing-builder`, `prompt-card-carousel`), Video (`ecom-ai-video-creator`, `autovis-script`, `news-to-video`, `fape-video-script`, `hon-nhan-dao-ly-script`, `video-viral-dao-ly-trung-quoc`, `content-creator-dao-ly`, `facebook-viral-script-factory`, `nguoi-que-ai-prompt`, `kich-ban-card-ai`), Review (`cham-diem-noi-dung`), Chat (`telesales-ai-chu-doanh-nghiep`, `lead-hunter-qualifier`), Creative (các skill Flow + prompt Veo3 theo kênh + dựng/hậu kỳ video). Chạy "Đồng bộ lại" để nạp vào DB. Mỗi agent chỉ nhận skill trong giới hạn ngữ cảnh của nó — skill đứng sau cùng có thể bị rút gọn / bỏ qua (xem "Xem prompt").
 
 Mọi agent gọi Claude đều nhận lớp **DNA** (`taki-dna` + references, hồ sơ `phong-marketing`). Skill viết cho phiên tương tác nên hệ thống giữ phương pháp/tiêu chí, bỏ các bước hỏi lại, ghi file, gọi tool. Mỗi lần chạy ghi lại phiên bản skill đã dùng (`task_run.skills`).
 
@@ -104,6 +159,14 @@ Nút **Ngân Nguyệt** ở góc phải mọi trang mở khung chat điều hàn
 - **Việc giao**: những việc Ngân Nguyệt đã giao + trạng thái trực tiếp. **Phát hiện**: lỗi/kẹt/chờ duyệt cần chú ý, bấm "Nhờ Ngân Nguyệt xử lý". **Lịch sử**: các cuộc trò chuyện (mỗi cuộc giữ ngữ cảnh riêng).
 - Cách chạy: **Claude Code CLI** — mỗi tin nhắn là `claude -p` bằng tài khoản Claude đã đăng nhập (gói Pro/Max, không dùng API key Anthropic; biến ANTHROPIC_API_KEY bị gỡ khỏi môi trường), nối tiếp phiên của cuộc trò chuyện. Công cụ duy nhất là `packages/orchestrator/bin/taki-mcp.mjs` (MCP) gọi API nội bộ của hệ thống trên máy (localhost:8787), ký tên "Ngân Nguyệt" trong nhật ký.
 - An toàn: đọc + giao việc (vẫn qua Review/Duyệt) chạy ngay; thao tác nhạy cảm (duyệt đăng, trả lời khách, đổi quảng cáo, tốn tín dụng Flow, bật/tắt luồng/agent, kill switch, mọi lệnh ghi qua `goi_api`) thành **thẻ xác nhận** Sếp bấm — trừ khi Sếp bật "Tự thực hiện". Công cụ không tự xác nhận được thẻ, không đụng khóa MCP / model / thông tin kết nối.
+
+## Bài SEO luôn đi kèm ảnh
+
+Agent SEO → trang Nội dung / Duyệt: cứ 1000 chữ tối thiểu 4 ảnh (`ceil(chữ × 4 / 1000)`, tối thiểu 4, tối đa 16), tạo ngay sau vòng chấm điểm và chèn thẳng vào thân bài (`![alt](/v1/media/<id>)`). Vị trí tối ưu SEO: 1 ảnh đầu bài ngay sau đoạn mở đầu, các ảnh còn lại chia đều theo số chữ, mỗi ảnh nằm sau đoạn văn đầu của một mục H2/H3 (không giữa danh sách/bảng, không liền nhau, không ở cuối bài). Alt ≤ 125 ký tự (ảnh đầu bài chứa từ khoá chính), tên tệp theo từ khoá không dấu, khung 16:9 1200×675. Thiếu ảnh → bài không tự duyệt, bấm "Tạo ảnh còn thiếu" (chạy nền). "Tải bài + ảnh (.zip)" xuất html chuẩn SEO + markdown + `images/` để đưa lên website. Mã: `packages/orchestrator/src/seo-images.ts`, `seo-export.ts`.
+
+## Tự động phê duyệt (trang Duyệt & Phê duyệt)
+
+Công tắc Sếp bật tay, mặc định TẮT. Khi bật, Sếp đặt ngưỡng điểm (70–100, mặc định 85): bài viết, kịch bản video, bài SEO và video Flow **mới** vào hộp Duyệt mà review "Đạt", không có lỗi nghiêm trọng và điểm ≥ ngưỡng thì được duyệt luôn và đi xuống phần Đăng bài (bài lên lịch đăng theo giờ yên lặng / giới hạn bài mỗi ngày; video đăng nháp lên kênh). Bài SEO phải đủ ảnh, video phải qua kiểm tra kỹ thuật, kill switch đăng bài tắt. **Không bao giờ tự duyệt:** quảng cáo / ngân sách, tin gửi khách (Zalo, chăm khách từ bình luận), đơn hàng, đề xuất học, kế hoạch. Bật công tắc không đụng tới mục đang chờ từ trước; nút "Duyệt ngay N mục" duyệt các mục chờ đã đạt ngưỡng (có hộp xác nhận). Nhật ký ghi "Tự động duyệt" kèm điểm và ngưỡng. Mã: `packages/orchestrator/src/auto-approve.ts`, API `/v1/auto-approve`.
 
 ## Sản xuất video Google Flow (Creative Agent)
 

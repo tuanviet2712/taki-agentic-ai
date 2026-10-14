@@ -17,6 +17,8 @@ const LOCAL_REFS = ["accountIds", "sheetConnectionId", "adIds", "channelIds", "a
 export function exportWorkspace(bizId: string) {
   const biz = q.get<Row>("SELECT name, timezone, currency, settings FROM biz WHERE id = ?", bizId)!;
   const { killSwitch: _k, ...settings } = biz.settings ?? {};
+  // Account choice belongs to this install/business, never to a portable workspace template.
+  if (settings.llm) settings.llm = { ...settings.llm, codexAccountId: null };
   const snap = {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -52,7 +54,7 @@ export async function applyWorkspace(bizId: string, file = WORKSPACE_FILE) {
   if (s.biz) update("biz", bizId, { name: s.biz.name, timezone: s.biz.timezone, currency: s.biz.currency });
   if (s.settings) {
     const cur = q.get<Row>("SELECT settings FROM biz WHERE id = ?", bizId)!.settings ?? {};
-    update("biz", bizId, { settings: { ...cur, ...s.settings, killSwitch: cur.killSwitch } });
+    update("biz", bizId, { settings: { ...cur, ...s.settings, killSwitch: cur.killSwitch, ...(s.settings.llm ? { llm: { ...s.settings.llm, codexAccountId: cur.llm?.codexAccountId ?? null } } : {}) } });
   }
   if (s.dna) {
     const cur = q.get<Row>("SELECT * FROM dna_profile WHERE biz_id = ? AND status = 'active' ORDER BY version DESC LIMIT 1", bizId);

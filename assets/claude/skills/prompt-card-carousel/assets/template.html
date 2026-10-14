@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!--DATA_INJECTION-->
+<style>
+  @font-face{font-family:'Be Vietnam Pro';font-weight:500;font-style:normal;font-display:block;src:url('__FONTDIR__/BeVietnamPro-Medium.ttf') format('truetype');}
+  @font-face{font-family:'Be Vietnam Pro';font-weight:600;font-style:normal;font-display:block;src:url('__FONTDIR__/BeVietnamPro-SemiBold.ttf') format('truetype');}
+  @font-face{font-family:'Be Vietnam Pro';font-weight:700;font-style:normal;font-display:block;src:url('__FONTDIR__/BeVietnamPro-Bold.ttf') format('truetype');}
+  @font-face{font-family:'Be Vietnam Pro';font-weight:800;font-style:normal;font-display:block;src:url('__FONTDIR__/BeVietnamPro-ExtraBold.ttf') format('truetype');}
+  @font-face{font-family:'Be Vietnam Pro';font-weight:500;font-style:italic;font-display:block;src:url('__FONTDIR__/BeVietnamPro-MediumItalic.ttf') format('truetype');}
+  @font-face{font-family:'Roboto';font-weight:100 900;font-style:normal;font-display:block;src:url('__FONTDIR__/Roboto-VF.ttf') format('truetype');}
+  :root{
+    /* ===== THEME: NTK (default) ===== */
+    --bg-card:      #F3F1EA;
+    --grid:         #E5E1D6;
+    --accent:       #D81F26;
+    --accent-dark:  #B0151B;
+    --gold:         #E9B84C;
+    --navy-1:       #0E1A2C;
+    --navy-2:       #1C2C46;
+    --title:        #33312C;
+    --prompt-text:  #46443F;
+    --bullet:       #C0392B;
+    --card-white:   #FFFFFF;
+    --card-border:  #E8E4D8;
+    --footer-main:  #3A3833;
+    --footer-sub:   #9A958A;
+    --font-head: 'Be Vietnam Pro', system-ui, sans-serif;
+    --font-body: 'Be Vietnam Pro', system-ui, sans-serif;
+  }
+  [data-theme="taki"]{
+    --bg-card:      #F1F5FB;
+    --grid:         #DCE6F4;
+    --accent:       #2563EB;
+    --accent-dark:  #1D4FBF;
+    --gold:         #F4B740;
+    --navy-1:       #0B1F45;
+    --navy-2:       #14306B;
+    --title:        #1B2A4A;
+    --prompt-text:  #33405C;
+    --bullet:       #2563EB;
+    --card-white:   #FFFFFF;
+    --card-border:  #DCE6F4;
+    --footer-main:  #1B2A4A;
+    --footer-sub:   #8DA0C2;
+    --font-head: 'Roboto', system-ui, sans-serif;
+    --font-body: 'Roboto', system-ui, sans-serif;
+  }
+
+  *{ margin:0; padding:0; box-sizing:border-box; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  html,body{ background:#fff; }
+  #root{ display:flex; flex-direction:column; align-items:flex-start; }
+
+  .slide{
+    position:relative;
+    overflow:hidden;
+    flex:0 0 auto;
+  }
+
+  /* ================= COVER ================= */
+  .cover{
+    background:
+      radial-gradient(120% 80% at 50% 18%, rgba(70,96,140,.45) 0%, rgba(70,96,140,0) 55%),
+      linear-gradient(168deg, var(--navy-2) 0%, var(--navy-1) 62%, #0a1422 100%);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .cover .cover-bg{
+    position:absolute; inset:0; background-size:cover; background-position:center;
+    opacity:.30; filter:grayscale(.25) contrast(1.02);
+  }
+  .cover .cover-overlay{
+    position:absolute; inset:0;
+    background:linear-gradient(180deg, rgba(8,16,30,.30) 0%, rgba(8,16,30,.62) 100%);
+  }
+  .cover .frame{
+    position:absolute; border:3px solid var(--gold); border-radius:30px;
+    box-shadow: inset 0 0 0 1px rgba(233,184,76,.25);
+  }
+  .cover .cover-text{
+    position:relative; z-index:3; text-align:center;
+    font-family:var(--font-head); font-weight:800;
+    line-height:1.2; letter-spacing:.2px; width:100%;
+  }
+  .cover .cover-text .ln{ display:block; color:#FFFFFF; margin:.10em 0; }
+  .cover .cover-text .ln.accent{ color:var(--gold); }
+  .cover .cover-text .ln.small{ font-weight:600; line-height:1.32; }
+
+  /* ================= CARD ================= */
+  .card-slide{
+    background-color:var(--bg-card);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-position: -1px -1px, -1px -1px;
+    display:flex; flex-direction:column;
+  }
+  .card-slide .top{
+    display:flex; align-items:center; gap:26px; flex:0 0 auto;
+  }
+  .badge{
+    flex:0 0 auto;
+    background:var(--accent);
+    color:#fff;
+    font-family:var(--font-head); font-weight:800;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 20px rgba(216,31,38,.28);
+  }
+  .title{
+    font-family:var(--font-head); font-weight:800;
+    color:var(--title); text-transform:uppercase;
+    line-height:1.12; letter-spacing:.3px;
+  }
+  .prompt-card{
+    flex:1 1 auto; min-height:0;
+    background:var(--card-white);
+    border:1.5px solid var(--card-border);
+    box-shadow:0 18px 44px rgba(40,34,20,.07);
+    display:flex; flex-direction:column;
+  }
+  .prompt-head{
+    flex:0 0 auto;
+    background:var(--accent);
+    color:#fff;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .prompt-head .lbl{
+    font-family:var(--font-head); font-weight:800; letter-spacing:3px;
+  }
+  .prompt-head .arrow{ font-weight:800; line-height:1; }
+  .prompt-body{
+    flex:1 1 auto; min-height:0; overflow:hidden;
+    display:flex; flex-direction:column; justify-content:flex-start;
+    color:var(--prompt-text); font-family:var(--font-body);
+    font-style:italic; font-weight:500;
+  }
+  .prompt-body .pintro{ }
+  .prompt-body ul{ list-style:none; }
+  .prompt-body ul li{
+    position:relative; padding-left:1.15em;
+  }
+  .prompt-body ul li::before{
+    content:"•"; position:absolute; left:0; top:0;
+    color:var(--bullet); font-weight:800; font-style:normal;
+  }
+  .prompt-body .poutro{ }
+
+  .footer{
+    flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
+    font-family:var(--font-head);
+  }
+  .footer .fmain{ color:var(--footer-main); font-weight:700; }
+  .footer .fline{ background:var(--footer-sub); opacity:.5; }
+  .footer .fsub{ color:var(--footer-sub); font-weight:600; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function(){
+  var DATA = (window.__DATA__) || { config:{}, slides:[] };
+  var cfg = DATA.config || {};
+  var W = cfg.width  || 1080;
+  var H = cfg.height || 1350;
+  var brandMain = cfg.brand_name || "NGUYEN TAT KIEM.COM";
+  var brandSub  = (cfg.brand_tagline === undefined) ? "SCALE MENTOR" : cfg.brand_tagline;
+  var theme = cfg.theme || "ntk";
+  document.body.setAttribute("data-theme", theme);
+
+  // sizing scale relative to a 1080x1350 reference
+  var S = W / 1080;
+  function px(n){ return (n * S) + "px"; }
+
+  var root = document.getElementById("root");
+
+  function el(tag, cls){ var e=document.createElement(tag); if(cls) e.className=cls; return e; }
+
+  (DATA.slides || []).forEach(function(sl){
+    var slide = el("div", "slide " + (sl.type === "cover" ? "cover" : "card-slide"));
+    slide.style.width = W + "px";
+    slide.style.height = H + "px";
+
+    if(sl.type === "cover"){
+      if(sl.bg_image){
+        var bg = el("div","cover-bg");
+        bg.style.backgroundImage = "url('" + sl.bg_image + "')";
+        slide.appendChild(bg);
+        slide.appendChild(el("div","cover-overlay"));
+      }
+      var frame = el("div","frame");
+      var inset = 40 * S;
+      frame.style.left = inset+"px"; frame.style.top = inset+"px";
+      frame.style.right = inset+"px"; frame.style.bottom = inset+"px";
+      slide.appendChild(frame);
+
+      var box = el("div","cover-text");
+      box.style.padding = "0 " + px(96);
+      box.style.fontSize = px(sl.font_size || 56);
+      (sl.lines || []).forEach(function(line){
+        var ln = el("span","ln" + (line.accent ? " accent":"") + (line.small ? " small":""));
+        ln.textContent = line.text;
+        box.appendChild(ln);
+      });
+      slide.appendChild(box);
+      root.appendChild(slide);
+      fitCover(box, slide, inset);
+      return;
+    }
+
+    // ===== CARD =====
+    var padX = 74 * S, padTop = 78 * S, padBot = 56 * S;
+    slide.style.padding = padTop + "px " + padX + "px " + padBot + "px";
+    slide.style.backgroundSize = px(44) + " " + px(44) + ", " + px(44) + " " + px(44);
+
+    var top = el("div","top");
+    var badge = el("div","badge");
+    badge.textContent = sl.number || "01";
+    badge.style.minWidth = px(118);
+    badge.style.height = px(98);
+    badge.style.fontSize = px(58);
+    badge.style.padding = "0 " + px(20);
+    badge.style.borderRadius = px(18) + " " + px(60) + " " + px(60) + " " + px(18);
+    top.appendChild(badge);
+
+    var title = el("div","title");
+    title.textContent = sl.title || "";
+    title.style.fontSize = px(sl.title_size || 39);
+    top.appendChild(title);
+    slide.appendChild(top);
+
+    var card = el("div","prompt-card");
+    card.style.marginTop = px(44);
+    card.style.borderRadius = px(28);
+
+    var head = el("div","prompt-head");
+    head.style.margin = px(24);
+    head.style.height = px(64);
+    head.style.padding = "0 " + px(30);
+    head.style.borderRadius = px(14);
+    var lbl = el("span","lbl"); lbl.textContent = sl.prompt_label || "PROMPT";
+    lbl.style.fontSize = px(26);
+    var arr = el("span","arrow"); arr.textContent = "\u2192";
+    arr.style.fontSize = px(34);
+    head.appendChild(lbl); head.appendChild(arr);
+    card.appendChild(head);
+
+    var body = el("div","prompt-body");
+    body.style.padding = px(6) + " " + px(34) + " " + px(30);
+    body.style.fontSize = px(sl.prompt_size || 28);
+    body.style.lineHeight = "1.5";
+
+    var openQuote = (sl.quote === false) ? "" : "\u201C";
+    var closeQuote = (sl.quote === false) ? "" : "\u201D";
+
+    if(sl.intro){
+      var pin = el("div","pintro");
+      pin.textContent = openQuote + sl.intro;
+      pin.style.marginBottom = px(14);
+      body.appendChild(pin);
+    }
+    if(sl.bullets && sl.bullets.length){
+      var ul = el("ul");
+      ul.style.margin = "0 0 " + px(14);
+      sl.bullets.forEach(function(b){
+        var li = el("li"); li.textContent = b;
+        li.style.marginBottom = px(9);
+        ul.appendChild(li);
+      });
+      // remove last bullet margin
+      if(ul.lastChild) ul.lastChild.style.marginBottom = "0";
+      body.appendChild(ul);
+    }
+    if(sl.outro){
+      var pou = el("div","poutro");
+      pou.textContent = sl.outro + closeQuote;
+      pou.style.marginTop = px(14);
+      body.appendChild(pou);
+    } else if(closeQuote){
+      // attach closing quote to last element
+      var last = body.lastChild;
+      if(last) last.textContent = last.textContent + closeQuote;
+    }
+    card.appendChild(body);
+    slide.appendChild(card);
+
+    if(brandMain || brandSub){
+      var ft = el("div","footer");
+      ft.style.marginTop = px(34);
+      if(brandMain){
+        var fm = el("div","fmain"); fm.textContent = brandMain;
+        fm.style.fontSize = px(22); fm.style.letterSpacing = px(1.2);
+        ft.appendChild(fm);
+      }
+      if(brandSub){
+        var fl = el("div","fline");
+        fl.style.width = px(70); fl.style.height = "2px";
+        fl.style.margin = px(7) + " 0 " + px(6);
+        ft.appendChild(fl);
+        var fs = el("div","fsub"); fs.textContent = brandSub;
+        fs.style.fontSize = px(13); fs.style.letterSpacing = px(3.5);
+        ft.appendChild(fs);
+      }
+      slide.appendChild(ft);
+    }
+
+    root.appendChild(slide);
+    fitBody(body);
+  });
+
+  // shrink prompt body font until it fits its container
+  function fitBody(body){
+    var fs = parseFloat(body.style.fontSize);
+    var min = 16 * S;
+    var guard = 0;
+    while(body.scrollHeight > body.clientHeight + 1 && fs > min && guard < 80){
+      fs -= 1 * S; guard++;
+      body.style.fontSize = fs + "px";
+    }
+  }
+  // shrink cover text until it fits within the gold frame
+  function fitCover(box, slide, inset){
+    var avail = slide.clientHeight - inset*2 - (24*S);
+    var fs = parseFloat(box.style.fontSize);
+    var min = 30 * S;
+    var guard = 0;
+    while(box.scrollHeight > avail && fs > min && guard < 80){
+      fs -= 1 * S; guard++;
+      box.style.fontSize = fs + "px";
+    }
+  }
+
+  window.__READY__ = true;
+})();
+</script>
+</body>
+</html>
