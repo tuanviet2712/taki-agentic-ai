@@ -33,6 +33,7 @@ export * from "./queue.ts";
 export * from "./runtime.ts";
 export * from "./review.ts";
 export * from "./ads.ts";
+export * from "./google-campaign.ts";
 export * from "./publishing.ts";
 export * from "./post-image.ts"; // ảnh đi kèm bài viết (Claude thiết kế / ChatGPT tạo ảnh)
 export * from "./image-engine.ts"; // chọn công cụ tạo ảnh: Claude thiết kế / ChatGPT vẽ / Gemini trên Flow (+ dự phòng)

@@ -114,6 +114,16 @@ Sao chép `.env.example` → `.env`.
 - **Cổng công khai** (mặc định TẮT): đặt `PUBLIC_PORT=8788` rồi chạy tunnel CHỈ về cổng đó (`cloudflared tunnel --url http://localhost:8788`), `PUBLIC_BASE_URL=https://…`. Cổng này chỉ phục vụ `/r/<mã>` (đo click), `/m/<token>` (media đã duyệt, ký sẵn, hết hạn 3 giờ), callback OAuth và `/healthz`. **Không bao giờ trỏ tunnel về cổng chính 8787** — API chính không có đăng nhập (lớp chặn Host lạ trả 421; `ALLOWED_HOSTS` để thêm tên miền riêng).
 - **Link dưới bình luận**: sản phẩm và link lấy ở Mục tiêu & DNA → Sản phẩm (`Link sản phẩm`, tuỳ chọn `Link gắn dưới bình luận` + `Câu bình luận`). Chọn "Sản phẩm của chiến dịch" ở trang Kế hoạch thì bài Facebook của chiến dịch tự gắn link sau 30–60 giây; gắn tay / gắn lại ở trang Đăng bài. Không có địa chỉ công khai ổn định → link sản phẩm + UTM (không có `/r/`; không dùng tunnel nhanh `*.trycloudflare.com` cho `/r/`).
 
+### Google Ads · tạo chiến dịch Search theo mục tiêu
+
+Set quảng cáo → **Tạo chiến dịch** → tab **Google** (cần tài khoản Google Ads thường, không phải MCC, đã nằm trong whitelist).
+
+- **Mục tiêu** quyết định từ khóa và giá thầu: *Truy cập* → tối đa lượt nhấp; *Khách hàng tiềm năng* → tối đa chuyển đổi; *Bán hàng* → tối đa giá trị chuyển đổi. Tối ưu theo chuyển đổi chỉ khi tài khoản **đã có hành động chuyển đổi** đang bật (hệ thống tự dò); chưa có thì chạy "Tối đa lượt nhấp" và báo rõ.
+- **Tạo tự động**: chọn mục tiêu + sản phẩm (hoặc URL) + ngân sách → AI soạn từ khóa, 6–10 tiêu đề (≤ 30 ký tự), 3–4 mô tả (≤ 90 ký tự) từ DNA rồi tạo luôn. Hoặc **soạn để chỉnh**: xem và sửa từng dòng trước khi tạo. Không nối AI thì dùng mẫu chuẩn (chỉ dữ kiện trong DNA).
+- **Kiểm tra trước với Google** (`validateOnly`): Google kiểm tra TOÀN BỘ chuỗi ngân sách → chiến dịch → nhóm → quảng cáo → từ khóa mà không tạo gì. Việc tạo là 1 lệnh `googleAds:mutate` nguyên khối: ghi hết hoặc không ghi gì, không bao giờ để chiến dịch dở dang, và không tự thử lại khi ghi (trùng tên bị Google từ chối nên bấm 2 lần không ra 2 chiến dịch).
+- Mặc định tạo **tạm dừng**. Cùng hàng rào như Facebook: whitelist, dừng khẩn cấp, trần tổng ngân sách ngày (khi chạy ngay), giới hạn lượt tạo/ngày, nhật ký. Phạm vi: mạng tìm kiếm Google, Việt Nam, tiếng Việt, 1 nhóm quảng cáo + 1 quảng cáo tìm kiếm thích ứng. Performance Max / Display / Video cần ảnh, video nên chưa có.
+- API: `GET /v1/ads/google/options|recent`, `POST /v1/ads/google/plan|check|campaign|auto`.
+
 Thời gian đăng bài / đo số liệu là giờ thật (khung đăng 8h · 11h30 · 20h giờ VN). Chỉ khi chạy thử mới nén thời gian bằng `TIME_SCALE_SECONDS` (vd. 60 → 1 giờ nền tảng ≈ 1 phút).
 
 ## Skill Phòng Marketing trong hệ thống

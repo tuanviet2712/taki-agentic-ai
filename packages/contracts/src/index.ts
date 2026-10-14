@@ -28,7 +28,7 @@ export const ConversationState = z.enum([
 export type ConversationState = z.infer<typeof ConversationState>;
 
 export const ActionType = z.enum([
-  "pause_ad", "resume_ad", "update_budget", "create_ad_from_post", "publish_post", "send_message", "notify", "tag",
+  "pause_ad", "resume_ad", "update_budget", "create_ad_from_post", "create_campaign", "publish_post", "send_message", "notify", "tag",
 ]);
 export type ActionType = z.infer<typeof ActionType>;
 

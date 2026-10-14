@@ -5,6 +5,7 @@ import { api, useApi } from "../lib/api";
 import { ddmm, hhmm, timeAgo, vndFull, type Tone } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Fold, Loading, Modal, PageHeader, Toggle, cx, inputCls, useToast } from "../components/ui";
 import { PlatformNotReady, PlatformTabs, pfLabel, useAdsPlatform, type AdsPf } from "../components/AdsPlatform";
+import { QuickAdGoogle } from "../components/QuickAdGoogle";
 
 const FIT_TONE: Record<string, Tone> = { good: "green", ok: "gray", warn: "amber", blocked: "red" };
 const OBJ_LABEL: Record<string, string> = { messages: "Tin nhắn", engagement: "Tương tác", sales: "Chuyển đổi", traffic: "Truy cập" };
@@ -16,9 +17,10 @@ const ST: Record<string, { label: string; tone: Tone }> = {
   approved: { label: "Đang xếp hàng", tone: "blue" }, publishing: { label: "Đang tạo", tone: "violet" }, published: { label: "Đã tạo", tone: "green" }, failed: { label: "Lỗi", tone: "red" },
 };
 
-/** Set quảng cáo theo nền tảng: Facebook tạo chiến dịch từ bài Fanpage; TikTok / Google nói rõ trạng thái. */
+/** Set quảng cáo theo nền tảng: Facebook tạo chiến dịch từ bài Fanpage; Google tạo chiến dịch Search theo mục tiêu; TikTok nói rõ trạng thái. */
 export function QuickAd() {
   const [pf, setPf] = useAdsPlatform();
+  if (pf === "google_ads") return <QuickAdGoogle tabs={<PlatformTabs value={pf} onChange={setPf} />} />;
   if (pf !== "meta") return (
     <div className="space-y-6">
       <PageHeader title={`Tạo chiến dịch · ${pfLabel(pf)}`} subtitle={`Set quảng cáo ${pfLabel(pf)} từ hệ thống.`} />

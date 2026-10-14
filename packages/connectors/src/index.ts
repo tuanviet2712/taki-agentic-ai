@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { CanonicalMetrics } from "@dotaka/contracts";
 import { logger, seeded, sleep } from "@dotaka/shared";
+import { validateGoogleSearchSpec, type GoogleCreatedCampaign, type GoogleSearchCampaignSpec } from "./google/create.ts";
 
 /**
  * Connector interface (spec §6). A connector declares only what it can do; the Tool Layer
@@ -55,6 +56,12 @@ export interface Connector {
     adsets: { dailyBudget: number; template?: unknown; name?: string }[];
     accountExternalId?: string; pageExternalId?: string; startPaused?: boolean; currency?: string;
   }, key: string): Promise<CreatedCampaign>;
+  /** Google Ads: tài khoản đã có hành động chuyển đổi đang bật chưa (quyết định chiến lược giá thầu theo mục tiêu). */
+  hasConversionTracking?(accountExternalId: string): Promise<boolean>;
+  /** Google Ads: kiểm TOÀN BỘ chuỗi tạo chiến dịch Search mà không tạo gì (lỗi → ConnectorError nói rõ chỗ sai). */
+  validateSearchCampaign?(spec: GoogleSearchCampaignSpec): Promise<{ ok: true }>;
+  /** Google Ads: tạo chiến dịch Search (ngân sách → chiến dịch → nhóm → quảng cáo → từ khóa) nguyên khối, không thử lại. */
+  createSearchCampaign?(spec: GoogleSearchCampaignSpec, key: string): Promise<GoogleCreatedCampaign>;
   /** `media`: local file of the post (video/image from Video Flow or upload). */
   publishPost?(spec: {
     channelExternalId: string; text: string; kind: string; media?: PostMedia;
@@ -190,6 +197,17 @@ function sandboxAds(platform: "meta" | "tiktok" | "google_ads"): Connector {
         };
       });
     },
+    ...(platform === "google_ads" ? {
+      async hasConversionTracking() { return true; },
+      async validateSearchCampaign(spec: GoogleSearchCampaignSpec) { validateGoogleSearchSpec(spec); return { ok: true as const }; },
+      async createSearchCampaign(spec: GoogleSearchCampaignSpec, key: string) {
+        validateGoogleSearchSpec(spec);
+        return once(key, (): GoogleCreatedCampaign => ({
+          campaignExternalId: `google_ads_cmp_${key.slice(-8)}`, adGroupExternalId: `google_ads_grp_${key.slice(-8)}`, adExternalId: `google_ads_ad_${key.slice(-8)}`,
+          budgetResource: null, status: spec.startPaused ? "paused" : "active", bidding: spec.bidding,
+        }));
+      },
+    } : {}),
     // Demo account for sandbox connections: stable campaigns/ads so the whole ads flow can be tested.
     async listAds(accountExternalId) {
       const seedName = accountExternalId.slice(-4);
@@ -319,5 +337,9 @@ export function platformForChannel(channel: string): PlatformKey {
 }
 
 export * from "./catalog.ts";
+export {
+  GOOGLE_OBJECTIVES, buildGoogleSearchOperations, isGoogleObjective, resolveGoogleBidding, validateGoogleSearchSpec, LIMITS as GOOGLE_AD_LIMITS,
+  type GoogleBidding, type GoogleCreatedCampaign, type GoogleMatch, type GoogleObjective, type GoogleSearchCampaignSpec,
+} from "./google/create.ts";
 export * as live from "./live.ts";
 export { minorFactor, spreadsheetIdOf } from "./live.ts";

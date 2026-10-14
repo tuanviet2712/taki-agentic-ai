@@ -2,6 +2,7 @@ import { createSign } from "node:crypto";
 import type { CanonicalMetrics } from "@dotaka/contracts";
 import { ConnectorError } from "../errors.ts";
 import type { AdRef, Connector, ImportedAd } from "../index.ts";
+import { buildGoogleSearchOperations, parseMutateResponse, validateGoogleSearchSpec, type GoogleSearchCampaignSpec } from "./create.ts";
 
 /**
  * Google Ads API — ported from TakiAcademy-AI/ads-os (lib/ads/google*.ts). Rules carried over:
@@ -78,7 +79,28 @@ const HINTS: Record<string, string> = {
   CUSTOMER_NOT_ENABLED: "Tài khoản Google Ads này chưa kích hoạt hoặc đã bị huỷ — chưa nhập thanh toán hay chưa tạo chiến dịch đầu tiên thì Google chưa cho gọi API.",
   SERVICE_DISABLED: "Google Ads API chưa được bật trong project Google Cloud. Vào APIs & Services → Library → Google Ads API → Enable, chờ vài phút rồi thử lại.",
   ACCESS_TOKEN_SCOPE_INSUFFICIENT: "Token không có quyền adwords. Kết nối lại.",
+  DUPLICATE_CAMPAIGN_NAME: "Tài khoản đã có chiến dịch trùng tên (kể cả chiến dịch đã tạm dừng). Đổi tên chiến dịch rồi tạo lại.",
+  DUPLICATE_NAME: "Tên bị trùng với một mục đã có trong tài khoản Google Ads. Đổi tên rồi thử lại.",
+  OPERATION_NOT_PERMITTED_FOR_CONTEXT: "Tài khoản này không được phép tạo chiến dịch Search (có thể là tài khoản quản lý MCC, hoặc tài khoản đã bị tạm ngưng).",
+  BILLING_SETUP_REQUIRED: "Tài khoản Google Ads chưa nhập thông tin thanh toán — vào Google Ads → Thanh toán để thiết lập, rồi tạo lại.",
+  TOO_LONG: "Có nội dung dài quá giới hạn của Google.",
+  TOO_SHORT: "Có nội dung ngắn quá giới hạn của Google.",
+  POLICY_FINDING: "Nội dung quảng cáo vi phạm chính sách Google Ads (xem chi tiết bên dưới) — sửa lại câu chữ rồi tạo lại.",
 };
+/** Tên trường Google báo lỗi → chữ người dùng hiểu (vị trí cuối cùng trong đường dẫn lỗi). */
+const FIELD_VI: [RegExp, string][] = [
+  [/headlines/, "tiêu đề quảng cáo"], [/descriptions/, "mô tả quảng cáo"], [/final_urls|finalUrls/, "URL trang đích"], [/keyword/, "từ khóa"],
+  [/path1|path2/, "đường dẫn hiển thị"], [/campaign_budget|amount_micros/, "ngân sách"], [/\bname\b/, "tên"], [/bidding|target_spend|maximize/, "chiến lược giá thầu"],
+  [/location|geo_target/, "khu vực nhắm"], [/language/, "ngôn ngữ nhắm"],
+];
+function fieldWhere(error: any): string {
+  const els: { fieldName?: string; index?: number | string }[] = error?.location?.fieldPathElements ?? [];
+  if (!els.length) return "";
+  const path = els.map((e) => `${e.fieldName}${e.index !== undefined ? `[${e.index}]` : ""}`).join(".");
+  const idx = [...els].reverse().find((e) => e.index !== undefined && e.fieldName !== "mutate_operations")?.index;
+  const vi = FIELD_VI.find(([re]) => re.test(path))?.[1];
+  return vi ? ` — ở ${vi}${idx !== undefined ? ` số ${Number(idx) + 1}` : ""}` : "";
+}
 export function extractGoogleError(body: unknown, status: number): string {
   const wrapped = (Array.isArray(body) ? body[0] : body) as { error?: any } | undefined;
   const err = wrapped?.error;
@@ -92,7 +114,8 @@ export function extractGoogleError(body: unknown, status: number): string {
     if (d?.budgetPerDayMinimumMicros) return `Ngân sách thấp hơn mức tối thiểu Google cho phép: tối thiểu ${Math.ceil(Number(d.budgetPerDayMinimumMicros) / 1e6).toLocaleString("vi-VN")} ${d.currencyCode ?? ""}/ngày`;
   }
   const hint = (code && HINTS[code]) || (reason && HINTS[reason]);
-  return hint ? `${hint} (${code ?? reason}: ${raw})` : code ? `${raw} (${code})` : raw;
+  const where = fieldWhere(adsErr);
+  return hint ? `${hint}${where} (${code ?? reason}: ${raw})` : code ? `${raw}${where} (${code})` : raw;
 }
 function headers(a: Auth): Record<string, string> {
   const h: Record<string, string> = { Authorization: `Bearer ${a.accessToken}`, "content-type": "application/json" };
@@ -129,6 +152,19 @@ async function mutate(a: Auth, customerId: string, resource: "campaigns" | "camp
     const msg = `Google Ads: ${extractGoogleError(await res.json().catch(() => ({})), res.status)}`;
     throw new ConnectorError(res.status === 401 || res.status === 403 ? "AuthError" : res.status === 429 ? "RateLimited" : res.status >= 500 ? "Transient" : "InvalidRequest", msg);
   }
+}
+
+/** Chuỗi thao tác liên hoàn (tạo chiến dịch). Ghi 1 lần, KHÔNG thử lại; `validateOnly` = chỉ kiểm, không tạo gì. */
+async function mutateAll(a: Auth, customerId: string, operations: unknown[], validateOnly: boolean): Promise<any> {
+  let res: Response;
+  try { res = await fetch(`${HOST}/${VERSION}/customers/${digits(customerId)}/googleAds:mutate`, { method: "POST", headers: headers(a), body: JSON.stringify({ mutateOperations: operations, validateOnly, partialFailure: false }), signal: AbortSignal.timeout(40_000) }); }
+  catch (e) { throw new ConnectorError("Transient", `Google Ads: không kết nối được khi tạo chiến dịch (${e instanceof Error ? e.message : e}) — vào Google Ads kiểm tra xem chiến dịch đã được tạo chưa trước khi tạo lại`); }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = `Google Ads: ${extractGoogleError(body, res.status)}`;
+    throw new ConnectorError(res.status === 401 || res.status === 403 ? "AuthError" : res.status === 429 ? "RateLimited" : res.status >= 500 ? "Transient" : "InvalidRequest", msg);
+  }
+  return body;
 }
 
 // ---------------- Accounts ----------------
@@ -263,6 +299,29 @@ export function googleAdsConnector(c: GoogleAdsCreds): Connector {
       if (info.shared || info.refs > 1) throw new ConnectorError("PolicyRejected", `Ngân sách đang dùng chung cho ${info.refs} chiến dịch — đổi sẽ ảnh hưởng chiến dịch khác nên bỏ qua. Tách ngân sách riêng trên Google Ads nếu muốn tự động điều chỉnh`);
       await mutate(a, cid, "campaignBudgets", [{ update: { resourceName: info.resourceName, amountMicros: String(Math.round(amount * 1e6)) }, updateMask: "amount_micros" }]);
       return { ok: true };
+    },
+    /** Tài khoản đã có hành động chuyển đổi đang bật chưa? (quyết định tối ưu theo chuyển đổi hay theo lượt nhấp). Lỗi → coi như chưa. */
+    async hasConversionTracking(customerId) {
+      try {
+        const a = await authFor(customerId);
+        return (await gaql<any>(a, customerId, "SELECT conversion_action.id FROM conversion_action WHERE conversion_action.status = 'ENABLED' LIMIT 1")).length > 0;
+      } catch { return false; }
+    },
+    /** Google kiểm TOÀN BỘ chuỗi (ngân sách → quảng cáo → từ khóa) mà không tạo gì. */
+    async validateSearchCampaign(spec: GoogleSearchCampaignSpec) {
+      validateGoogleSearchSpec(spec);
+      const cid = spec.accountExternalId;
+      const a = await authFor(cid);
+      await mutateAll(a, cid, buildGoogleSearchOperations(cid, spec, Date.now().toString(36)), true);
+      return { ok: true as const };
+    },
+    /** Tạo chiến dịch Search nguyên khối. Không thử lại; trùng tên thì Google từ chối (DUPLICATE_CAMPAIGN_NAME) nên bấm 2 lần không ra 2 chiến dịch. */
+    async createSearchCampaign(spec: GoogleSearchCampaignSpec, _key: string) {
+      validateGoogleSearchSpec(spec);
+      const cid = spec.accountExternalId;
+      const a = await authFor(cid);
+      const body = await mutateAll(a, cid, buildGoogleSearchOperations(cid, spec, Date.now().toString(36)), false);
+      return parseMutateResponse(body, spec);
     },
   };
 }

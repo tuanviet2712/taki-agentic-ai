@@ -7,6 +7,7 @@ import { workRoutes } from "./routes/work.ts";
 import { skillRoutes } from "./routes/skills.ts";
 import { creativeRoutes } from "./routes/creative.ts";
 import { connectRoutes } from "./routes/connect.ts";
+import { googleAdsRoutes } from "./routes/google-ads.ts";
 import { zaloRoutes } from "./routes/zalo.ts";
 import { orchestraRoutes } from "./routes/orchestra.ts";
 import { assistantRoutes } from "./routes/assistant.ts";
@@ -35,6 +36,7 @@ export function registerApiRoutes(app: FastifyInstance) {
   skillRoutes(app);
   creativeRoutes(app);
   connectRoutes(app);
+  googleAdsRoutes(app);
   zaloRoutes(app);
   orchestraRoutes(app);
   assistantRoutes(app);
