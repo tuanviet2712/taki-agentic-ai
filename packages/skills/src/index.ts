@@ -42,13 +42,14 @@ export const TEAM: { employee: string | null; label: string; agents: string[]; e
   { employee: "mkt-kiem-duyet", label: "Kiểm duyệt", agents: ["review"], extraSkills: ["remove-ai-marks", "cham-diem-noi-dung"] },
   { employee: null, label: "Tư vấn bán hàng (ABS)", agents: ["chat"], extraSkills: ["abs-sales-agent", "objection-handler-ai-sales", "lead-qualifier-taki", "telesales-ai-chu-doanh-nghiep", "lead-hunter-qualifier"] },
   { employee: null, label: "Chăm sóc lead", agents: ["follow_up"], extraSkills: ["follow-up-sequence-abs"] },
+  { employee: null, label: "Email marketing", agents: ["email"], extraSkills: ["email-marketing", "copywriting"] },
   { employee: null, label: "Sản xuất video Flow", agents: ["creative"], extraSkills: ["flow-review-do-an-vat", "flow-review-thoi-trang", "flow-nguoi-que-so-sanh", "flow-video-nhan-hieu", "video-nhan-hieu-google-flow", "flow-koc-thoi-trang-nu", "flow-review-gia-dung", "flow-review-nha-hang-shop", "news-to-video", "flow-cooking-director-video", "flow-cinematic-short-film", "flow-anh-chan-dung-cu-dong",
     // kịch bản / prompt Veo3 theo kênh nhân vật + dựng / hậu kỳ video
     "bac-si-baby-veo3", "ong-ban-sua-veo3", "nguoi-noi-dao-ly-veo3", "me-bim-cho-que", "tho-trang-nau-an-veo3", "tieng-anh-tre-em-veo3", "veo3-tra-an-nhien", "yen-mach-veo3-animation",
     "tro-ly-edit-video", "video-edit-ai-keynote", "viral-video-editor", "remotion-best-practices"] },
 ];
 /** Agents that read the DNA layer when they call Claude. */
-export const LLM_AGENTS = ["brief", "market_research", "strategy", "content", "video_script", "seo_web", "chat", "follow_up", "review", "ads", "analytics"];
+export const LLM_AGENTS = ["brief", "market_research", "strategy", "content", "video_script", "seo_web", "chat", "follow_up", "review", "ads", "analytics", "email"];
 
 /** Characters of skill text an agent may receive (≈ 3–4 chars per token). */
 export const BUDGET: Record<string, number> = {

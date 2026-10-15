@@ -80,6 +80,9 @@ function ensureStream() {
     // Chăm khách từ bình luận (packages/orchestrator/src/nurture.ts + chat-engine/optout.ts)
     "nurture.comment_in", "nurture.comments_classified", "nurture.lead_created", "nurture.dm_sent", "nurture.phone", "nurture.friend_requested", "nurture.friend_accepted",
     "nurture.following_up", "nurture.started", "nurture.needs_check", "nurture.review_skipped", "optout.added", "optout.removed",
+    // Kênh Email (packages/orchestrator/src/email)
+    "email.sent", "email.delivered", "email.opened", "email.clicked", "email.bounced", "email.complained", "email.unsubscribed", "email.contact_created",
+    "email.contact_tagged", "email.campaign_sent", "email.sequence_activated", "email.sequence_generated",
   ];
   for (const t of types) es.addEventListener(t, (ev) => {
     const data = JSON.parse((ev as MessageEvent).data);

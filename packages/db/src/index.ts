@@ -76,6 +76,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ["orders", "meta", "TEXT NOT NULL DEFAULT '{}'"],
   ["orders", "external_id", "TEXT"],
   ["orders", "product_key", "TEXT"],
+  // Link đo click trong email: meta.emailMessageId / contactId (mỗi thư một mã riêng để biết ai bấm)
+  ["track_link", "meta", "TEXT NOT NULL DEFAULT '{}'"],
 ];
 function migrate(d: DatabaseSync) {
   for (const [table, column, ddl] of MIGRATIONS) {
@@ -214,7 +216,7 @@ export function audit(bizId: string, actor: string, event: string, ref?: { type:
 
 // ---------- Biz settings (kill switches, autonomy defaults, caps) ----------
 export interface BizSettings {
-  killSwitch: { publish: boolean; ads: boolean; chat: boolean; all: boolean };
+  killSwitch: { publish: boolean; ads: boolean; chat: boolean; email?: boolean; all: boolean };
   caps: { maxTotalDailyAdBudget: number; maxAdsCreatedPerDay: number; maxPostsPerDayPerChannel: number };
   quietHours: [number, number];
   explorationPct: number;
@@ -233,7 +235,7 @@ export interface BizSettings {
   autoApprove?: { enabled: boolean; minScore: number };
 }
 export const DEFAULT_SETTINGS: BizSettings = {
-  killSwitch: { publish: false, ads: false, chat: false, all: false },
+  killSwitch: { publish: false, ads: false, chat: false, email: false, all: false },
   caps: { maxTotalDailyAdBudget: 80_000_000, maxAdsCreatedPerDay: 5, maxPostsPerDayPerChannel: 3 },
   quietHours: [22, 7],
   explorationPct: 15,
@@ -245,9 +247,9 @@ export function bizSettings(bizId: string): BizSettings {
   const b = q.get<{ settings: Partial<BizSettings> }>("SELECT settings FROM biz WHERE id = ?", bizId);
   return { ...DEFAULT_SETTINGS, ...(b?.settings ?? {}), killSwitch: { ...DEFAULT_SETTINGS.killSwitch, ...(b?.settings?.killSwitch ?? {}) } };
 }
-export function isKilled(bizId: string, area: "publish" | "ads" | "chat"): boolean {
+export function isKilled(bizId: string, area: "publish" | "ads" | "chat" | "email"): boolean {
   const k = bizSettings(bizId).killSwitch;
-  return k.all || k[area];
+  return k.all || Boolean(k[area]);
 }
 
 export function activeDna(bizId: string): Row | undefined {

@@ -8,7 +8,7 @@ import {
   sendImageAsHuman, setSalesFlowStatus, transition,
 } from "@dotaka/chat-engine";
 import { verifyWebhook } from "@dotaka/connectors";
-import { audit, byId, insert, q, update, type Row } from "@dotaka/db";
+import { audit, byId, emit, insert, q, update, type Row } from "@dotaka/db";
 import { CHAT_MEDIA_MAX, chatMediaFile, enqueue, latestChatInsight, publicOrder, removeChatMediaFile, runChatInsight, saveOutboundChatImage } from "@dotaka/orchestrator";
 import { AppError, nowIso, sha256 } from "@dotaka/shared";
 import { currentBizId, routes } from "../http.ts";
@@ -94,6 +94,7 @@ export function chatRoutes(app: FastifyInstance) {
     // Đơn ghi tay: chỉ là bản ghi nội bộ — không qua cổng duyệt nên KHÔNG BAO GIỜ được đẩy sang Pancake (thiếu meta.approvalId).
     const o = insert("orders", { biz_id: bizId, conversation_id: c.id, customer_name: c.customer_name, product: p.product, product_key: p.productKey ?? null, total: p.total, status: "pending", source: src?.source ?? null });
     audit(bizId, actor, "order.draft_created", { type: "orders", id: o.id }, p);
+    emit(bizId, "order.created", { orderId: o.id, conversationId: c.id }); // kênh Email: khách đã mua, dừng chuỗi mục tiêu mua, quy doanh thu
     return publicOrder(o);
   });
   r.get("/v1/leads", ({ bizId }) => q.all("SELECT l.*, c.channel, c.state FROM lead l JOIN conversation c ON c.id = l.conversation_id WHERE l.biz_id = ? ORDER BY l.score DESC", bizId));

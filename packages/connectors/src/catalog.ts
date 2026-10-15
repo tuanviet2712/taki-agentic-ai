@@ -137,6 +137,27 @@ export const PLATFORMS: PlatformDef[] = [
     ],
   },
   {
+    key: "resend", name: "Email (Resend)", category: "messaging", status: "live", color: "#0F172A",
+    description: "Gửi email thật qua Resend: chiến dịch, chuỗi tự động, thư giao dịch. Theo dõi giao/mở/click, tự loại bounce & khiếu nại, link hủy nhận một chạm.",
+    capabilities: ["Gửi email", "Chiến dịch", "Chuỗi tự động", "Theo dõi mở/click", "Hủy nhận một chạm", "Tự bảo vệ uy tín"],
+    fields: [
+      { key: "api_key", label: "API key Resend", type: "password", secret: true, required: true, placeholder: "re_...", help: "Resend → API Keys → Create API Key → quyền Full access (để hệ thống tự thêm domain và webhook)." },
+      { key: "from_name", label: "Tên người gửi", type: "text", required: true, placeholder: "TAKI Academy", help: "Hiện ở hộp thư khách, và trong footer định danh người gửi." },
+      { key: "from_address", label: "Địa chỉ gửi", type: "text", required: true, placeholder: "hello@mail.taki.vn", help: "Phải thuộc domain đã thêm (và xác minh) trên Resend. Nên dùng subdomain riêng cho email, vd. mail.taki.vn." },
+      { key: "reply_to", label: "Địa chỉ nhận trả lời (tuỳ chọn)", type: "text", placeholder: "cskh@taki.vn", help: "Khách bấm Trả lời sẽ gửi về đây (hộp thư của bạn)." },
+      { key: "daily_limit", label: "Hạn mức gửi/ngày (warm-up)", type: "text", placeholder: "50", help: "Domain mới: bắt đầu 50/ngày, tăng dần ×2 mỗi tuần khi tỉ lệ bounce < 2%. Đổi được ở trang Email." },
+      { key: "webhook_secret", label: "Webhook signing secret (tuỳ chọn)", type: "password", secret: true, placeholder: "whsec_...", help: "Để trống: bấm «Thiết lập tự động» ở trang Email, hệ thống tự tạo webhook và lưu khoá. Tạo tay: Resend → Webhooks → endpoint <PUBLIC_BASE_URL>/hooks/email/resend." },
+      { key: "cloudflare_token", label: "Cloudflare API token (tuỳ chọn)", type: "password", secret: true, help: "Chỉ cần nếu muốn hệ thống tự thêm bản ghi DNS (SPF/DKIM/DMARC) lên Cloudflare. Mẫu token «Edit zone DNS», chọn đúng zone." },
+    ],
+    guide: [
+      "Tạo tài khoản resend.com → Domains → Add Domain → nhập subdomain gửi (vd. mail.taki.vn). Hoặc để trống bước này và dùng nút «Thiết lập tự động» (cần Cloudflare token).",
+      "Thêm các bản ghi DNS Resend yêu cầu (MX + TXT SPF ở send.<domain>, TXT DKIM resend._domainkey) và một bản ghi DMARC → bấm Verify trên Resend.",
+      "API Keys → Create API Key → Full access → dán vào đây cùng tên và địa chỉ gửi.",
+      "Bật cổng công khai (PUBLIC_PORT + PUBLIC_BASE_URL https) để nhận sự kiện giao/mở/bounce và cho link hủy nhận/click chạy từ hộp thư khách.",
+      "Vào trang Email → Gửi thử tới hộp thư của bạn trước khi gửi khách.",
+    ],
+  },
+  {
     key: "ai", name: "AI", category: "ai", status: "live", color: "#7C3AED",
     description: "Claude CLI, tài khoản ChatGPT qua Codex CLI và Jev System One — chọn hồ sơ tại Kết nối AI.", capabilities: ["Claude CLI", "ChatGPT / Codex CLI", "Nhiều hồ sơ ChatGPT", "Jev"], fields: [],
   },
@@ -181,6 +202,8 @@ export const MCP_SCOPES: { platform: string; name: string; desc: string; perms: 
     { key: "read", title: "Đọc dữ liệu", label: "Xem" }, { key: "write", title: "Chỉnh sửa", label: "Sửa", sensitive: true }, { key: "create", title: "Tạo mới", label: "Tạo", sensitive: true }] },
   { platform: "tiktok", name: "TikTok Ads", desc: "Quản lý chiến dịch, nhóm quảng cáo, quảng cáo.", perms: [
     { key: "read", title: "Đọc dữ liệu", label: "Xem" }, { key: "write", title: "Chỉnh sửa", label: "Sửa", sensitive: true }] },
+  { platform: "email", name: "Email", desc: "Liên hệ, chiến dịch, chuỗi email và số liệu gửi.", perms: [
+    { key: "read", title: "Đọc dữ liệu", label: "Xem" }, { key: "write", title: "Tạo chiến dịch / gửi duyệt", label: "Sửa", sensitive: true }] },
   { platform: "agentic", name: "Agentic AI", desc: "Bài viết, hội thoại, mục chờ duyệt và luồng/rule của hệ thống.", perms: [
     { key: "read", title: "Đọc dữ liệu", label: "Xem" }, { key: "rules", title: "Chạy thử luồng", label: "Chạy thử" }] },
 ];

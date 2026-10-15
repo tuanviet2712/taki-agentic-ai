@@ -39,6 +39,9 @@ const SCHEDULES: [name: string, queue: string, every: number, label: string][] =
   ["autopilot.tick", "agent", 15, "Lái tự động: giữ đủ nội dung cho các ngày tới (15 phút)"],
   // Đơn đã đẩy sang Pancake: kéo trạng thái (đã nhận / đã huỷ…) về để báo cáo doanh thu đúng; không gọi mạng nếu chưa có đơn nào.
   ["orders.pancake_sync", "agent", 30, "Cập nhật trạng thái đơn đã đẩy sang Pancake (30 phút)"],
+  // Email: không gọi mạng khi chưa có chiến dịch / chuỗi nào đến hạn.
+  ["email.tick", "chat", 1, "Email: gửi chiến dịch đến giờ + thư chuỗi đến hạn (1 phút)"],
+  ["email.reputation", "agent", 30, "Email: quét uy tín gửi 24h — giảm tốc / mở lại (30 phút)"],
 ];
 export function ensureBizSchedules(bizId: string): string[] {
   const added: string[] = [];

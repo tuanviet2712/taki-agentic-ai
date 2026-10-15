@@ -21,6 +21,7 @@ import { orderRoutes } from "./routes/orders.ts";
 import { commentLinkRoutes } from "./routes/comment-link.ts";
 import { businessRoutes } from "./routes/businesses.ts";
 import { brainRoutes } from "./routes/brain.ts";
+import { emailRoutes } from "./routes/email.ts";
 
 /**
  * Danh sách module route của API, đúng thứ tự khởi động thật. server.ts và server-boot.test.ts cùng dùng hàm này nên
@@ -50,4 +51,5 @@ export function registerApiRoutes(app: FastifyInstance) {
   orderRoutes(app);
   commentLinkRoutes(app);
   businessRoutes(app);
+  emailRoutes(app);
 }

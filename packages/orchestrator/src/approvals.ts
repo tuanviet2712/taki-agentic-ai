@@ -10,6 +10,8 @@ import { seoImagesShortReason } from "./seo-images.ts";
 import { sendZaloFollowUp } from "./zalo-followup.ts";
 import { decideNurtureSend } from "./nurture.ts";
 import { createApprovedOrder, validateOrderDraft } from "./order-push.ts";
+import { decideCampaignApproval } from "./email/campaigns.ts";
+import { decideSequenceApproval } from "./email/sequences.ts";
 
 /**
  * Approval gate (spec §5, §14): approve | edit | reject, with a reason.
@@ -109,6 +111,16 @@ export async function decideApproval(bizId: string, approvalId: string, decision
     case "change_proposal": {
       if (decision === "reject") update("change_proposal", ap.subject_id, { status: "rejected" });
       else applyProposal(bizId, ap.subject_id, actor);
+      break;
+    }
+    case "email_campaign": {
+      // Gửi chiến dịch email [ĐỎ]: duyệt = lên lịch (email.tick gửi); từ chối = về nháp. Chiến dịch đã đổi → lỗi, mục duyệt mở lại.
+      try { decideCampaignApproval(bizId, ap, decision, actor); } catch (e) { update("approval", ap.id, { status: "expired" }); throw e; }
+      break;
+    }
+    case "email_sequence": {
+      // Kích hoạt chuỗi email [ĐỎ].
+      try { decideSequenceApproval(bizId, ap, decision, actor); } catch (e) { update("approval", ap.id, { status: "expired" }); throw e; }
       break;
     }
     case "order_draft": {

@@ -36,11 +36,11 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); closeDb(); rmSync(tmp, { recursive: true, force: true }); });
 
 describe("cổng công khai: chỉ đúng những đường dẫn cho phép", () => {
-  it("đúng 4 route GET (+ HEAD tự động), không /v1/* nào khác, không static", () => {
-    for (const [m, u] of [["GET", "/healthz"], ["GET", "/r/:code"], ["GET", "/m/:token"], ["GET", "/v1/oauth/:provider/callback"]] as const) expect(app.hasRoute({ method: m, url: u })).toBe(true);
-    expect(PUBLIC_ROUTES).toHaveLength(4);
+  it("đúng 4 route GET + 2 route email (webhook Resend, hủy nhận), không /v1/* nào khác, không static", () => {
+    for (const [m, u] of [["GET", "/healthz"], ["GET", "/r/:code"], ["GET", "/m/:token"], ["GET", "/v1/oauth/:provider/callback"], ["POST", "/hooks/email/resend"], ["GET", "/u/:token"], ["POST", "/u/:token"]] as const) expect(app.hasRoute({ method: m, url: u })).toBe(true);
+    expect(PUBLIC_ROUTES).toHaveLength(6);
     const tree = app.printRoutes({ commonPrefix: false });
-    for (const forbidden of ["approvals", "settings", "connections", "dna", "uploads", "media", "assistant", "hooks", "stream", "oauth/:provider/app", "oauth/:provider/start"]) {
+    for (const forbidden of ["approvals", "settings", "connections", "dna", "uploads", "media", "assistant", "hooks/:platform", "hooks/meta", "stream", "oauth/:provider/app", "oauth/:provider/start"]) {
       expect(tree, forbidden).not.toMatch(new RegExp(`/v1/${forbidden}|/${forbidden}\\b`));
     }
     expect(app.hasRoute({ method: "POST", url: "/v1/oauth/:provider/start" })).toBe(false);

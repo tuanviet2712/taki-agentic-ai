@@ -28,6 +28,7 @@ import { Mcp, McpNewKey } from "./pages/Mcp";
 import { AdsSetup } from "./pages/AdsSetup";
 import { AdsHelp } from "./pages/AdsHelp";
 import { ZaloFollowUp } from "./pages/ZaloFollowUp";
+import { EmailPage } from "./pages/Email";
 import { Orchestra } from "./pages/Orchestra";
 import { Logs } from "./pages/Logs";
 import { Channels } from "./pages/Channels";
@@ -90,6 +91,7 @@ export function App() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/sales-flow" element={<SalesFlow />} />
           <Route path="/zalo" element={<ZaloFollowUp />} />
+          <Route path="/email" element={<EmailPage />} />
           <Route path="/orchestra" element={<Orchestra />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/approvals" element={<Approvals />} />
