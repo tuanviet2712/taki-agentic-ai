@@ -15,7 +15,7 @@ import { Badge, Button, Empty, Field, Loading, Modal, Toggle, cx, inputCls, useT
  */
 
 type FormState = {
-  fullName: string; phone: string; address: string; quantity: string; unitPrice: string; discount: string; shippingFee: string; cod: string; note: string; push: boolean;
+  fullName: string; phone: string; address: string; quantity: string; unitPrice: string; discount: string; shippingFee: string; cod: string; note: string; email?: string; push: boolean;
 };
 const toInt = (s: string) => {
   const n = Number(String(s).replace(/[^\d]/g, ""));
@@ -33,6 +33,7 @@ function toPayload(f: FormState, opts: { keepPhoneIfEmpty?: boolean } = {}) {
     shippingFee: toInt(f.shippingFee),
     ...(f.cod.trim() ? { cod: toInt(f.cod) } : {}),
     note: f.note.trim() || undefined,
+    email: f.email?.trim() || undefined,
     pushToPancake: f.push,
   };
 }
@@ -59,6 +60,7 @@ function OrderFields({ f, set, needsShipping, phoneHint }: { f: FormState; set: 
       {money("shippingFee", "Phí ship khách trả (đ)")}
       {money("cod", "Tiền thu hộ COD (đ)", `Để trống = bằng tổng đơn (${vnd(totalOf(f))})`)}
       <Field label="Ghi chú đơn"><input className={inputCls} value={f.note} onChange={(e) => set({ note: e.target.value })} placeholder="Ví dụ: giao giờ hành chính" /></Field>
+      <Field label="Email khách" optional hint="Có email: khách vào sổ liên hệ Email (đã mua), dừng chuỗi mục tiêu mua, nhận chuỗi sau mua nếu có."><input className={inputCls} type="email" value={f.email ?? ""} onChange={(e) => set({ email: e.target.value })} placeholder="khach@gmail.com" /></Field>
     </div>
   );
 }

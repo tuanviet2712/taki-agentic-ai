@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { byId, insert, openDb, q, type Row } from "@dotaka/db";
 import { live, mcpAllows } from "@dotaka/connectors";
-import { credsOf, latestDaily, proposeManualAction, runRule, sumMetrics, today } from "@dotaka/orchestrator";
+import { createCampaign, credsOf, deliverability, emailStatus, latestDaily, listCampaigns, listSequences, proposeManualAction, requestCampaignApproval, runRule, sumMetrics, today } from "@dotaka/orchestrator";
 import { derived } from "@dotaka/contracts";
 import { nowIso, sha256 } from "@dotaka/shared";
 
@@ -113,6 +113,19 @@ async function ordersFrom(k: Row, platform: "pancake" | "nhanh") {
   if (c.mode !== "live") return q.all("SELECT id, customer_name customer, total, status, created_at FROM orders WHERE biz_id = ? ORDER BY created_at DESC LIMIT 30", k.biz_id);
   return platform === "pancake" ? live.pancakeOrders(credsOf(c) as any, c.config?.shops?.[0]?.externalId ?? c.external_account_id) : live.nhanhOrders({ ...(credsOf(c) as any), app_id: c.config.app_id, business_id: c.config.business_id });
 }
+// ---- Email ----
+tool(server, "email_stats", "Chất lượng gửi email 24h / 7 ngày (gửi, mở, click, bounce, khiếu nại, doanh thu) + trạng thái kết nối.", {}, (_a, k) =>
+  ({ status: emailStatus(k.biz_id), deliverability: { ...deliverability(k.biz_id), suppression: undefined } }), { platform: "email", perm: "read" });
+tool(server, "email_campaigns_list", "Chiến dịch email gần đây kèm số gửi / mở / click / doanh thu.", {}, (_a, k) => listCampaigns(k.biz_id), { platform: "email", perm: "read" });
+tool(server, "email_sequences_list", "Chuỗi email tự động: trạng thái, số người đang trong chuỗi, số thư đã gửi.", {}, (_a, k) => listSequences(k.biz_id), { platform: "email", perm: "read" });
+tool(server, "email_campaign_draft", "Tạo chiến dịch email NHÁP (văn bản) và gửi vào hộp Duyệt [cao] — không gửi khách khi chưa được duyệt. Lần đầu không confirm để xem trước.",
+  { name: z.string().max(160), subject: z.string().max(200), body: z.string().max(20000), segmentId: z.string().optional(), confirm: z.boolean().default(false) },
+  ({ name, subject, body, segmentId, confirm }, k) => {
+    if (!confirm) return { preview: { name, subject, body: body.slice(0, 500) }, note: "Gọi lại với confirm=true để tạo nháp và gửi duyệt." };
+    const c = createCampaign(k.biz_id, { name, subject, body, segmentId: segmentId ?? null, mode: "text" }, `mcp:${k.name ?? k.id}`);
+    return { campaignId: c.id, ...requestCampaignApproval(k.biz_id, c.id, `mcp:${k.name ?? k.id}`) };
+  }, { platform: "email", perm: "write" });
+
 tool(server, "pancake_orders", "30 đơn hàng gần nhất từ Pancake POS.", {}, (_a, k) => ordersFrom(k, "pancake"), { platform: "pancake", perm: "read" });
 tool(server, "nhanh_orders", "30 đơn hàng gần nhất từ Nhanh.vn.", {}, (_a, k) => ordersFrom(k, "nhanh"), { platform: "nhanh", perm: "read" });
 

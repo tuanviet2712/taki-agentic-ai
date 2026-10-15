@@ -245,7 +245,7 @@ export function createApprovedOrder(bizId: string, ap: Row, form: OrderForm | un
   const order = insert("orders", {
     biz_id: bizId, conversation_id: ap.subject_id, customer_name: s.fullName || pv.customerName || "Khách",
     product: pv.product ?? "Sản phẩm", product_key: pv.productKey ?? null, total: totalOf(s), status: "pending", source: src?.source ?? null,
-    meta: { approvalId: ap.id, shipping: s, pancake: { state: push ? "queued" : "off", seq: 0 } },
+    meta: { approvalId: ap.id, shipping: s, pancake: { state: push ? "queued" : "off", seq: 0 }, ...(form?.email ? { email: form.email.toLowerCase() } : {}) },
   });
   emit(bizId, "order.created", { orderId: order.id, conversationId: ap.subject_id });
   audit(bizId, actor, "order.created", { type: "order", id: order.id }, { total: order.total, product: order.product, phone: s.phoneMasked, pushToPancake: push, approvalId: ap.id });

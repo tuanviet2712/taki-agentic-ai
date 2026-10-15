@@ -54,12 +54,17 @@ describe("khởi động API", () => {
       ["GET", "/v1/oauth"], ["PUT", "/v1/oauth/:provider/app"], ["POST", "/v1/oauth/:provider/start"], ["GET", "/v1/oauth/:provider/callback"],
       ["PUT", "/v1/publish-channels/:id/tiktok-audited"], ["GET", "/v1/publish-channels"],
       ["GET", "/v1/nurture"], ["GET", "/v1/messenger/sync/status"], ["PUT", "/v1/messenger/bot"], ["GET", "/v1/approvals"], ["GET", "/v1/stream"],
+      // Kênh Email
+      ["GET", "/v1/email/status"], ["GET", "/v1/email/contacts"], ["POST", "/v1/email/contacts/import"], ["GET", "/v1/email/segments"], ["GET", "/v1/email/templates"],
+      ["GET", "/v1/email/campaigns"], ["POST", "/v1/email/campaigns/:id/submit"], ["GET", "/v1/email/sequences"], ["POST", "/v1/email/sequences/:id/submit"],
+      ["POST", "/v1/email/test"], ["POST", "/v1/email/domain/setup"], ["GET", "/v1/email/deliverability"],
     ] as const) expect(has(m, u), `${m} ${u}`).toBe(true);
   });
 
   it("route đọc trả 200 với DB trống (không lỗi khi chưa có DNA / kịch bản)", async () => {
     for (const url of ["/v1/sales-flows", "/v1/chat-insights/latest", "/v1/conversations", "/v1/conversations/counts", "/v1/orders", "/v1/pancake/overview",
-      "/v1/link-comment/settings", "/v1/public/status", "/v1/oauth", "/v1/publish-channels", "/v1/comment-link/channels", "/v1/posts"]) {
+      "/v1/link-comment/settings", "/v1/public/status", "/v1/oauth", "/v1/publish-channels", "/v1/comment-link/channels", "/v1/posts",
+      "/v1/email/status", "/v1/email/contacts", "/v1/email/segments", "/v1/email/templates", "/v1/email/campaigns", "/v1/email/sequences", "/v1/email/sequence-presets", "/v1/email/deliverability", "/v1/email/messages"]) {
       const res = await app.inject({ method: "GET", url });
       expect(res.statusCode, `${url} -> ${res.body.slice(0, 200)}`).toBe(200);
     }

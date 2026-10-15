@@ -7,3 +7,7 @@ onlyBuiltDependencies:
   - esbuild
 allowBuilds:
   esbuild: true
+packageExtensions:
+  "@maily-to/core":
+    dependencies:
+      "@tiptap/extension-code-block": "^2.27.3"

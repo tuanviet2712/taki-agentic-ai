@@ -12,6 +12,7 @@ export { tiktokError, tiktokPostConnector, tiktokPostTest } from "./tiktok-post.
 export * from "./oauth.ts";
 export { googleAdsConnector, googleAdsTest, type GoogleAdsCreds } from "./google/ads.ts";
 export { wordpressConnector, wordpressTest, wpSiteUrl, type WordpressCreds } from "./wordpress.ts";
+export * from "./resend.ts";
 import { CONVERSION_ACTIONS, RESULT_SETTING, countConversions, mapObjective } from "./meta/conversions.ts";
 
 /**

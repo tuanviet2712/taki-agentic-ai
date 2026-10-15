@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Radio, Telescope, HeartHandshake, PlaneTakeoff,
   Bell, BookOpen, BrainCircuit, Clapperboard, FileClock, FileText, Home, Library, Link2, Bot, CalendarDays, ChartLine, CheckCircle2,
-  Megaphone, Menu, MessageCircle, MessagesSquare, MonitorCog, Moon, Network, Octagon, PanelLeftClose, PanelLeftOpen, Rocket, Route, Send, Settings, SlidersHorizontal, Sparkles, Sun, Target, X,
+  Mail, Megaphone, Menu, MessageCircle, MessagesSquare, MonitorCog, Moon, Network, Octagon, PanelLeftClose, PanelLeftOpen, Rocket, Route, Send, Settings, SlidersHorizontal, Sparkles, Sun, Target, X,
 } from "lucide-react";
 import { api, useApi, useEvents } from "../lib/api";
 import { timeAgo } from "../lib/format";
@@ -32,6 +32,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     { to: "/sales-flow", label: "Kịch bản chốt đơn", icon: Route },
     { to: "/nurture", label: "Chăm khách từ bình luận", icon: HeartHandshake },
     { to: "/zalo", label: "Follow-up Zalo", icon: MessagesSquare },
+    { to: "/email", label: "Email marketing", icon: Mail },
   ] },
   { title: "Quảng cáo", items: [
     { to: "/ads/flows?type=metrics_pull", label: "AI Agent Ads", icon: Megaphone, special: true, children: [

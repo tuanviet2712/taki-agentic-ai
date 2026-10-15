@@ -28,6 +28,7 @@ import { ensureBizSchedules } from "./business.ts";
 import { startTelegramAssistant } from "./telegram-assistant.ts";
 import { automationsTick, ensureAutomations } from "./automations.ts";
 import { registerZaloProxy, runZaloFollowUps, syncZalo } from "./zalo-followup.ts";
+import { EMAIL_HANDLERS, registerEmailHooks } from "./email/index.ts";
 
 export * from "./queue.ts";
 export * from "./runtime.ts";
@@ -58,6 +59,7 @@ export * from "./creative.ts";
 export * from "./connections.ts";
 export * from "./automations.ts";
 export * from "./zalo-followup.ts";
+export * from "./email/index.ts"; // kênh Email (Resend): liên hệ, chiến dịch, chuỗi, mẫu, webhook, hủy nhận
 export * from "./messenger-sync.ts";
 export * from "./chat-media.ts";
 export * from "./chat-vision.ts"; // bot xem ảnh khách gửi (tiêm vào chat-engine khi nạp)
@@ -119,6 +121,7 @@ export const HANDLERS: Record<string, Handler> = {
   ...RESEARCH_HANDLERS,
   ...AUTOPILOT_HANDLERS,
   ...ORDER_PUSH_HANDLERS, // order.push_pancake + orders.pancake_sync
+  ...EMAIL_HANDLERS, // email.tick (chiến dịch + chuỗi) · email.reputation · email.generate
   "learn.daily": async (p) => void learnDaily(p.bizId),
   "ads.weekly_report": async (p) => { if (q.scalar<number>("SELECT COUNT(*) FROM ad WHERE biz_id = ?", p.bizId)) startAdsReport(p.bizId); },
   "report.daily": async (p) => dailyReport(p.bizId),
@@ -145,6 +148,7 @@ export function startOrchestrator() {
   registerBrainHooks();
   registerZaloProxy();
   setConversationConnector(liveMessengerConnector);
+  registerEmailHooks(); // email khách gõ trong chat → liên hệ; đơn → đã mua + doanh thu; trigger chuỗi email
   // Mọi doanh nghiệp đang hoạt động: trợ lý, bộ não, bộ lịch nền đầy đủ (business.ts ensureBizSchedules).
   for (const id of activeBizIds()) {
     ensureAssistantAgent(id);

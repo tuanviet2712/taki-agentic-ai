@@ -192,6 +192,9 @@ export const hashIp = (bizId: string, ip?: string | null) => (ip ? sha256(`${sal
 const BOT_UA = /bot\b|bot\/|crawl|spider|preview|facebookexternalhit|facebookcatalog|facebot|slurp|embedly|whatsapp|skypeuripreview|zalo(bot|preview)|headless|curl\/|wget\/|python-requests|okhttp|go-http-client|java\//i;
 export const isBotUserAgent = (ua?: string | null) => !ua || BOT_UA.test(ua);
 const DEDUPE_MS = 10_000;
+/** Kênh email gắn vào đây (email/events.ts onEmailLinkClick) — tránh import vòng tracking ↔ email. */
+let emailClickHook: ((link: Row, counted: boolean) => void) | null = null;
+export function setEmailClickHook(fn: (link: Row, counted: boolean) => void) { emailClickHook = fn; }
 
 /**
  * Ghi 1 click và trả URL đích (302). Mã không tồn tại → undefined.
@@ -217,6 +220,11 @@ export function recordClick(code: string, req: { ip?: string | null; ua?: string
       biz_id: link.biz_id, link_id: link.id, at: nowIso(), ip_hash: ipHash, is_bot: bot ? 1 : 0,
       ua: req.ua ? String(req.ua).slice(0, 300) : null, referer: req.referer ? String(req.referer).slice(0, 500) : null,
     });
+  }
+  // Link trong email: đích đã gắn sẵn UTM lúc gửi; đánh dấu thư + người nhận đã click.
+  if (link.meta?.emailMessageId) {
+    try { emailClickHook?.(link, counted); } catch { /* không chặn chuyển hướng */ }
+    return { url: link.target_url, linkId: link.id, counted };
   }
   return { url: destinationUrl(link), linkId: link.id, counted };
 }

@@ -98,6 +98,17 @@ async function discover(platform: string, mode: "live" | "sandbox", cr: Record<s
       const r = await live.nhanhTest({ ...cfg, ...cr } as any);
       return { accountId: r.accountId, name: r.name, config: { totalOrders: r.totalOrders } };
     }
+    case "resend": {
+      // Email: khoá phải đúng; domain của địa chỉ gửi chưa xác minh vẫn lưu được (trang Email có nút Thiết lập tự động / Kiểm lại).
+      const from = String(cfg.from_address ?? "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(from)) throw new AppError("INVALID", "Địa chỉ gửi không hợp lệ (vd. hello@mail.taki.vn)");
+      const r = await live.resendTest(cr as any, from);
+      const limit = Math.max(1, Math.min(100_000, Number(cfg.daily_limit) || 50));
+      return {
+        accountId: r.domain, name: `${cfg.from_name || r.domain} <${from}>`,
+        config: { from_address: from, domain: r.domain, domain_id: r.domainId, domain_status: r.status, daily_limit: String(limit) },
+      };
+    }
     default:
       throw new AppError("NOT_SUPPORTED", "Nền tảng này sắp ra mắt");
   }
@@ -211,7 +222,7 @@ export async function testConnection(bizId: string, id: string, actor: string) {
     if (c.platform === "tiktok_post" && c.mode === "live") { await tiktokAccessToken(c.id); c = mustConn(bizId, id); }
     const d = await discover(c.platform, c.mode, credsOf(c), c.config ?? {});
     if (c.mode === "live") saveAssets(bizId, c, d);
-    if (c.platform === "zlcrm" && d.config) update("connection", c.id, { config: { ...(c.config ?? {}), ...d.config } });
+    if ((c.platform === "zlcrm" || c.platform === "resend") && d.config) update("connection", c.id, { config: { ...(c.config ?? {}), ...d.config } });
     update("connection", c.id, { status: "active", last_health_at: nowIso(), last_error: null });
     audit(bizId, actor, "connection.tested", { type: "connection", id: c.id }, { ok: true });
     return { ok: true, detail: c.mode === "sandbox" ? "Kết nối mô phỏng hoạt động" : `Hoạt động: ${d.name}` };

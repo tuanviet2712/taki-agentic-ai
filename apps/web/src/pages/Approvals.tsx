@@ -19,6 +19,8 @@ const TYPES = [
   { value: "follow_up", label: "Follow-up Zalo" },
   { value: "nurture_send", label: "Chăm khách từ bình luận" },
   { value: "order_draft", label: "Đơn hàng" },
+  { value: "email_campaign", label: "Chiến dịch email" },
+  { value: "email_sequence", label: "Chuỗi email" },
   { value: "change_proposal", label: "Đề xuất học" },
 ];
 const RISK = { low: { label: "Rủi ro thấp", tone: "green" }, medium: { label: "Rủi ro trung bình", tone: "amber" }, high: { label: "Rủi ro cao", tone: "red" } } as const;
@@ -183,6 +185,8 @@ function approveHint(d: any) {
   if (d.subject_type === "action") return "Phê duyệt sẽ đưa thay đổi vào hàng đợi thực thi; có thể hoàn tác ở trang Quảng cáo.";
   if (d.subject_type === "follow_up") return `Phê duyệt sẽ gửi tin này qua ZL-CRM bằng nick ${d.preview?.nick ?? "đang giữ hội thoại"}. Nếu khách nhắn lại trước đó, tin sẽ không gửi.`;
   if (d.subject_type === "nurture_send") return "Phê duyệt sẽ trả lời công khai dưới bình luận + nhắn inbox cho khách (Chỉnh sửa = sửa tin inbox). Từ chối = không nhắn khách này.";
+  if (d.subject_type === "email_campaign") return `Phê duyệt sẽ gửi email tới ${d.preview?.recipients ?? "?"} người (${d.preview?.segment ?? ""}) ${d.preview?.scheduledAt ? `lúc ${new Date(d.preview.scheduledAt).toLocaleString("vi-VN")}` : "ngay"}, trong khung giờ gửi và hạn mức ${d.preview?.dailyLimit ?? "?"}/ngày. Từ chối = về nháp.`;
+  if (d.subject_type === "email_sequence") return "Phê duyệt sẽ KÍCH HOẠT chuỗi: người khớp trigger được ghi danh và nhận lần lượt các email theo lịch. Tạm dừng được ở trang Email.";
   if (d.subject_type === "creative_job") return `Phê duyệt sẽ tải video lên ${(d.preview?.channels ?? []).join(", ")} dưới dạng BẢN NHÁP (chưa công khai).`;
   if (d.subject?.task?.agent_key === "strategy") return "Phê duyệt chiến lược sẽ kích hoạt các agent viết nội dung theo kế hoạch.";
   if (d.subject?.content?.channel) return "Phê duyệt sẽ lên lịch đăng bài theo khung giờ hiệu quả (dừng được bằng kill switch).";
@@ -205,6 +209,22 @@ function SubjectView({ d, onChange }: { d: any; onChange?: () => void }) {
       <div><p className="mb-1 font-semibold">Bình luận của {d.preview?.author}{d.preview?.postTitle ? ` dưới “${d.preview.postTitle}”` : ""}</p><div className="whitespace-pre-wrap rounded-xl bg-soft p-3 text-ink">{d.preview?.comment}</div>{d.preview?.permalink && <a href={d.preview.permalink} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline">Mở bài ↗</a>}</div>
       {d.preview?.replyText && <div><p className="mb-1 font-semibold">Trả lời công khai dưới bình luận</p><div className="whitespace-pre-wrap rounded-xl border border-line p-3 leading-relaxed text-ink">{d.preview.replyText}</div></div>}
       {d.preview?.dmText && <div><p className="mb-1 font-semibold">Tin inbox gửi riêng cho khách</p><div className="whitespace-pre-wrap rounded-xl border border-blue-500/40 bg-blue-500/5 p-4 leading-relaxed text-ink">{d.preview.dmText}</div></div>}
+    </div>
+  );
+  if (d.subject_type === "email_campaign") return (
+    <div className="space-y-3 text-sm">
+      <div className="flex flex-wrap gap-2"><Badge tone="blue">Email · {d.preview?.recipients} người nhận</Badge><Badge>{d.preview?.segment}</Badge>{d.preview?.abPct > 0 && <Badge tone="violet">A/B {d.preview.abPct}% bản B</Badge>}{d.preview?.resendAfterHours && <Badge>Gửi lại người chưa mở sau {d.preview.resendAfterHours}h</Badge>}</div>
+      <p><b>Tiêu đề:</b> {d.preview?.subject}</p>{d.preview?.subjectB && <p><b>Tiêu đề B:</b> {d.preview.subjectB}</p>}
+      <iframe title="email" sandbox="" src={`/v1/email/campaigns/${d.subject_id}/preview-html`} className="h-[55vh] w-full rounded-xl border border-line bg-white" />
+      <a href="/email?tab=campaigns" className="text-xs text-blue-600 underline">Mở trang Email</a>
+    </div>
+  );
+  if (d.subject_type === "email_sequence") return (
+    <div className="space-y-3 text-sm">
+      <div className="flex flex-wrap gap-2"><Badge tone="blue">Chuỗi · {d.preview?.steps?.length} email</Badge><Badge>Điểm {d.preview?.score}/100</Badge><Badge>Trigger: {d.preview?.trigger?.type}{d.preview?.trigger?.tag ? ` «${d.preview.trigger.tag}»` : ""}</Badge></div>
+      <ol className="space-y-2">{(d.preview?.steps ?? []).map((s: any) => (
+        <li key={s.position} className="rounded-xl border border-line p-3"><p className="text-xs text-muted">Email {s.position + 1} · sau {s.delayDays} ngày{s.noHardSell ? " · cấm chào bán" : ""}</p><p className="font-medium">{s.subject}</p><p className="whitespace-pre-wrap text-xs text-muted">{s.excerpt}…</p></li>))}</ol>
+      <a href="/email?tab=sequences" className="text-xs text-blue-600 underline">Mở trang Email</a>
     </div>
   );
   if (d.subject_type === "order_draft") return (

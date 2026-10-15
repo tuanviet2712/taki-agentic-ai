@@ -246,6 +246,8 @@ export const OrderForm = z.object({
   /** Tiền thu hộ; bỏ trống = bằng tổng đơn. */
   cod: z.number().int().nonnegative().max(10_000_000_000).optional(),
   note: z.string().trim().max(500).optional(),
+  /** Email khách (tuỳ chọn): gửi thư xác nhận / chuỗi sau mua qua kênh Email. */
+  email: z.string().trim().max(254).email("Email không hợp lệ").optional().or(z.literal("")),
   /** Chỉ đẩy sang Pancake khi phiếu nói rõ true. */
   pushToPancake: z.boolean().optional(),
 });
