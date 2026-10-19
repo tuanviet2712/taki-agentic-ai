@@ -266,6 +266,7 @@ async function mktReview(bizId: string, rubricKey: string, v: { title: string; h
   try {
     const r = await generate({
       bizId, agentKey: "review", tier: "medium", schema: MktJudge,
+      allowCrossProvider: true,
       system: `Bạn là Trưởng nhóm Kiểm duyệt của Phòng Marketing AI. Chấm thật, không nể. Trả JSON theo schema: score /100, verdict dat (>=${passMark}) hoặc sua, tối đa 3 lỗi cụ thể nhất, vi phạm DNA (claim cấm, số liệu không có trong DNA, ký tự cấm, sai lớp brand/xưng hô, rủi ro chính sách Meta), dấu vết văn AI, và 1 đoạn gợi ý sửa.`,
       systemSuffix: pb.text,
       user: `LOẠI: ${kind} · KÊNH: ${v.channel ?? "?"}\nTIÊU ĐỀ: ${v.title}\nHOOK: ${v.hook}\n\nNỘI DUNG:\n${v.body}\n\nCTA: ${v.cta}`,

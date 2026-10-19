@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Pencil, RotateCcw, Sparkles, X, XCircle } from "lucide-react";
+import { AlertTriangle, Check, Pencil, RotateCcw, Sparkles, Users, X, XCircle } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { openCouncilAudit } from "./AgentDialoguePanel";
 import { AGENT_LABEL, CONTENT_STATUS, KIND_LABEL, TASK_STATUS, num, timeAgo } from "../lib/format";
 import { Badge, Button, Empty, Loading, Modal, PlatformIcon, cx, inputCls, useToast } from "./ui";
 
@@ -51,6 +52,16 @@ export function TaskResult({ id, onClose }: { id: string | null; onClose: () => 
   return (
     <Modal open={!!id} onClose={onClose} wide title={show ? t.title : "Kết quả tác vụ"}
       footer={show ? <div className="flex w-full flex-wrap items-center gap-2">
+        <Button
+          variant="success"
+          icon={Users}
+          onClick={() => {
+            onClose();
+            openCouncilAudit({ targetType: "task", targetId: t.id, title: t.title });
+          }}
+        >
+          Hội đồng Agent thảo luận & tối ưu
+        </Button>
         {RETRYABLE.includes(t.status) && <Button icon={RotateCcw} loading={busy === "retry"} onClick={() => run("retry", () => api.post(`tasks/${t.id}/retry`), "Đã cho agent chạy lại")}>Chạy lại</Button>}
         {CANCELLABLE.includes(t.status) && <Button variant="ghost" icon={XCircle} loading={busy === "cancel"} onClick={() => run("cancel", () => api.post(`tasks/${t.id}/cancel`), "Đã huỷ tác vụ", true)}>Huỷ tác vụ</Button>}
         <span className="flex-1" />

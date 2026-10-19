@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CATALOG } from "@dotaka/agents";
 import { activeDna, audit, bizSettings, bus, byId, emit, insert, ownerProfile, q, update, type Row } from "@dotaka/db";
-import { effectiveProvider, modelFor, modelMatchesProvider, runCodexAgent, selectedAiAccount, tokensUsedToday, withAiAccount, type Provider } from "@dotaka/llm-gateway";
+import { defaultModelsForProvider, effectiveProvider, inferProviderFromModel, llmSettings, modelFor, modelMatchesProvider, runCodexAgent, runGeminiAgent, runGrokAgent, selectedAiAccount, tokensUsedToday, withAiAccount, type Provider, type Tier } from "@dotaka/llm-gateway";
 import { AppError, logger, nowIso } from "@dotaka/shared";
 import { enqueue } from "./queue.ts";
 
@@ -25,10 +25,28 @@ const API_URL = `http://127.0.0.1:${process.env.API_PORT ?? 8787}`;
 const BIN = process.env.CLAUDE_CLI_PATH ?? "claude";
 const TIMEOUT_MS = 10 * 60_000;
 
+/** Automatically switch & activate the matching CLI provider when the user selects a model from another CLI. */
+export function activateProviderForModel(bizId: string, model: string | null | undefined, actor: string) {
+  if (!model) return;
+  const cur = llmSettings(bizId);
+  if (cur.provider !== "sandbox" && modelMatchesProvider(model, cur.provider)) return;
+  const target = inferProviderFromModel(model);
+  if (!target || target === cur.provider) return;
+  const saved = { ...cur.providerModels, [cur.provider]: cur.models };
+  const baseModels = saved[target] ?? defaultModelsForProvider(target);
+  const models: Record<Tier, string> = { ...baseModels, medium: model };
+  const nextLlm = { ...cur, provider: target, models, providerModels: { ...saved, [target]: models } };
+  const s = bizSettings(bizId) as any;
+  update("biz", bizId, { settings: { ...s, llm: nextLlm } });
+  audit(bizId, actor, "llm.auto_switched_by_model", { type: "biz", id: bizId }, { from: cur.provider, to: target, model });
+  emit(bizId, "llm.updated", { provider: target, model });
+}
+
 export function assistantSettings(bizId: string) {
   return { model: null as string | null, autoConfirm: false, ...((bizSettings(bizId) as any).assistant ?? {}) };
 }
 export function saveAssistantSettings(bizId: string, patch: { model?: string | null; autoConfirm?: boolean }, actor: string) {
+  if (patch.model) activateProviderForModel(bizId, patch.model, actor);
   const s = bizSettings(bizId) as any;
   const next = { ...assistantSettings(bizId), ...patch };
   update("biz", bizId, { settings: { ...s, assistant: next } });
@@ -153,8 +171,9 @@ export async function sendAssistantMessage(bizId: string, threadId: string, text
   const thread = byId<Row>("assistant_thread", threadId);
   if (!thread || thread.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không thấy cuộc trò chuyện", 404);
   if (running.has(threadId)) throw new AppError("BUSY", "Ngân Nguyệt đang trả lời tin trước, Sếp chờ chút nhé", 409);
+  if (opts.model) activateProviderForModel(bizId, opts.model, "Sếp · qua Ngân Nguyệt");
   const effective = effectiveProvider(bizId);
-  if (effective.provider === "sandbox" || effective.ready === false) throw new AppError("NEED_CLI", effective.reason ?? "Ngân Nguyệt cần kết nối Claude hoặc ChatGPT — Kết nối AI", 400);
+  if (effective.provider === "sandbox" || effective.ready === false) throw new AppError("NEED_CLI", effective.reason ?? "Ngân Nguyệt cần kết nối AI CLI (Claude, Grok, ChatGPT hoặc Gemini) — Kết nối AI", 400);
   const provider = effective.provider;
   const accountId = provider === "codex_cli" ? selectedAiAccount(bizId)!.id : null;
   if (opts.model && !modelMatchesProvider(opts.model, provider)) throw new AppError("BAD_MODEL", "Model không thuộc kết nối AI đang chọn", 400);
@@ -186,6 +205,8 @@ export function stopAssistant(threadId: string) {
 
 async function runTurn(bizId: string, thread: Row, messageId: string, prompt: string, model: string, ctrl: AbortController, provider: Provider, accountId: string | null) {
   if (provider === "codex_cli") return runCodexTurn(bizId, thread, messageId, prompt, model, ctrl, accountId!);
+  if (provider === "grok_cli") return runGrokTurn(bizId, thread, messageId, prompt, model, ctrl);
+  if (provider === "gemini_cli") return runGeminiTurn(bizId, thread, messageId, prompt, model, ctrl);
   mkdirSync(RUN_DIR, { recursive: true });
   const mcpFile = join(RUN_DIR, `mcp-${thread.id}.json`);
   writeFileSync(mcpFile, JSON.stringify({ mcpServers: { taki: { command: process.execPath, args: [MCP_SERVER], env: { TAKI_API: API_URL, TAKI_THREAD: thread.id, TAKI_ACTOR: ASSISTANT.actor, TAKI_BIZ: bizId } } } }));
@@ -309,6 +330,60 @@ async function runCodexTurn(bizId: string, thread: Row, messageId: string, promp
     update("assistant_message", messageId, { text, log, model: result.model, status: "done", error: null });
   } catch (e) {
     const message = e instanceof Error ? e.message : "ChatGPT chưa xử lý được yêu cầu";
+    update("assistant_message", messageId, { text: ctrl.signal.aborted ? `${text}\n\n_(Sếp đã dừng)_` : text || message, log, status: ctrl.signal.aborted ? "stopped" : "error", error: ctrl.signal.aborted ? null : message });
+  } finally {
+    running.delete(thread.id);
+    emit(bizId, "assistant.updated", { threadId: thread.id, messageId, status: "done" });
+  }
+}
+
+async function runGrokTurn(bizId: string, thread: Row, messageId: string, prompt: string, model: string, ctrl: AbortController) {
+  const log: Row[] = [];
+  let text = "";
+  try {
+    const budget = q.get<Row>("SELECT token_budget_day FROM agent_config WHERE biz_id = ? AND agent_key = ?", bizId, ASSISTANT.key)?.token_budget_day;
+    if (budget && tokensUsedToday(bizId, ASSISTANT.key) >= budget) throw new AppError("TOKEN_BUDGET_EXCEEDED", "Ngân Nguyệt đã đạt trần token hôm nay", 429);
+    const history = q.all<Row>("SELECT role, text FROM assistant_message WHERE thread_id = ? AND id != ? AND id != (SELECT id FROM assistant_message WHERE thread_id = ? AND role = 'user' ORDER BY rowid DESC LIMIT 1) AND status = 'done' ORDER BY created_at DESC, rowid DESC LIMIT 24", thread.id, messageId, thread.id).reverse();
+    const context = history.map((m) => `${m.role === "user" ? "Sếp" : "Ngân Nguyệt"}: ${m.text}`).join("\n\n").slice(-40_000);
+    const result = await runGrokAgent({
+      signal: ctrl.signal, model, system: systemPrompt(bizId),
+      prompt: `Lịch sử hội thoại (chỉ dùng làm ngữ cảnh):\n${context}\n\nYêu cầu hiện tại:\n${prompt}`, timeoutMs: TIMEOUT_MS,
+      mcp: { taki: { command: process.execPath, args: [MCP_SERVER], env: { TAKI_API: API_URL, TAKI_THREAD: thread.id, TAKI_ACTOR: ASSISTANT.actor, TAKI_BIZ: bizId } } },
+      onStep: (step) => { log.push(step); if (step.kind === "text") text = step.text; update("assistant_message", messageId, { text, log }); live(bizId, { threadId: thread.id, messageId, status: "streaming", text, log }); },
+    });
+    text = result.text;
+    insert("model_usage", { biz_id: bizId, agent_key: ASSISTANT.key, provider: "grok_cli", model: result.model,
+      tokens_in: result.usage.input, tokens_out: result.usage.output, tokens_cached: result.usage.cached, cost_micros: 0, latency_ms: result.durationMs, at: nowIso() });
+    update("assistant_message", messageId, { text, log, model: result.model, status: "done", error: null });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Grok CLI chưa xử lý được yêu cầu";
+    update("assistant_message", messageId, { text: ctrl.signal.aborted ? `${text}\n\n_(Sếp đã dừng)_` : text || message, log, status: ctrl.signal.aborted ? "stopped" : "error", error: ctrl.signal.aborted ? null : message });
+  } finally {
+    running.delete(thread.id);
+    emit(bizId, "assistant.updated", { threadId: thread.id, messageId, status: "done" });
+  }
+}
+
+async function runGeminiTurn(bizId: string, thread: Row, messageId: string, prompt: string, model: string, ctrl: AbortController) {
+  const log: Row[] = [];
+  let text = "";
+  try {
+    const budget = q.get<Row>("SELECT token_budget_day FROM agent_config WHERE biz_id = ? AND agent_key = ?", bizId, ASSISTANT.key)?.token_budget_day;
+    if (budget && tokensUsedToday(bizId, ASSISTANT.key) >= budget) throw new AppError("TOKEN_BUDGET_EXCEEDED", "Ngân Nguyệt đã đạt trần token hôm nay", 429);
+    const history = q.all<Row>("SELECT role, text FROM assistant_message WHERE thread_id = ? AND id != ? AND id != (SELECT id FROM assistant_message WHERE thread_id = ? AND role = 'user' ORDER BY rowid DESC LIMIT 1) AND status = 'done' ORDER BY created_at DESC, rowid DESC LIMIT 24", thread.id, messageId, thread.id).reverse();
+    const context = history.map((m) => `${m.role === "user" ? "Sếp" : "Ngân Nguyệt"}: ${m.text}`).join("\n\n").slice(-40_000);
+    const result = await runGeminiAgent({
+      signal: ctrl.signal, model, system: systemPrompt(bizId),
+      prompt: `Lịch sử hội thoại (chỉ dùng làm ngữ cảnh):\n${context}\n\nYêu cầu hiện tại:\n${prompt}`, timeoutMs: TIMEOUT_MS,
+      mcp: { taki: { command: process.execPath, args: [MCP_SERVER], env: { TAKI_API: API_URL, TAKI_THREAD: thread.id, TAKI_ACTOR: ASSISTANT.actor, TAKI_BIZ: bizId } } },
+      onStep: (step) => { log.push(step); if (step.kind === "text") text = step.text; update("assistant_message", messageId, { text, log }); live(bizId, { threadId: thread.id, messageId, status: "streaming", text, log }); },
+    });
+    text = result.text;
+    insert("model_usage", { biz_id: bizId, agent_key: ASSISTANT.key, provider: "gemini_cli", model: result.model,
+      tokens_in: result.usage.input, tokens_out: result.usage.output, tokens_cached: result.usage.cached, cost_micros: 0, latency_ms: result.durationMs, at: nowIso() });
+    update("assistant_message", messageId, { text, log, model: result.model, status: "done", error: null });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Gemini CLI chưa xử lý được yêu cầu";
     update("assistant_message", messageId, { text: ctrl.signal.aborted ? `${text}\n\n_(Sếp đã dừng)_` : text || message, log, status: ctrl.signal.aborted ? "stopped" : "error", error: ctrl.signal.aborted ? null : message });
   } finally {
     running.delete(thread.id);

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, CheckCircle2, Clock, FileText, Pencil, ShieldAlert, X, XCircle } from "lucide-react";
+import { Check, CheckCircle2, Clock, FileText, Pencil, ShieldAlert, Users, X, XCircle } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { openCouncilAudit } from "../components/AgentDialoguePanel";
 import { AGENT_LABEL, timeAgo, vnd } from "../lib/format";
 import { Badge, Button, Card, Empty, ExpandableText, JevBadge, Loading, Modal, PageHeader, PlatformIcon, ProbBar, Stat, Tabs, cx, inputCls, useToast } from "../components/ui";
 import { OrderDraftPanel } from "../components/PancakeOrders";
@@ -159,6 +160,15 @@ export function Approvals() {
                     </div>
                   )}
                   <div className="flex flex-wrap justify-end gap-2">
+                    {!mode && ["task", "ad_candidate", "action"].includes(d.subject_type) && (
+                      <Button
+                        variant="soft"
+                        icon={Users}
+                        onClick={() => openCouncilAudit({ targetType: "approval", targetId: d.id, title: d.title })}
+                      >
+                        Hội đồng thảo luận & tối ưu
+                      </Button>
+                    )}
                     {mode ? <Button variant="ghost" onClick={() => setMode(null)}>Hủy</Button> : (
                       <>
                         {(content || d.subject_type === "ad_candidate" || d.subject_type === "follow_up" || (d.subject_type === "nurture_send" && d.preview?.dmText)) && <Button icon={Pencil} onClick={() => { setMode("edit"); setEdited(d.subject_type === "follow_up" || d.subject_type === "nurture_send" ? String(d.preview?.text ?? "") : content?.body ?? String(d.subject?.candidate?.daily_budget ?? "")); }}>Chỉnh sửa</Button>}

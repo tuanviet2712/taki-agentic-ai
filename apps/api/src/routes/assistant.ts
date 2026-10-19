@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { byId, type Row } from "@dotaka/db";
-import { cliInfo, effectiveProvider, modelCatalog, modelFor } from "@dotaka/llm-gateway";
+import { ALL_PROVIDER_CATALOGS, cliInfo, effectiveProvider, geminiInfo, grokInfo, llmSettings, modelCatalog, modelFor } from "@dotaka/llm-gateway";
 import {
   createTelegramPairCode, removeTelegramChat, telegramAssistantStatus,
   ASSISTANT, assistantBusy, assistantFindings, assistantSettings, checkActionPath, createAction, createThread, deleteThread, dispatchAgentTask,
@@ -32,18 +32,40 @@ export function assistantRoutes(app: FastifyInstance) {
     return finishAction(bizId, id, res.statusCode < 400 ? "done" : "failed", res.statusCode < 400 ? body : { status: res.statusCode, error: (body as any)?.message ?? body }, actor);
   }
 
-  r.get("/v1/assistant", ({ bizId }) => ({
-    name: ASSISTANT.name, settings: assistantSettings(bizId), defaultModel: modelFor(bizId, ASSISTANT.key, "medium"),
-    models: modelCatalog(bizId), ready: effectiveProvider(bizId).provider === "codex_cli" ? effectiveProvider(bizId).ready === true : effectiveProvider(bizId).provider === "claude_cli" && cliInfo().available && cliInfo().loggedIn !== false,
-    authError: effectiveProvider(bizId).provider === "codex_cli" ? effectiveProvider(bizId).reason : cliInfo().loggedIn === false ? (cliInfo().authError ?? "Claude CLI chưa đăng nhập") : undefined,
-    suggestions: [
-      "Hôm nay hệ thống có gì cần em để ý không?",
-      "Báo cáo nhanh tình hình quảng cáo 7 ngày qua",
-      "Giao Content Agent viết 1 bài Facebook giới thiệu khóa học mới",
-      "Những mục nào đang chờ Sếp duyệt? Mục nào nên duyệt trước?",
-      "Các agent đang làm gì? Có tác vụ nào lỗi không?",
-    ],
-  }));
+  r.get("/v1/assistant", ({ bizId }) => {
+    const eff = effectiveProvider(bizId);
+    const chosen = llmSettings(bizId).provider;
+    const ready = eff.provider === "codex_cli" || eff.provider === "grok_cli" || eff.provider === "gemini_cli"
+      ? eff.ready === true
+      : eff.provider === "claude_cli" && cliInfo().available && cliInfo().loggedIn !== false;
+    const authError = eff.provider === "codex_cli"
+      ? eff.reason
+      : chosen === "grok_cli" && !ready
+        ? (grokInfo().authError ?? eff.reason ?? "Grok CLI chưa đăng nhập")
+        : chosen === "gemini_cli" && !ready
+          ? (geminiInfo().authError ?? eff.reason ?? "Gemini CLI chưa đăng nhập")
+          : cliInfo().loggedIn === false
+            ? (cliInfo().authError ?? "Claude CLI chưa đăng nhập")
+            : eff.reason;
+    return {
+      name: ASSISTANT.name,
+      settings: assistantSettings(bizId),
+      defaultModel: modelFor(bizId, ASSISTANT.key, "medium"),
+      provider: eff.provider,
+      chosenProvider: chosen,
+      models: modelCatalog(bizId),
+      allCatalogs: ALL_PROVIDER_CATALOGS,
+      ready,
+      authError: ready ? undefined : authError,
+      suggestions: [
+        "Hôm nay hệ thống có gì cần em để ý không?",
+        "Báo cáo nhanh tình hình quảng cáo 7 ngày qua",
+        "Giao Content Agent viết 1 bài Facebook giới thiệu khóa học mới",
+        "Những mục nào đang chờ Sếp duyệt? Mục nào nên duyệt trước?",
+        "Các agent đang làm gì? Có tác vụ nào lỗi không?",
+      ],
+    };
+  });
   r.put("/v1/assistant/settings", (c) => {
     ceoOnly(c);
     const p = z.object({ model: z.string().nullable().optional(), autoConfirm: z.boolean().optional() }).parse(c.body);

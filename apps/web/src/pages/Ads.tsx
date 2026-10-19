@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Coins, FlaskConical, Megaphone, RefreshCw, RotateCcw, ShieldAlert, Target, TrendingUp, Wallet } from "lucide-react";
+import { Coins, FlaskConical, Megaphone, RefreshCw, RotateCcw, ShieldAlert, Target, TrendingUp, Users, Wallet } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { openCouncilAudit } from "../components/AgentDialoguePanel";
 import { ddmm, hhmm, num, pct, timeAgo, vnd, vndFull, type Tone } from "../lib/format";
 import { Badge, Button, Card, Empty, Field, Loading, Modal, PageHeader, PlatformIcon, Stat, Toggle, cx, inputCls, platformName, useToast } from "../components/ui";
 import { PlatformTabs, pfLabel, useAdsPlatform } from "../components/AdsPlatform";
@@ -193,7 +194,17 @@ export function Ads() {
                     </div>
                     <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-muted">{(c.reasons ?? []).map((r: string) => <li key={r}>{r}</li>)}</ul>
                     {c.decision_note && <p className="mt-1 text-xs text-rose-500">{c.decision_note}</p>}
-                    {c.status === "proposed" && c.approval_id && <Link to={`/approvals?id=${c.approval_id}`} className="mt-2 inline-block"><Button size="sm" variant="primary">Xem & duyệt</Button></Link>}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {c.status === "proposed" && c.approval_id && <Link to={`/approvals?id=${c.approval_id}`}><Button size="sm" variant="primary">Xem & duyệt</Button></Link>}
+                      <Button
+                        size="sm"
+                        variant="soft"
+                        icon={Users}
+                        onClick={() => openCouncilAudit({ targetType: "ad_candidate", targetId: c.id, title: c.title })}
+                      >
+                        Hội đồng thảo luận
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
@@ -243,7 +254,21 @@ export function Ads() {
                       <td className="px-2 py-2.5 text-xs text-muted">{showState(a.before)} → <b className="text-ink">{showState(a.after)}</b></td>
                       <td className="max-w-[240px] px-2 py-2.5 text-xs text-muted">{a.reason}</td>
                       <td className="px-2 py-2.5"><Badge tone={st.tone}>{st.label}</Badge></td>
-                      <td className="px-2 py-2.5 text-right">{a.status === "done" && !!a.reversible && <Button size="sm" icon={RotateCcw} onClick={() => setRevert(a)}>Hoàn tác</Button>}</td>
+                      <td className="px-2 py-2.5 text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          {a.status === "proposed" && (
+                            <Button
+                              size="sm"
+                              variant="soft"
+                              icon={Users}
+                              onClick={() => openCouncilAudit({ targetType: "action", targetId: a.id, title: a.target_name ?? a.type })}
+                            >
+                              Hội đồng
+                            </Button>
+                          )}
+                          {a.status === "done" && !!a.reversible && <Button size="sm" icon={RotateCcw} onClick={() => setRevert(a)}>Hoàn tác</Button>}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}

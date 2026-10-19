@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdsLayout } from "./components/AdsLayout";
 import { Layout } from "./components/Layout";
 import { AssistantPanel } from "./components/AssistantPanel";
+import { AgentDialoguePanel } from "./components/AgentDialoguePanel";
 import { ToastProvider } from "./components/ui";
 import { Overview } from "./pages/Overview";
 import { Brain } from "./pages/Brain";
@@ -47,6 +48,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <>
       {loc.pathname.startsWith("/ads") ? <AdsLayout>{children}</AdsLayout> : <Layout>{children}</Layout>}
+      <AgentDialoguePanel />
       <AssistantPanel />
     </>
   );

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Lightbulb, Plus, RefreshCw, Target, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Lightbulb, Plus, RefreshCw, Target, Users, Wand2 } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { openCouncilAudit } from "../components/AgentDialoguePanel";
 import { TaskResult } from "../components/TaskResult";
 import { AGENT_LABEL, CONTENT_STATUS, TASK_STATUS, ddmm, hhmm, num, timeAgo, vnd } from "../lib/format";
 import { Badge, Button, Card, Empty, ExpandableText, Field, Loading, Modal, PageHeader, PlatformIcon, Progress, cx, inputCls, platformName, useToast } from "../components/ui";
@@ -191,7 +192,23 @@ function GoalCard({ g }: { g: any }) {
           <Button size="sm" variant="primary" icon={Wand2} loading={continuing} onClick={goOn}>Triển khai tiếp</Button>
         </div>
       )}
-      <div className="mt-4 flex items-center gap-3"><Progress value={tasks.length ? (done / tasks.length) * 100 : 0} tone="green" /><span className="whitespace-nowrap text-xs text-muted">{done}/{tasks.length} khâu xong</span></div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <Progress value={tasks.length ? (done / tasks.length) * 100 : 0} tone="green" />
+          <span className="whitespace-nowrap text-xs text-muted">{done}/{tasks.length} khâu xong</span>
+        </div>
+        {tasks.length > 0 && (
+          <button
+            type="button"
+            onClick={() => openCouncilAudit({ goalId: g.id, title: g.title })}
+            data-testid={`council-audit-goal-${g.id}`}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-600 hover:text-white dark:text-emerald-300"
+          >
+            <Users className="h-3.5 w-3.5" />
+            Hội đồng tự rà soát & tối ưu Kế hoạch
+          </button>
+        )}
+      </div>
       {(() => {
         // Số bài Sếp yêu cầu so với số bài đang có: thấy ngay bài nào chờ duyệt / bị chặn (bị chặn thì kế hoạch không tự làm tiếp bài đó).
         const want = Number(g.params?.contentCount) || 0;
@@ -203,20 +220,70 @@ function GoalCard({ g }: { g: any }) {
           <p className="mt-2 text-xs text-muted">
             {want ? <>Yêu cầu <b className="text-ink">{want}</b> bài · {pieces.length < want && tasks.some((t) => t.agent_key === "strategy" && t.status === "done") ? <b className="text-amber-600">mới lập {pieces.length}</b> : <>đã lập {pieces.length}</>}</> : <>Đã lập {pieces.length} bài</>}
             {" "}· xong {n(["done"])} · chờ duyệt {n(["awaiting_approval"])} · đang làm {n(["ready", "running", "in_review", "revising", "pending", "approved"])}
-            {blocked > 0 && <> · <b className="text-rose-600">bị chặn / lỗi {blocked}</b> (bấm vào bài để xem lý do và làm lại)</>}
+            {blocked > 0 && <> · <b className="text-rose-600">bị chặn / lỗi {blocked}</b> (bấm Hội đồng tự sửa lỗi hoặc bấm vào bài)</>}
           </p>
         );
       })()}
       <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {tasks.map((t, i) => {
           const ts = TASK_STATUS[t.status] ?? { label: t.status, tone: "gray" as const };
+          const councilScore = t.output?.councilConsensus?.score;
+          const isFailed = ["failed", "blocked", "rejected"].includes(t.status);
           return (
-            <button key={t.id} onClick={() => setOpenTask(t.id)} title="Bấm để xem kết quả và chỉnh sửa" className="group rounded-xl border border-line bg-soft/40 p-3 text-left transition hover:border-blue-400 hover:bg-card hover:shadow-card">
-              <div className="flex items-start justify-between gap-2"><p className="min-w-0 truncate text-sm font-medium text-ink" title={t.title}>{i + 1}. {t.title}</p><Badge tone={ts.tone}>{ts.label}</Badge></div>
-              <p className="mt-0.5 text-xs text-muted">{AGENT_LABEL[t.agent_key] ?? t.agent_key}{t.step ? ` · ${t.step}` : ""}</p>
-              <div className="mt-2 flex items-center gap-2"><Progress value={(t.progress ?? 0) * 100} tone={ts.tone === "red" ? "red" : "blue"} className="h-1.5" /><span className="w-9 text-right text-[11px] text-muted">{Math.round((t.progress ?? 0) * 100)}%</span></div>
-              <p className="mt-1.5 text-[11px] font-medium text-blue-600 opacity-70 group-hover:opacity-100">{ts.tone === "red" ? "Xem lý do & sửa →" : t.status === "done" || t.status === "awaiting_approval" ? "Xem kết quả & chỉnh sửa →" : "Xem chi tiết →"}</p>
-            </button>);
+            <div
+              key={t.id}
+              onClick={() => setOpenTask(t.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setOpenTask(t.id);
+              }}
+              title="Bấm để xem kết quả và chỉnh sửa"
+              className="group flex cursor-pointer flex-col justify-between rounded-xl border border-line bg-soft/40 p-3 text-left transition hover:border-blue-400 hover:bg-card hover:shadow-card"
+            >
+              <div>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 truncate text-sm font-medium text-ink" title={t.title}>{i + 1}. {t.title}</p>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {typeof councilScore === "number" && (
+                      <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                        HĐ {councilScore}đ
+                      </span>
+                    )}
+                    <Badge tone={ts.tone}>{ts.label}</Badge>
+                  </div>
+                </div>
+                <p className="mt-0.5 text-xs text-muted">{AGENT_LABEL[t.agent_key] ?? t.agent_key}{t.step ? ` · ${t.step}` : ""}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <Progress value={(t.progress ?? 0) * 100} tone={ts.tone === "red" ? "red" : "blue"} className="h-1.5" />
+                  <span className="w-9 text-right text-[11px] text-muted">{Math.round((t.progress ?? 0) * 100)}%</span>
+                </div>
+              </div>
+              <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-line/60 pt-2">
+                <span className="text-[11px] font-medium text-blue-600 opacity-80 group-hover:opacity-100">
+                  {ts.tone === "red" ? "Xem lý do & sửa →" : t.status === "done" || t.status === "awaiting_approval" ? "Xem kết quả & chỉnh sửa →" : "Xem chi tiết →"}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openCouncilAudit({ targetType: "task", targetId: t.id, title: `${i + 1}. ${t.title}` });
+                  }}
+                  data-testid={`council-audit-task-${t.id}`}
+                  className={cx(
+                    "inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition",
+                    isFailed
+                      ? "bg-rose-500/15 text-rose-700 hover:bg-rose-600 hover:text-white dark:text-rose-300"
+                      : "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-600 hover:text-white dark:text-emerald-300",
+                  )}
+                  title="Mở Hội đồng Agent tự đọc, thảo luận phản biện và đưa ra phương án tối ưu cho mục này"
+                >
+                  <Users className="h-3 w-3" />
+                  {isFailed ? "Hội đồng tự sửa" : "Hội đồng thảo luận"}
+                </button>
+              </div>
+            </div>
+          );
         })}
       </div>
       <TaskResult id={openTask} onClose={() => setOpenTask(null)} />

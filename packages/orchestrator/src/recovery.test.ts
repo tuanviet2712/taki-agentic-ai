@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, byId, closeDb, insert, openDb, q, type Row } from "@d
 
 /** Không để rơi bài: khởi động lại giữa bước hoàn thiện, task mất job, lượt đăng mất job. DB :memory:, không gọi AI. */
 vi.mock("./image-engine.ts", async (orig) => ({ ...(await orig<typeof import("./image-engine.ts")>()), postImageEngine: () => ({ engine: "claude", chosen: "claude" }) }));
-const { recoverStuckTasks, recoverTasksAfterRestart } = await import("./runtime.ts");
+const { finalizeTask, recoverStuckTasks, recoverTasksAfterRestart } = await import("./runtime.ts");
 const { recoverStuckPublishing } = await import("./publishing.ts");
 
 let B = "";
@@ -32,6 +32,18 @@ describe("khởi động lại", () => {
     expect(byId<Row>("task", fin.id)!.status).toBe("in_review");
     expect(jobsFor(fin.id, "task.finalize")).toBe(1);
     expect(byId<Row>("task", writing.id)!.status).toBe("ready");
+  });
+
+  it("khâu nội bộ (brief / strategy) không có content_item vẫn hoàn tất finalizeTask và mở khâu tiếp theo", async () => {
+    insert("agent_config", { biz_id: B, agent_key: "brief", autonomy: "L2", enabled: 1, tools: [] });
+    const goal = insert("goal", { biz_id: B, title: "Kế hoạch", description: "", template: "weekly_content", budget_ads: 0, status: "active", params: {} });
+    const brief = insert("task", { biz_id: B, goal_id: goal.id, agent_key: "brief", title: "Chuẩn hóa brief", status: "in_review", output: { goal: "x" }, input: {}, depends_on: [] });
+    const strategy = insert("task", { biz_id: B, goal_id: goal.id, agent_key: "strategy", title: "Chiến lược", status: "pending", input: {}, depends_on: [brief.id] });
+    insert("review_score", { biz_id: B, subject_type: "task", subject_id: brief.id, rubric_key: "brief", rubric_version: 1, total: 100, verdict: "pass", result: {} });
+    await finalizeTask(brief.id);
+    expect(byId<Row>("task", brief.id)!.status).toBe("done");
+    expect(byId<Row>("task", strategy.id)!.status).toBe("ready");
+    expect(jobsFor(strategy.id, "agent.run")).toBe(1);
   });
 });
 

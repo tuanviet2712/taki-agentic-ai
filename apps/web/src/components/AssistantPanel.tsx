@@ -230,9 +230,32 @@ function ChatTab({ info, threadId, setThreadId, newThread, pendingAsk, clearAsk,
           <button onClick={() => void newThread()} className="flex items-center gap-1 rounded-xl border border-line px-2.5 text-xs font-semibold text-ink hover:bg-soft"><Plus className="h-3.5 w-3.5" />Mới</button>
         </div>
         <div className="flex items-center gap-1.5">
-          <select className="min-w-0 flex-1 rounded-xl border border-line bg-card px-2.5 py-1.5 text-xs text-ink" value={model} onChange={(e) => setModel(e.target.value)} title="Model cho tin nhắn tiếp theo">
+          <select
+            className="min-w-0 flex-1 rounded-xl border border-line bg-card px-2.5 py-1.5 text-xs text-ink"
+            value={model}
+            onChange={async (e) => {
+              const v = e.target.value;
+              setModel(v);
+              try {
+                await api.put("assistant/settings", { model: v || null });
+                onSettings();
+                if (v) toast(`Ngân Nguyệt & hệ thống đã kích hoạt model: ${v}`);
+              } catch (err: any) { toast(err.message, "err"); }
+            }}
+            title="Chọn model AI (tự động kích hoạt CLI tương ứng: Grok, Claude, Codex, Gemini)"
+          >
             <option value="">Model mặc định ({info?.settings?.model ?? info?.defaultModel ?? "…"})</option>
-            {(info?.models ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            {info?.allCatalogs ? (
+              Object.entries(info.allCatalogs as Record<string, any[]>).map(([prov, items]) => (
+                <optgroup key={prov} label={prov === "grok_cli" ? "Grok Bot (Grok CLI)" : prov === "claude_cli" ? "Claude (Claude Code CLI)" : prov === "codex_cli" ? "ChatGPT (Codex CLI)" : "Google Gemini (Gemini CLI)"}>
+                  {(items ?? []).map((m: any) => (
+                    <option key={`${prov}-${m.id}`} value={m.id}>{m.label} ({m.id})</option>
+                  ))}
+                </optgroup>
+              ))
+            ) : (
+              (info?.models ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.label}</option>)
+            )}
           </select>
           <label className="flex shrink-0 items-center gap-1.5 rounded-xl border border-line px-2 py-1 text-[11px] text-muted" title="Bật: Ngân Nguyệt tự thực hiện thao tác nhạy cảm (duyệt, trả lời khách, đổi quảng cáo, tốn tín dụng Flow…) không cần Sếp bấm xác nhận">
             <ShieldCheck className={cx("h-3.5 w-3.5", info?.settings?.autoConfirm ? "text-amber-500" : "text-emerald-500")} />Tự thực hiện
@@ -246,8 +269,8 @@ function ChatTab({ info, threadId, setThreadId, newThread, pendingAsk, clearAsk,
           <div className="flex flex-col items-center px-2 pt-6 text-center">
             <NguyetAvatar size={72} />
             <p className="mt-3 font-semibold text-ink">Em là Ngân Nguyệt — trợ lý riêng của Sếp.</p>
-            <p className="mt-1 text-xs text-muted">Em điều phối toàn bộ Agentic AI: giao việc ngay cho các agent, theo dõi và can thiệp mọi tác vụ, báo cáo số liệu thật. Việc nhạy cảm em sẽ hỏi Sếp xác nhận trước.</p>
-            {info && !info.ready && <p className="mt-2 rounded-xl bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">{info.authError ?? "Chọn và đăng nhập Claude hoặc ChatGPT trong Kết nối AI để em làm việc."}</p>}
+            <p className="mt-1 text-xs text-muted">Em điều phối toàn bộ Agentic AI: giao việc ngay cho các agent, theo dõi và can thiệp mọi tác vụ, báo cáo số liệu thật. Đổi model ở trên sẽ tự động chuyển đổi giữa Grok Bot, Claude Code, Codex và Gemini.</p>
+            {info && !info.ready && <p className="mt-2 rounded-xl bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">{info.authError ?? "Chọn và đăng nhập Grok, Claude, ChatGPT hoặc Gemini trong Kết nối AI để em làm việc."}</p>}
             <div className="mt-4 flex flex-col items-center gap-2">
               {(info?.suggestions ?? []).map((s: string) => (
                 <button key={s} onClick={() => void send(s)} className="rounded-full border border-dashed border-blue-400/60 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-500/5 dark:text-blue-300">{s}</button>

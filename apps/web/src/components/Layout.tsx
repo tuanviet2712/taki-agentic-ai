@@ -175,10 +175,11 @@ export function Layout({ children }: { children: ReactNode }) {
       })}
     </nav>
   );
+  const llmLabel = sys?.llm?.chosen === "grok_cli" ? "Grok Bot (CLI)" : sys?.llm?.chosen === "gemini_cli" ? "Gemini (CLI)" : sys?.llm?.chosen === "codex_cli" ? "ChatGPT (Codex)" : "Claude (CLI)";
   const status = (compact: boolean) => (
     <div className={cx("shrink-0 border-t border-line text-[11px] text-muted", compact ? "flex flex-col items-center gap-2 py-3" : "space-y-1 px-4 py-2.5")}>
       <ModeRow compact={compact} label="Jev (System One)" on={sys?.jev?.enabled} offText="heuristic" />
-      <ModeRow compact={compact} label={sys?.llm?.provider === "codex_cli" ? "ChatGPT (Codex)" : "Claude (LLM)"} on={sys?.llm?.enabled} offText={sys?.llm?.provider === "codex_cli" ? "chưa kết nối" : "sandbox"} />
+      <ModeRow compact={compact} label={llmLabel} on={sys?.llm?.enabled} offText={sys?.llm?.chosen === "sandbox" ? "sandbox" : "chưa kết nối"} />
       <NavLink to="/ads/integrations" className="block rounded-lg"><ModeRow compact={compact} label="Nền tảng" on={(sys?.connections?.live ?? 0) > 0} onText={`${sys?.connections?.live ?? 0} LIVE`} offText={sys?.connections?.sandbox ? "mô phỏng" : "chưa kết nối"} /></NavLink>
     </div>
   );

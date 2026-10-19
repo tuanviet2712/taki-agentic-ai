@@ -20,7 +20,7 @@ const usd = (micros: number | null | undefined) => `$${((micros ?? 0) / 1e6).toF
 const LLM_AGENTS = new Set(["assistant", "brief", "market_research", "strategy", "content", "video_script", "seo_web", "chat", "ads", "review"]);
 
 /** One agent as a compact row (name, status, on/off); settings drop down only when the row is opened. */
-function AgentRow({ a, catalog, putConfig, changeAutonomy, onAssign }: { a: any; catalog: any[]; putConfig: (key: string, patch: any, msg: string) => void; changeAutonomy: (agent: any, autonomy: string) => void; onAssign: () => void }) {
+function AgentRow({ a, catalog, allCatalogs, putConfig, changeAutonomy, onAssign }: { a: any; catalog: any[]; allCatalogs?: Record<string, any[]>; putConfig: (key: string, patch: any, msg: string) => void; changeAutonomy: (agent: any, autonomy: string) => void; onAssign: () => void }) {
   const [open, toggleOpen] = useOpen(false);
   const cfg = a.config ?? {};
   const enabled = !!cfg.enabled;
@@ -50,12 +50,20 @@ function AgentRow({ a, catalog, putConfig, changeAutonomy, onAssign }: { a: any;
                 {Object.entries(AUTONOMY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </label>
-            <div className="space-y-1"><span className="block text-[11px] font-medium text-muted">Model</span>
+            <div className="space-y-1"><span className="block text-[11px] font-medium text-muted">Model (tự kích hoạt CLI)</span>
               {LLM_AGENTS.has(a.key) ? (
-                <select className={cx(inputCls, "py-1.5 text-xs")} value={catalog.some((m: any) => m.id === a.modelOverride) ? a.modelOverride : ""} title={`Đang dùng: ${a.model}`}
-                  onChange={(e) => putConfig(a.key, { model: e.target.value || null }, `${a.label}: ${e.target.value ? `dùng ${e.target.value}` : "theo tầng mặc định"}`)}>
+                <select className={cx(inputCls, "py-1.5 text-xs")} value={a.modelOverride ?? ""} title={`Đang dùng: ${a.model}`}
+                  onChange={(e) => putConfig(a.key, { model: e.target.value || null }, `${a.label}: ${e.target.value ? `dùng ${e.target.value} (đã kích hoạt CLI)` : "theo tầng mặc định"}`)}>
                   <option value="">Model theo tầng ({a.model})</option>
-                  {catalog.map((m: any) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  {allCatalogs ? (
+                    Object.entries(allCatalogs).map(([prov, items]) => (
+                      <optgroup key={prov} label={prov === "grok_cli" ? "Grok Bot (Grok CLI)" : prov === "claude_cli" ? "Claude (Claude Code CLI)" : prov === "codex_cli" ? "ChatGPT (Codex CLI)" : "Google Gemini (Gemini CLI)"}>
+                        {(items ?? []).map((m: any) => <option key={`${prov}-${m.id}`} value={m.id}>{m.label} ({m.id})</option>)}
+                      </optgroup>
+                    ))
+                  ) : (
+                    catalog.map((m: any) => <option key={m.id} value={m.id}>{m.label}</option>)
+                  )}
                 </select>
               ) : <p className="rounded-xl bg-soft px-3 py-1.5 text-xs text-muted">Chạy bằng mã tất định{a.usesJev?.length ? " + Jev" : ""}</p>}
             </div>
@@ -119,7 +127,12 @@ export function Agents() {
   return (
     <div className="space-y-6">
       <PageHeader title="Agent & Tác vụ" subtitle="Bật/tắt từng agent, đặt mức tự chủ và theo dõi mọi tác vụ đội AI đang làm cho doanh nghiệp. Các agent tự chạy theo luồng; khi cần, giao việc riêng cho 1 agent — làm xong là dừng."
-        actions={<Button variant="primary" icon={Send} className="whitespace-nowrap" onClick={() => setAssign({ agent: "" })}>Giao việc riêng</Button>} />
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="soft" icon={Bot} className="whitespace-nowrap border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300" onClick={() => window.dispatchEvent(new CustomEvent("council:open"))}>Hội đồng Agent · Đa Model</Button>
+            <Button variant="primary" icon={Send} className="whitespace-nowrap" onClick={() => setAssign({ agent: "" })}>Giao việc riêng</Button>
+          </div>
+        } />
 
       <div className="grid gap-4 sm:grid-cols-2 wide:grid-cols-5 sm:[&>*:last-child:nth-child(odd)]:col-span-2 wide:[&>*:last-child:nth-child(odd)]:col-span-1">
         <Stat icon={Cpu} tone="blue" label="Token (7 ngày)" value={num(tokens)} sub={`${(u?.byAgent ?? []).reduce((a: number, r: any) => a + r.calls, 0)} lượt gọi model`} />
@@ -133,7 +146,7 @@ export function Agents() {
         {!agents.data ? <Loading /> : (
           <div className="grid items-start gap-x-4 lg:grid-cols-2">
             {agents.data.map((a) => (
-              <AgentRow key={a.key} a={a} catalog={llm.data?.catalog ?? []} putConfig={putConfig} changeAutonomy={changeAutonomy} onAssign={() => setAssign({ agent: a.key })} />
+              <AgentRow key={a.key} a={a} catalog={llm.data?.catalog ?? []} allCatalogs={llm.data?.allCatalogs} putConfig={putConfig} changeAutonomy={changeAutonomy} onAssign={() => setAssign({ agent: a.key })} />
             ))}
           </div>
         )}

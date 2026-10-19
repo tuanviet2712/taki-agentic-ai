@@ -78,6 +78,7 @@ export * from "./chrome-profiles.ts";
 export * from "./claude-chrome.ts";
 export * from "./flow-browser.ts";
 export * from "./assistant.ts";
+export * from "./agent-dialogue.ts";
 export * from "./brain.ts";
 export * from "./brain-auto.ts";
 export * from "./video-ai.ts";

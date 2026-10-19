@@ -4,8 +4,8 @@ import { CATALOG, STAGES } from "@dotaka/agents";
 import { AgentConfigUpdate } from "@dotaka/contracts";
 import { activeDna, audit, bizSettings, bus, byId, emit, insert, ownerProfile, q, update, type Row } from "@dotaka/db";
 import { JEV_MODEL, jevEnabled } from "@dotaka/jev";
-import { DEFAULT_LLM, DEFAULT_CODEX_MODELS, MODEL_CATALOG, cancelAiLogin, checkAiAccount, codexInfo, createAiAccount, disconnectAiAccount, listAiAccounts, mustAiAccount, removeAiAccount, selectedAiAccount, startAiLogin, cliInfo, effectiveProvider, llmSettings, modelCatalog, modelMatchesProvider, modelFor, testModel, tokensUsedToday, type Tier } from "@dotaka/llm-gateway";
-import { FLOW_IMAGE_MODELS, imageEngineStatus, latestDaily, sumMetrics, today } from "@dotaka/orchestrator";
+import { ALL_PROVIDER_CATALOGS, DEFAULT_LLM, cancelAiLogin, cancelGrokLogin, checkAiAccount, codexInfo, createAiAccount, defaultModelsForProvider, disconnectAiAccount, disconnectGrok, geminiInfo, grokInfo, inferProviderFromModel, listAiAccounts, mustAiAccount, removeAiAccount, selectedAiAccount, startAiLogin, startGrokLogin, cliInfo, effectiveProvider, llmSettings, modelCatalog, modelMatchesProvider, modelFor, testModel, tokensUsedToday, type Provider, type Tier } from "@dotaka/llm-gateway";
+import { FLOW_IMAGE_MODELS, activateProviderForModel, imageEngineStatus, latestDaily, sumMetrics, today } from "@dotaka/orchestrator";
 import { AppError, sha256 } from "@dotaka/shared";
 import { currentBizId, routes } from "../http.ts";
 import { publicProfile } from "./account.ts";
@@ -22,28 +22,34 @@ const pct = (cur: number, prev: number) => (prev ? Math.round(((cur - prev) / pr
 export function coreRoutes(app: FastifyInstance) {
   const r = routes(app);
 
-  r.get("/v1/system", ({ bizId }) => ({
-    biz: q.get("SELECT id, name, timezone, currency FROM biz WHERE id = ?", bizId),
-    ceo: activeDna(bizId)?.data?.company?.ceo ?? "CEO",
-    operator: ownerProfile().name,
-    profile: publicProfile(),
-    brand: activeDna(bizId)?.data?.company?.brand ?? null,
-    pendingConfirmations: activeDna(bizId)?.data?.pendingConfirmations?.length ?? 0,
-    jev: { enabled: jevEnabled(), model: JEV_MODEL },
-    llm: { enabled: effectiveProvider(bizId).provider !== "sandbox" && effectiveProvider(bizId).ready !== false, ...effectiveProvider(bizId), chosen: llmSettings(bizId).provider, models: llmSettings(bizId).models, loggedIn: llmSettings(bizId).provider === "codex_cli" ? !!selectedAiAccount(bizId)?.loggedIn : cliInfo().loggedIn, authError: llmSettings(bizId).provider === "codex_cli" ? effectiveProvider(bizId).reason : cliInfo().authError },
-    connectorsMode: "sandbox",
-    killSwitch: bizSettings(bizId).killSwitch,
-    connections: {
-      live: q.scalar<number>("SELECT COUNT(*) FROM connection WHERE biz_id = ? AND mode = 'live' AND status = 'active'", bizId),
-      sandbox: q.scalar<number>("SELECT COUNT(*) FROM connection WHERE biz_id = ? AND mode = 'sandbox' AND status = 'active'", bizId),
-      broken: q.scalar<number>("SELECT COUNT(*) FROM connection WHERE biz_id = ? AND status IN ('error','expired')", bizId),
-    },
-    counts: {
-      approvals: q.scalar("SELECT COUNT(*) FROM approval WHERE biz_id = ? AND status = 'pending'", bizId),
-      unread: q.scalar("SELECT COUNT(*) FROM conversation WHERE biz_id = ? AND state IN ('handoff_pending','bot_active','awaiting_customer','new') AND unread > 0", bizId),
-      handoff: q.scalar("SELECT COUNT(*) FROM conversation WHERE biz_id = ? AND state = 'handoff_pending'", bizId),
-    },
-  }));
+  r.get("/v1/system", ({ bizId }) => {
+    const chosen = llmSettings(bizId).provider;
+    const eff = effectiveProvider(bizId);
+    const loggedIn = chosen === "codex_cli" ? !!selectedAiAccount(bizId)?.loggedIn : chosen === "grok_cli" ? grokInfo().loggedIn : chosen === "gemini_cli" ? geminiInfo().loggedIn : cliInfo().loggedIn;
+    const authError = chosen === "codex_cli" ? eff.reason : chosen === "grok_cli" ? grokInfo().authError : chosen === "gemini_cli" ? geminiInfo().authError : cliInfo().authError;
+    return {
+      biz: q.get("SELECT id, name, timezone, currency FROM biz WHERE id = ?", bizId),
+      ceo: activeDna(bizId)?.data?.company?.ceo ?? "CEO",
+      operator: ownerProfile().name,
+      profile: publicProfile(),
+      brand: activeDna(bizId)?.data?.company?.brand ?? null,
+      pendingConfirmations: activeDna(bizId)?.data?.pendingConfirmations?.length ?? 0,
+      jev: { enabled: jevEnabled(), model: JEV_MODEL },
+      llm: { enabled: eff.provider !== "sandbox" && eff.ready !== false, ...eff, chosen, models: llmSettings(bizId).models, loggedIn, authError },
+      connectorsMode: "sandbox",
+      killSwitch: bizSettings(bizId).killSwitch,
+      connections: {
+        live: q.scalar<number>("SELECT COUNT(*) FROM connection WHERE biz_id = ? AND mode = 'live' AND status = 'active'", bizId),
+        sandbox: q.scalar<number>("SELECT COUNT(*) FROM connection WHERE biz_id = ? AND mode = 'sandbox' AND status = 'active'", bizId),
+        broken: q.scalar<number>("SELECT COUNT(*) FROM connection WHERE biz_id = ? AND status IN ('error','expired')", bizId),
+      },
+      counts: {
+        approvals: q.scalar("SELECT COUNT(*) FROM approval WHERE biz_id = ? AND status = 'pending'", bizId),
+        unread: q.scalar("SELECT COUNT(*) FROM conversation WHERE biz_id = ? AND state IN ('handoff_pending','bot_active','awaiting_customer','new') AND unread > 0", bizId),
+        handoff: q.scalar("SELECT COUNT(*) FROM conversation WHERE biz_id = ? AND state = 'handoff_pending'", bizId),
+      },
+    };
+  });
 
   r.get("/v1/overview", ({ bizId }) => {
     const rev = (a: number, b: number) => q.scalar<number>("SELECT COALESCE(SUM(total),0) FROM orders WHERE biz_id = ? AND status = 'paid' AND created_at >= ? AND created_at < ?", bizId, since(a), since(b));
@@ -115,6 +121,7 @@ export function coreRoutes(app: FastifyInstance) {
     const patch = AgentConfigUpdate.parse(body);
     const cfg = q.get<Row>("SELECT * FROM agent_config WHERE biz_id = ? AND agent_key = ?", bizId, params.key);
     if (!cfg) throw new AppError("NOT_FOUND", "Không có agent", 404);
+    if (patch.model) activateProviderForModel(bizId, patch.model, actor);
     const limits = patch.model !== undefined ? { ...(cfg.limits ?? {}), model: patch.model ?? undefined } : cfg.limits;
     update("agent_config", cfg.id, { ...(patch.autonomy ? { autonomy: patch.autonomy } : {}), ...(patch.enabled != null ? { enabled: patch.enabled ? 1 : 0 } : {}), ...(patch.tokenBudgetDay ? { token_budget_day: patch.tokenBudgetDay } : {}), limits });
     audit(bizId, actor, "agent.config_changed", { type: "agent_config", id: cfg.id }, { agent: params.key, before: { autonomy: cfg.autonomy, enabled: cfg.enabled }, after: patch });
@@ -122,30 +129,36 @@ export function coreRoutes(app: FastifyInstance) {
   });
 
   // ---------------- LLM provider & model selection ----------------
-  r.get("/v1/llm", ({ bizId }) => ({ settings: llmSettings(bizId), effective: effectiveProvider(bizId), cli: cliInfo(), codex: codexInfo(), accounts: listAiAccounts(bizId, false), selectedAccount: selectedAiAccount(bizId), catalog: modelCatalog(bizId), defaults: DEFAULT_LLM }));
+  r.get("/v1/llm", ({ bizId }) => ({ settings: llmSettings(bizId), effective: effectiveProvider(bizId), cli: cliInfo(), codex: codexInfo(), grok: grokInfo(), gemini: geminiInfo(), accounts: listAiAccounts(bizId, false), selectedAccount: selectedAiAccount(bizId), catalog: modelCatalog(bizId), allCatalogs: ALL_PROVIDER_CATALOGS, defaults: DEFAULT_LLM }));
   r.put("/v1/llm", ({ bizId, body, actor }) => {
     const model = z.string().min(3).max(100).regex(/^[a-z0-9._-]+$/i);
-    const p = z.object({ provider: z.enum(["claude_cli", "codex_cli", "sandbox"]).optional(), codexAccountId: z.string().nullable().optional(), models: z.object({ small: model, medium: model, large: model }).partial().optional(), effort: z.enum(["low", "medium", "high"]).optional() }).parse(body);
+    const p = z.object({ provider: z.enum(["claude_cli", "codex_cli", "grok_cli", "gemini_cli", "sandbox"]).optional(), codexAccountId: z.string().nullable().optional(), models: z.object({ small: model, medium: model, large: model }).partial().optional(), effort: z.enum(["low", "medium", "high"]).optional(), autoSwitch: z.boolean().optional() }).parse(body);
     const cur = llmSettings(bizId);
     if (p.codexAccountId) mustAiAccount(bizId, p.codexAccountId);
-    const provider = p.provider ?? cur.provider;
+    let provider: Provider = p.provider ?? cur.provider;
+    if (!p.provider && p.autoSwitch && p.models) {
+      const picked = Object.values(p.models).find((m) => m && !modelMatchesProvider(m, provider));
+      const inferred = picked ? inferProviderFromModel(picked) : null;
+      if (inferred) provider = inferred;
+    }
     const saved = { ...cur.providerModels, [cur.provider]: cur.models };
-    const baseModels = provider === cur.provider || provider === "sandbox" ? cur.models : saved[provider] ?? (provider === "codex_cli" ? DEFAULT_CODEX_MODELS : DEFAULT_LLM.models);
+    const baseModels = provider === cur.provider || provider === "sandbox" ? cur.models : saved[provider] ?? defaultModelsForProvider(provider);
     const models = { ...baseModels, ...(p.models ?? {}) } as Record<Tier, string>;
     if (provider !== "sandbox" && Object.values(models).some((m) => !modelMatchesProvider(m, provider))) throw new AppError("BAD_MODEL", "Model không thuộc kết nối AI đã chọn", 400);
-    const next = { ...cur, ...p, models, providerModels: { ...saved, [provider]: models } };
+    const { autoSwitch: _autoSwitch, ...rest } = p;
+    const next = { ...cur, ...rest, provider, models, providerModels: { ...saved, [provider]: models } };
     const s = bizSettings(bizId);
     update("biz", bizId, { settings: { ...s, llm: next } });
     audit(bizId, actor, "llm.settings_changed", { type: "biz", id: bizId }, { before: cur, after: next });
-    emit(bizId, "llm.updated", {});
-    return { settings: next, effective: effectiveProvider(bizId), catalog: modelCatalog(bizId), selectedAccount: selectedAiAccount(bizId) };
+    emit(bizId, "llm.updated", { provider, models });
+    return { settings: next, effective: effectiveProvider(bizId), catalog: modelCatalog(bizId), allCatalogs: ALL_PROVIDER_CATALOGS, selectedAccount: selectedAiAccount(bizId), grok: grokInfo(), gemini: geminiInfo() };
   });
   r.post("/v1/llm/test", ({ bizId, body }) => testModel(bizId, z.object({ model: z.string() }).parse(body).model));
 
   // OAuth is performed by the installed CLI on the local machine; no shared default ChatGPT account.
   const localAccountAction = (req: { ip: string; headers: Record<string, unknown> }) => {
-    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip)) throw new AppError("LOCAL_ONLY", "Quản lý đăng nhập ChatGPT trên máy chạy hệ thống", 403);
-    if (req.headers["x-taki-actor"]) throw new AppError("DIRECT_ONLY", "Người dùng tự quản lý đăng nhập ChatGPT trên giao diện", 403);
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip)) throw new AppError("LOCAL_ONLY", "Quản lý đăng nhập AI trên máy chạy hệ thống", 403);
+    if (req.headers["x-taki-actor"]) throw new AppError("DIRECT_ONLY", "Người dùng tự quản lý đăng nhập AI trên giao diện", 403);
   };
   r.get("/v1/llm/accounts", ({ bizId, req }) => { localAccountAction(req); return listAiAccounts(bizId); });
   r.post("/v1/llm/accounts", ({ bizId, body, actor, req }) => { localAccountAction(req); return createAiAccount(bizId, z.object({ name: z.string().trim().min(1).max(80) }).parse(body).name, actor); });
@@ -154,6 +167,25 @@ export function coreRoutes(app: FastifyInstance) {
   r.post("/v1/llm/accounts/:id/check", ({ bizId, params, req }) => { localAccountAction(req); return checkAiAccount(bizId, params.id); });
   r.post("/v1/llm/accounts/:id/disconnect", ({ bizId, params, actor, req }) => { localAccountAction(req); return disconnectAiAccount(bizId, params.id, actor); });
   r.del("/v1/llm/accounts/:id", ({ bizId, params, actor, req }) => { localAccountAction(req); return removeAiAccount(bizId, params.id, actor); });
+
+  // Grok CLI & Gemini CLI authentication & API key helpers
+  r.post("/v1/llm/grok/login", ({ bizId, body, req }) => { localAccountAction(req); return startGrokLogin(z.object({ method: z.enum(["browser", "device"]).default("browser") }).parse(body ?? {}).method, () => emit(bizId, "llm.updated", {})); });
+  r.post("/v1/llm/grok/cancel", ({ bizId, req }) => { localAccountAction(req); return cancelGrokLogin(() => emit(bizId, "llm.updated", {})); });
+  r.post("/v1/llm/grok/disconnect", ({ bizId, req }) => { localAccountAction(req); return disconnectGrok(() => emit(bizId, "llm.updated", {})); });
+  r.post("/v1/llm/grok/apikey", ({ bizId, body, req }) => {
+    localAccountAction(req);
+    const key = z.object({ apiKey: z.string().trim() }).parse(body ?? { apiKey: "" }).apiKey;
+    if (key) process.env.XAI_API_KEY = key; else delete process.env.XAI_API_KEY;
+    emit(bizId, "llm.updated", {});
+    return grokInfo();
+  });
+  r.post("/v1/llm/gemini/apikey", ({ bizId, body, req }) => {
+    localAccountAction(req);
+    const key = z.object({ apiKey: z.string().trim() }).parse(body ?? { apiKey: "" }).apiKey;
+    if (key) process.env.GEMINI_API_KEY = key; else delete process.env.GEMINI_API_KEY;
+    emit(bizId, "llm.updated", {});
+    return geminiInfo();
+  });
 
   r.get("/v1/schedules", ({ bizId }) => q.all("SELECT * FROM schedule WHERE biz_id = ? ORDER BY every_minutes", bizId));
   r.put("/v1/schedules/:id", ({ bizId, params, body, actor }) => {

@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, closeDb, insert, openDb } from "@dotaka/db";
 vi.mock("../../../packages/llm-gateway/src/codex.ts", async (original) => ({ ...(await original<Record<string, unknown>>()), codexInfo: () => ({ available: true, version: "test" }) }));
 vi.mock("../../../packages/llm-gateway/src/cli.ts", async (original) => ({ ...(await original<Record<string, unknown>>()), cliInfo: () => ({ available: true, loggedIn: true, version: "test" }), cliAvailable: () => true }));
 const { coreRoutes } = await import("./routes/core.ts");
+const { assistantRoutes } = await import("./routes/assistant.ts");
 const { errorHandler } = await import("./http.ts");
 let app: FastifyInstance, b1: string, b2: string, id: string;
 const root = mkdtempSync(join(tmpdir(), "taki-llm-routes-test-"));
@@ -15,7 +16,7 @@ beforeAll(async () => {
   vi.stubEnv("AI_ACCOUNTS_DIR", root); openDb(":memory:");
   b1 = insert("biz", { name: "One", settings: { ...DEFAULT_SETTINGS, llm: { provider: "claude_cli" } } }).id;
   b2 = insert("biz", { name: "Two", settings: DEFAULT_SETTINGS }).id;
-  app = Fastify({ logger: false }); app.setErrorHandler(errorHandler); coreRoutes(app); await app.ready();
+  app = Fastify({ logger: false }); app.setErrorHandler(errorHandler); coreRoutes(app); assistantRoutes(app); await app.ready();
 });
 afterAll(async () => { await app.close(); closeDb(); rmSync(root, { recursive: true, force: true }); vi.unstubAllEnvs(); });
 const call = (method: any, url: string, payload?: unknown, biz = b1) => app.inject({ method, url, headers: { "x-biz-id": biz }, ...(payload ? { payload } : {}) });
@@ -43,5 +44,27 @@ describe("AI connections API", () => {
     expect((await call("POST", "/v1/llm/accounts", { name: "  " })).statusCode).toBe(400);
     expect((await call("DELETE", `/v1/llm/accounts/${id}`)).statusCode).toBe(200);
     const result = (await call("GET", "/v1/llm")).json(); expect(result.settings.codexAccountId).toBeNull(); expect(result.selectedAccount).toBeNull(); expect(result.effective.ready).toBe(false);
+  });
+  it("automatically activates Grok CLI, Gemini CLI, Codex CLI, or Claude CLI when switching models", async () => {
+    const grokSwitched = (await call("PUT", "/v1/llm", { models: { medium: "grok-4.6" }, autoSwitch: true })).json();
+    expect(grokSwitched.settings.provider).toBe("grok_cli");
+    expect(grokSwitched.settings.models.medium).toBe("grok-4.6");
+    expect(grokSwitched.allCatalogs.grok_cli.some((m: any) => m.id === "grok-4.6")).toBe(true);
+
+    // Switching model in Assistant (Ngân Nguyệt) automatically switches & activates the matching CLI provider
+    await call("PUT", "/v1/assistant/settings", { model: "gemini-2.5-pro" });
+    const afterGemini = (await call("GET", "/v1/llm")).json();
+    expect(afterGemini.settings.provider).toBe("gemini_cli");
+    expect(afterGemini.settings.models.medium).toBe("gemini-2.5-pro");
+
+    await call("PUT", "/v1/assistant/settings", { model: "grok-4.7" });
+    const afterGrok = (await call("GET", "/v1/llm")).json();
+    expect(afterGrok.settings.provider).toBe("grok_cli");
+    expect(afterGrok.settings.models.medium).toBe("grok-4.7");
+
+    await call("PUT", "/v1/assistant/settings", { model: "claude-sonnet-4-6" });
+    const afterClaude = (await call("GET", "/v1/llm")).json();
+    expect(afterClaude.settings.provider).toBe("claude_cli");
+    expect(afterClaude.settings.models.medium).toBe("claude-sonnet-4-6");
   });
 });

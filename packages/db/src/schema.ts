@@ -457,4 +457,22 @@ CREATE TABLE IF NOT EXISTS email_enrollment (
   UNIQUE (sequence_id, contact_id)
 );
 CREATE INDEX IF NOT EXISTS email_enrollment_due ON email_enrollment (status, next_at);
+
+-- Hội đồng Agent Đa Model (Multi-Agent Cross-CLI Dialogue): các Agent chọn các CLI model khác nhau (Claude CLI, Grok CLI, Codex CLI, Gemini CLI) trao đổi, chấm điểm & sửa bài trực tiếp
+CREATE TABLE IF NOT EXISTS agent_dialogue (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, title TEXT NOT NULL, scenario TEXT NOT NULL DEFAULT 'content_review',
+  topic TEXT NOT NULL DEFAULT '', channel TEXT DEFAULT 'facebook', status TEXT NOT NULL DEFAULT 'idle',
+  max_rounds INTEGER NOT NULL DEFAULT 3, current_round INTEGER NOT NULL DEFAULT 0, pass_threshold INTEGER NOT NULL DEFAULT 80,
+  config TEXT NOT NULL DEFAULT '{}', result TEXT NOT NULL DEFAULT '{}', content_item_id TEXT, approval_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_dialogue_biz ON agent_dialogue (biz_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS agent_dialogue_msg (
+  id TEXT PRIMARY KEY, biz_id TEXT NOT NULL, dialogue_id TEXT NOT NULL, round INTEGER NOT NULL DEFAULT 1,
+  role TEXT NOT NULL, agent_key TEXT NOT NULL, agent_label TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'done', text TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '{}',
+  log TEXT NOT NULL DEFAULT '[]', meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_dialogue_msg_thread ON agent_dialogue_msg (dialogue_id, created_at);
 `;
+

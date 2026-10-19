@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CheckCircle2, Clapperboard, FileText, Lightbulb, Pencil, RefreshCw, Send, ShieldCheck, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, Clapperboard, FileText, Lightbulb, Pencil, RefreshCw, Send, ShieldCheck, Sparkles, Users, XCircle } from "lucide-react";
 import { api, useApi } from "../lib/api";
+import { openCouncilAudit } from "../components/AgentDialoguePanel";
 import { CONTENT_STATUS, KIND_LABEL, num, timeAgo } from "../lib/format";
 import { PostImage } from "../components/PostImage";
 import { SeoImages } from "../components/SeoImages";
@@ -104,6 +105,13 @@ export function Content() {
                 {d.image?.supported && <div className="mt-3"><PostImage contentId={d.id} image={d.image} onChange={() => { detail.reload(); list.reload(); }} /></div>}
                 {d.seoImages?.supported && <div className="mt-3"><SeoImages contentId={d.id} info={d.seoImages} onChange={() => { detail.reload(); list.reload(); }} /></div>}
                 <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    variant="soft"
+                    icon={Users}
+                    onClick={() => openCouncilAudit({ targetType: "content_item", targetId: d.id, title: d.title })}
+                  >
+                    Hội đồng thảo luận & tối ưu
+                  </Button>
                   <Button icon={Pencil} onClick={() => setEditing({ title: d.title ?? "", body: d.body ?? "" })}>Chỉnh sửa</Button>
                   {isScript && <Link to={`/video-flow?from=${d.id}`}><Button variant={["approved", "scheduled"].includes(d.status) ? "success" : "soft"} icon={Clapperboard}>Làm video</Button></Link>}
                   {d.task_id && <Button icon={RefreshCw} loading={busy === "regen"} onClick={() => run("regen", () => api.post(`content/${d.id}/regenerate`), "Agent đang viết lại nội dung này")}>Tạo lại</Button>}

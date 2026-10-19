@@ -22,6 +22,7 @@ import { commentLinkRoutes } from "./routes/comment-link.ts";
 import { businessRoutes } from "./routes/businesses.ts";
 import { brainRoutes } from "./routes/brain.ts";
 import { emailRoutes } from "./routes/email.ts";
+import { agentDialogueRoutes } from "./routes/agent-dialogue.ts";
 
 /**
  * Danh sách module route của API, đúng thứ tự khởi động thật. server.ts và server-boot.test.ts cùng dùng hàm này nên
@@ -41,6 +42,7 @@ export function registerApiRoutes(app: FastifyInstance) {
   zaloRoutes(app);
   orchestraRoutes(app);
   assistantRoutes(app);
+  agentDialogueRoutes(app);
   brainRoutes(app);
   accountRoutes(app);
   channelRoutes(app);
@@ -53,3 +55,4 @@ export function registerApiRoutes(app: FastifyInstance) {
   businessRoutes(app);
   emailRoutes(app);
 }
+

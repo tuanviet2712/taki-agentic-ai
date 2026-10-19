@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 
 const kids = [];
 const run = (name, cmd, args, opts = {}) => {
-  const p = spawn(cmd, args, { stdio: opts.log ? ["ignore", "pipe", "pipe"] : "inherit", shell: process.platform === "win32", cwd: opts.cwd, env: { ...process.env, ...(opts.env ?? {}) } });
+  const p = spawn(cmd, args, { stdio: opts.log ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"], shell: process.platform === "win32", cwd: opts.cwd, env: { ...process.env, ...(opts.env ?? {}) } });
   if (opts.log) {
     const out = createWriteStream(opts.log, { flags: "a" });
     p.stdout.pipe(out);

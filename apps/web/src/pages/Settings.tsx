@@ -133,11 +133,21 @@ export function Settings() {
                 <p className="text-xs text-muted">Biến môi trường: <code className="rounded bg-soft px-1">TYPESAFE_API_KEY</code> {sys.jev.enabled ? <Badge tone="green">đã đặt</Badge> : <Badge tone="amber">chưa đặt</Badge>}</p>
               </div>
               <div className="space-y-2 rounded-xl border border-line p-4">
-                <div className="flex items-center justify-between"><p className="font-medium text-ink">Claude (agent soạn thảo)</p>{!sys.llm.enabled ? <Badge tone="amber">Sandbox</Badge> : sys.llm.loggedIn === false ? <Badge tone="red">HẾT PHIÊN</Badge> : sys.llm.loggedIn === null ? <Badge tone="amber">chưa rõ</Badge> : <Badge tone="green">LIVE</Badge>}</div>
-                <p className="text-sm text-muted">{sys.llm.provider !== "claude_cli" ? "Sandbox — chưa gọi AI" : sys.llm.loggedIn === false ? "Tài khoản Claude đã hết phiên đăng nhập — mọi agent sẽ lỗi cho tới khi đăng nhập lại." : sys.llm.loggedIn === null ? "Chưa xác minh được tài khoản Claude (mạng chậm hoặc Claude không phản hồi)." : "Qua tài khoản Claude đã đăng nhập (Claude Code CLI)"}</p>
-                {sys.llm.loggedIn === false && <p className="text-xs text-ink">Mở Terminal trên máy chạy hệ thống, gõ <code className="rounded bg-soft px-1">claude</code> rồi <code className="rounded bg-soft px-1">/login</code> và đăng nhập lại.</p>}
+                <div className="flex items-center justify-between">
+                  <p className="font-medium text-ink">
+                    {sys.llm.chosen === "grok_cli" ? "Grok Bot (Grok CLI)" : sys.llm.chosen === "codex_cli" ? "ChatGPT (Codex CLI)" : sys.llm.chosen === "gemini_cli" ? "Gemini (Gemini CLI)" : "Claude (Claude Code CLI)"}
+                  </p>
+                  {!sys.llm.enabled ? <Badge tone="amber">Sandbox / Chưa đăng nhập</Badge> : sys.llm.loggedIn === false ? <Badge tone="red">HẾT PHIÊN</Badge> : <Badge tone="green">LIVE</Badge>}
+                </div>
+                <p className="text-sm text-muted">
+                  {sys.llm.chosen === "sandbox"
+                    ? "Sandbox — chưa gọi AI"
+                    : !sys.llm.enabled
+                      ? (sys.llm.reason ?? sys.llm.authError ?? "CLI đã chọn chưa đăng nhập — đang tạm dùng Sandbox.")
+                      : `Đang chạy qua ${sys.llm.provider} · Model vừa: ${sys.llm.models?.medium ?? "default"}`}
+                </p>
                 {sys.llm.authError && <p className="text-xs text-muted">{sys.llm.authError}</p>}
-                <p className="text-xs text-muted">Chọn tài khoản, nhà cung cấp và model ở thẻ "Kết nối AI" bên dưới.</p>
+                <p className="text-xs text-muted">Chọn tài khoản, nhà cung cấp (Claude, Grok, Codex, Gemini) và model ở thẻ "Kết nối AI" bên dưới.</p>
               </div>
               <p className="text-xs text-muted md:col-span-2">Đặt khóa trong file <code className="rounded bg-soft px-1">.env</code> ở thư mục dự án rồi khởi động lại API. Giao diện không bao giờ hiển thị giá trị khóa.</p>
             </div>

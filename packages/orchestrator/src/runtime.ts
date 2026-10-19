@@ -13,6 +13,7 @@ import { postImageEngine } from "./image-engine.ts";
 import { queueAutoApprove } from "./auto-approve-hook.ts";
 import { MAX_GOAL_PIECES, ensureTokenBudgets, goalHasExplicitCount, type GoalKind } from "./goal-request.ts";
 import { ensureSeoImages, isSeoArticle, syncSeoFeatured, type SeoImageResult } from "./seo-images.ts";
+import { auditAndOptimizeTarget } from "./agent-dialogue.ts";
 
 /** Hạn của mục duyệt theo cài đặt "approvalExpiryHours" (mặc định 72 giờ) — dùng chung mọi loại duyệt (bài, video…). */
 export function approvalExpiresAt(bizId: string, from = Date.now()): string {
@@ -220,6 +221,7 @@ export async function runTask(taskId: string) {
       bizId: task.biz_id, agentKey: task.agent_key, tier: def.tier, taskRunId: run.id,
       system: systemPrefix(dna, def), systemSuffix: playbook.text, user: def.buildUser(task.input, ctx), schema: def.output,
       budget: { perRun: cfg.token_budget_run, perDay: cfg.token_budget_day },
+      allowCrossProvider: true,
       sandbox: () => def.sandbox(task.input, ctx),
     });
   } catch (e) {
@@ -228,6 +230,13 @@ export async function runTask(taskId: string) {
     setTaskStatus(task, blocked ? "blocked" : "failed", { error: { code: blocked ? "TOKEN_BUDGET_EXCEEDED" : "RUN_FAILED", message: e instanceof Error ? e.message : String(e) }, step: null });
     if (blocked) emit(task.biz_id, "alert.raised", { level: "warning", text: `Agent ${task.agent_key} chạm trần token` });
     logger.error("task.failed", { taskId, error: String(e) });
+    if (!blocked && ["content", "video_script", "seo_web"].includes(task.agent_key)) {
+      try {
+        await auditAndOptimizeTarget(task.biz_id, { targetType: "task", targetId: task.id }, "council_auto");
+      } catch (councilErr) {
+        logger.warn("council.auto_rescue_failed", { taskId, error: String(councilErr) });
+      }
+    }
     return;
   }
   update("task_run", run.id, {
@@ -290,15 +299,17 @@ export async function runTask(taskId: string) {
 // ---------------- Không để rơi bài (khởi động lại / job mất) ----------------
 /** Có job nào đang chờ / đang chạy cho task này không (viết bài hoặc bước hoàn thiện). */
 const hasLiveJob = (taskId: string) => Boolean(q.get("SELECT id FROM job WHERE status IN ('queued','running') AND name IN ('agent.run','task.finalize') AND json_extract(payload, '$.taskId') = ?", taskId));
-/** Bài đã viết + chấm xong (tới bước hoàn thiện: tạo ảnh → vào Duyệt) mà chưa có mục duyệt. */
-function inFinalizePhase(task: Row): Row | undefined {
-  const ci = q.get<Row>("SELECT id, kind, status, review_score_id FROM content_item WHERE task_id = ?", task.id);
-  if (!ci?.review_score_id || ci.status !== "in_review") return undefined;
+/** Bài / khâu đã làm + chấm xong (tới bước hoàn thiện: tạo ảnh → vào Duyệt / tự duyệt) mà chưa có mục duyệt. */
+function inFinalizePhase(task: Row): { kind?: string } | undefined {
   if (q.get("SELECT id FROM approval WHERE subject_type = 'task' AND subject_id = ? AND status = 'pending'", task.id)) return undefined;
-  return ci;
+  const ci = q.get<Row>("SELECT id, kind, status, review_score_id FROM content_item WHERE task_id = ?", task.id);
+  if (ci) return ci.review_score_id && ci.status === "in_review" ? { kind: ci.kind } : undefined;
+  if (AGENTS[task.agent_key]?.toContent || task.output == null || task.status === "revising") return undefined;
+  const rs = q.get<Row>("SELECT id FROM review_score WHERE subject_type = 'task' AND subject_id = ? ORDER BY created_at DESC LIMIT 1", task.id);
+  return rs ? { kind: undefined } : undefined;
 }
 /** Đưa bài đã viết + chấm xong đi nốt bước hoàn thiện (KHÔNG viết lại bài, giữ ảnh đã có). */
-function resumeFinalize(task: Row, ci: Row, why: string) {
+function resumeFinalize(task: Row, ci: { kind?: string }, why: string) {
   update("task", task.id, { status: "in_review", step: why });
   emit(task.biz_id, "task.updated", { taskId: task.id, status: "in_review", agent: task.agent_key });
   void queueOrFinalize({ ...task, status: "in_review" }, ci.kind, undefined, true).catch((e) => logger.warn("task.resume_finalize_failed", { taskId: task.id, error: String(e).slice(0, 300) }));
@@ -366,7 +377,9 @@ export async function finalizeTask(taskId: string, runId?: string) {
   const def = AGENTS[task.agent_key];
   const cfg = q.get<Row>("SELECT * FROM agent_config WHERE biz_id = ? AND agent_key = ?", task.biz_id, task.agent_key);
   const ci = q.get<Row>("SELECT * FROM content_item WHERE task_id = ?", task.id);
-  const review = ci?.review_score_id ? byId<Row>("review_score", ci.review_score_id) : undefined;
+  const review = ci?.review_score_id
+    ? byId<Row>("review_score", ci.review_score_id)
+    : q.get<Row>("SELECT * FROM review_score WHERE subject_type = 'task' AND subject_id = ? ORDER BY created_at DESC LIMIT 1", task.id);
   if (!def || !cfg || !review) return;
   const content = ci ? { kind: ci.kind as string, title: ci.title as string, channel: ci.channel as string | null, body: ci.body as string } : undefined;
   const contentItemId: string | null = ci?.id ?? null;
