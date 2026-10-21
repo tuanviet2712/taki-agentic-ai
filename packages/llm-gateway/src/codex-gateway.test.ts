@@ -44,7 +44,7 @@ describe("ChatGPT routing through the shared gateway", () => {
   });
   it("ignores old Claude model overrides for ChatGPT and rejects incompatible forced models", async () => {
     insert("agent_config", { biz_id: biz, agent_key: "chat", autonomy: "L1", enabled: 1, tools: [], token_budget_run: 1000, token_budget_day: 1000, limits: { model: "claude-opus-5" } });
-    expect(gateway.modelFor(biz, "chat", "small")).toBe("default");
+    expect(gateway.modelFor(biz, "chat", "small")).toBe("gpt-6-luna");
     await expect(gateway.generate({ ...req(), model: "claude-opus-5" })).rejects.toMatchObject({ code: "BAD_MODEL" });
     update("biz", biz, { settings: { ...DEFAULT_SETTINGS, llm: { provider: "sandbox" } } });
     expect((await gateway.generate(req())).output.reply).toBe("SANDBOX");

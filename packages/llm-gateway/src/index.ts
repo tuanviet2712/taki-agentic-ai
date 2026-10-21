@@ -7,12 +7,12 @@ import { bizSettings, insert, q } from "@dotaka/db";
 import { AppError, logger } from "@dotaka/shared";
 import { cliAvailable, runClaudeCli } from "./cli.ts";
 import { codexInfo, runCodexCli, runCodexImage } from "./codex.ts";
-import { cancelGrokLogin, disconnectGrok, grokInfo, runGrokAgent, runGrokCli, startGrokLogin } from "./grok.ts";
+import { cancelGrokLogin, disconnectGrok, grokAvailableModels, grokInfo, runGrokAgent, runGrokCli, startGrokLogin } from "./grok.ts";
 import { geminiInfo, runGeminiAgent, runGeminiCli } from "./gemini.ts";
 import { mustAiAccount, publicAiAccount, selectedAiAccount, withAiAccount } from "./ai-accounts.ts";
 
 export { codexInfo, runCodexAgent, runCodexImage } from "./codex.ts";
-export { cancelGrokLogin, disconnectGrok, grokInfo, runGrokAgent, runGrokCli, startGrokLogin } from "./grok.ts";
+export { cancelGrokLogin, disconnectGrok, grokAvailableModels, grokInfo, resolveGrokModel, runGrokAgent, runGrokCli, startGrokLogin } from "./grok.ts";
 export { geminiInfo, runGeminiAgent, runGeminiCli } from "./gemini.ts";
 export { aiAccountHome, cancelAiLogin, checkAiAccount, createAiAccount, disconnectAiAccount, listAiAccounts, mustAiAccount, removeAiAccount, selectedAiAccount, startAiLogin, withAiAccount } from "./ai-accounts.ts";
 
@@ -30,23 +30,23 @@ export { buildCliArgs, runInLane, cliAvailable, cliInfo, cliSystemPrompt, fastEn
 export type Tier = "small" | "medium" | "large";
 export type Provider = "claude_cli" | "codex_cli" | "grok_cli" | "gemini_cli" | "sandbox";
 
-/** Models offered in the UI. */
+/**
+ * Models offered in the UI. Mọi model trong các danh sách dưới đây đã được GỌI THẬT qua đúng CLI + tài khoản của hệ thống
+ * (21/10/2026) và trả lời đúng; model đời cũ / yếu đã gỡ và tự nâng cấp qua RETIRED_MODELS (cài đặt cũ không bị lỗi).
+ */
 export const MODEL_CATALOG = [
-  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", note: "Nhanh, rẻ — phân loại, chat, tóm tắt" },
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5", note: "Cân bằng — viết nội dung, kịch bản" },
-  { id: "claude-opus-5", label: "Claude Opus 5", note: "Mạnh — chiến lược, nghiên cứu" },
-  { id: "claude-opus-5-5", label: "Claude Opus 5.5", note: "Opus mới nhất" },
-  { id: "claude-fable-5-1", label: "Claude Fable 5.1", note: "Mạnh nhất — việc khó, chậm & tốn hạn mức hơn" },
+  { id: "claude-fable-5-1", label: "Claude Fable 5.1", note: "Mạnh nhất — việc khó, chiến lược sâu; chậm & tốn hạn mức hơn" },
+  { id: "claude-opus-5-5", label: "Claude Opus 5.5", note: "Rất mạnh — chiến lược, nghiên cứu, phản biện" },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", note: "Cân bằng — viết nội dung, kịch bản, điều phối" },
+  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", note: "Nhanh, rẻ — phân loại, chat khách, tóm tắt" },
 ] as const;
 
 export const GROK_MODELS = [
-  { id: "grok-4.6", label: "Grok 4.6 (Mặc định)", note: "Cân bằng, tốc độ cao — điều phối, bài viết, kịch bản" },
-  { id: "grok-4.7", label: "Grok 4.7", note: "Mạnh nhất của xAI — nghiên cứu thị trường, chiến lược" },
-  { id: "grok-4.5", label: "Grok 4.5", note: "Suy luận ổn định, đa tác vụ" },
-  { id: "grok-4.3", label: "Grok 4.3 (1M context)", note: "Nhanh, nhẹ — phân loại, chat khách, tóm tắt" },
-  { id: "grok-build-0.1", label: "Grok Build Fast", note: "Tối ưu tốc độ & gọi công cụ (grok-code-fast-1)" },
+  { id: "grok-4.7", label: "Grok 4.7", note: "Mạnh nhất của xAI — nghiên cứu thị trường, chiến lược, phản biện" },
+  { id: "grok-4.6", label: "Grok 4.6", note: "Cân bằng — điều phối, bài viết, kịch bản" },
+  { id: "grok-4.7-build-fast", label: "Grok 4.7 Build Fast", note: "Nhanh — phân loại, chat khách, tóm tắt" },
 ] as const;
-export const DEFAULT_GROK_MODELS: Record<Tier, string> = { small: "grok-4.3", medium: "grok-4.6", large: "grok-4.7" };
+export const DEFAULT_GROK_MODELS: Record<Tier, string> = { small: "grok-4.7-build-fast", medium: "grok-4.6", large: "grok-4.7" };
 
 export const GEMINI_MODELS = [
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "Nhanh, cân bằng — bài viết, kịch bản, điều phối" },
@@ -56,15 +56,53 @@ export const GEMINI_MODELS = [
 export const DEFAULT_GEMINI_MODELS: Record<Tier, string> = { small: "gemini-2.5-flash-lite", medium: "gemini-2.5-flash", large: "gemini-2.5-pro" };
 
 export const CODEX_MODELS = [
-  { id: "default", label: "Model mặc định của Codex", note: "Theo phiên bản CLI và quyền tài khoản ChatGPT" },
-  { id: "gpt-5", label: "GPT-5", note: "Đa năng — viết nội dung, điều phối, kịch bản" },
-  { id: "gpt-5-mini", label: "GPT-5 Mini", note: "Nhanh, nhẹ — chat khách, tóm tắt" },
-  { id: "o3", label: "OpenAI o3", note: "Suy luận chuyên sâu, chiến lược" },
+  { id: "gpt-6-astra", label: "GPT-6 Astra", note: "Mạnh nhất của OpenAI — việc khó, chiến lược, phản biện" },
+  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", note: "Mới nhất, đa năng — viết nội dung, điều phối, kịch bản" },
+  { id: "gpt-6-sol", label: "GPT-6 Sol", note: "Đa năng (đời 6.0)" },
+  { id: "gpt-6-luna", label: "GPT-6 Luna", note: "Nhanh, rẻ — chat khách, phân loại, tóm tắt" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", note: "Cân bằng, đời 5.6 (OpenAI xếp vào thế hệ cũ)" },
+  { id: "default", label: "Model mặc định của Codex", note: "Codex tự chọn theo tài khoản ChatGPT" },
 ];
-export const DEFAULT_CODEX_MODELS: Record<Tier, string> = { small: "default", medium: "default", large: "default" };
+export const DEFAULT_CODEX_MODELS: Record<Tier, string> = { small: "gpt-6-luna", medium: "gpt-6.1-sol", large: "gpt-6-astra" };
+
+/**
+ * Model đã gỡ khỏi danh sách (đời cũ / yếu / tài khoản không còn) → model mới tương ứng. Áp dụng khi đọc cài đặt và khi
+ * gọi AI, nên cài đặt đã lưu (.env LLM_MODEL_*, Cài đặt → Chế độ AI, model riêng của từng agent) vẫn chạy, bằng model mới.
+ */
+export const RETIRED_MODELS: Record<string, string> = {
+  "claude-haiku-4-5": "claude-haiku-5-5",
+  "claude-sonnet-5": "claude-sonnet-5-5",
+  "claude-opus-5": "claude-opus-5-5",
+  "gpt-5": "gpt-6.1-sol",
+  "gpt-5-mini": "gpt-6-luna",
+  "o3": "gpt-6-astra",
+  "grok-4.5": "grok-4.6",
+  "grok-4.3": "grok-4.7-build-fast",
+  "grok-build-0.1": "grok-4.7-build-fast",
+};
+export const currentModel = (model: string): string => RETIRED_MODELS[model] ?? model;
+
+/**
+ * Model Grok hiển thị để chọn: chỉ những model tài khoản Grok đang đăng nhập thật sự dùng được (đọc từ bộ nhớ đệm
+ * `grok models`), thêm model mới của tài khoản chưa có trong danh sách tĩnh. Chưa đăng nhập / chưa có bộ đệm → danh sách tĩnh.
+ */
+export function grokModelCatalog(): { id: string; label: string; note: string }[] {
+  const avail = grokAvailableModels();
+  if (!avail) return [...GROK_MODELS];
+  const ids = new Set(avail.map((m) => m.id));
+  const known = new Set<string>(GROK_MODELS.map((m) => m.id));
+  return [
+    ...GROK_MODELS.filter((m) => ids.has(m.id)),
+    // model mới của tài khoản chưa có trong danh sách tĩnh (model đã gỡ vì yếu / đời cũ thì không thêm lại)
+    ...avail.filter((m) => !known.has(m.id) && !RETIRED_MODELS[m.id]).map((m) => ({ id: m.id, label: m.name, note: m.description ?? "Model Grok của tài khoản" })),
+  ];
+}
 
 export const ALL_PROVIDER_CATALOGS: Record<Exclude<Provider, "sandbox">, readonly { id: string; label: string; note: string }[]> = {
-  grok_cli: GROK_MODELS,
+  // getter: đọc lại mỗi lần (đăng nhập tài khoản Grok khác → danh sách model đổi theo)
+  get grok_cli() {
+    return grokModelCatalog();
+  },
   claude_cli: MODEL_CATALOG,
   codex_cli: CODEX_MODELS,
   gemini_cli: GEMINI_MODELS,
@@ -92,8 +130,9 @@ export function modelCatalog(bizId: string) {
   const p = llmSettings(bizId).provider;
   if (p === "grok_cli") {
     const custom = new Set([...Object.values(llmSettings(bizId).models), ...q.all<{ limits: { model?: string } }>("SELECT limits FROM agent_config WHERE biz_id = ?", bizId).map((c) => c.limits?.model).filter((m): m is string => !!m && modelMatchesProvider(m, "grok_cli"))]);
-    const baseIds = new Set(GROK_MODELS.map((m) => m.id));
-    return [...GROK_MODELS, ...[...custom].filter((m) => !baseIds.has(m as any)).map((id) => ({ id, label: id, note: "Model Grok tùy chỉnh" }))];
+    const base = grokModelCatalog();
+    const baseIds = new Set(base.map((m) => m.id));
+    return [...base, ...[...custom].filter((m) => !baseIds.has(m as any)).map((id) => ({ id, label: id, note: "Model Grok tùy chỉnh" }))];
   }
   if (p === "gemini_cli") {
     const custom = new Set([...Object.values(llmSettings(bizId).models), ...q.all<{ limits: { model?: string } }>("SELECT limits FROM agent_config WHERE biz_id = ?", bizId).map((c) => c.limits?.model).filter((m): m is string => !!m && modelMatchesProvider(m, "gemini_cli"))]);
@@ -116,9 +155,9 @@ export function modelMatchesProvider(model: string, provider: Provider) {
 export const DEFAULT_LLM = {
   provider: (process.env.LLM_PROVIDER === "sandbox" ? "sandbox" : "claude_cli") as Provider,
   models: {
-    small: process.env.LLM_MODEL_SMALL ?? "claude-haiku-4-5",
-    medium: process.env.LLM_MODEL_MEDIUM ?? "claude-sonnet-5",
-    large: process.env.LLM_MODEL_LARGE ?? "claude-opus-5",
+    small: currentModel(process.env.LLM_MODEL_SMALL ?? "claude-haiku-5-5"),
+    medium: currentModel(process.env.LLM_MODEL_MEDIUM ?? "claude-sonnet-5-5"),
+    large: currentModel(process.env.LLM_MODEL_LARGE ?? "claude-opus-5-5"),
   } as Record<Tier, string>,
   effort: "medium" as "low" | "medium" | "high",
   codexAccountId: null as string | null,
@@ -129,6 +168,10 @@ export type LlmSettings = typeof DEFAULT_LLM;
 export function llmSettings(bizId?: string): LlmSettings {
   const s = bizId ? ((bizSettings(bizId) as any).llm as Partial<LlmSettings> | undefined) : undefined;
   const merged = { ...DEFAULT_LLM, ...(s ?? {}), models: { ...DEFAULT_LLM.models, ...(s?.models ?? {}) } };
+  merged.models = Object.fromEntries(Object.entries(merged.models).map(([t, m]) => [t, currentModel(String(m))])) as Record<Tier, string>;
+  if (merged.providerModels) {
+    merged.providerModels = Object.fromEntries(Object.entries(merged.providerModels).map(([p, tiers]) => [p, Object.fromEntries(Object.entries(tiers ?? {}).map(([t, m]) => [t, currentModel(String(m))]))])) as LlmSettings["providerModels"];
+  }
   if (!["sandbox", "claude_cli", "codex_cli", "grok_cli", "gemini_cli"].includes(merged.provider)) merged.provider = "claude_cli";
   if (merged.provider !== "claude_cli" && merged.provider !== "sandbox") {
     const fallback = defaultModelsForProvider(merged.provider);
@@ -156,7 +199,7 @@ export function providerReadiness(bizId: string | undefined, provider: Provider)
   }
   if (provider === "gemini_cli") {
     const gm = geminiInfo();
-    const reason = !gm.available ? "Chưa cài Gemini CLI (@google/gemini-cli)" : !gm.loggedIn ? "Gemini CLI chưa đăng nhập hoặc chưa có GEMINI_API_KEY" : undefined;
+    const reason = !gm.available ? "Chưa cài Gemini CLI (@google/gemini-cli)" : !gm.loggedIn ? (gm.authError ?? "Gemini CLI chưa đăng nhập hoặc chưa có GEMINI_API_KEY") : undefined;
     return { ready: !reason, ...(reason ? { reason } : {}) };
   }
   return { ready: false, reason: "Provider không hợp lệ" };
@@ -194,7 +237,7 @@ export function llmEnabled(bizId?: string): boolean {
 export function agentConfiguredModel(bizId: string, agentKey: string): string | null {
   const cfg = q.get<{ limits: Record<string, unknown> }>("SELECT limits FROM agent_config WHERE biz_id = ? AND agent_key = ?", bizId, agentKey);
   const override = cfg?.limits?.model;
-  return typeof override === "string" && override.trim() ? override.trim() : null;
+  return typeof override === "string" && override.trim() ? currentModel(override.trim()) : null;
 }
 
 /** Model for an agent: per-agent override (agent_config.limits.model) > tier default. */
@@ -292,7 +335,7 @@ export async function generate<T>(input: GenerateRequest<T>): Promise<GenerateRe
     return { output, model: "sandbox", source: "sandbox", provider, usage: { input: 0, output: 0, cached: 0, costMicros: 0 } };
   }
 
-  let model = req.model && modelMatchesProvider(req.model, provider) ? req.model : req.model && !targetProvider ? req.model : modelFor(req.bizId, req.agentKey, req.tier, targetProvider ?? undefined);
+  let model = currentModel(req.model && modelMatchesProvider(req.model, provider) ? req.model : req.model && !targetProvider ? req.model : modelFor(req.bizId, req.agentKey, req.tier, targetProvider ?? undefined));
   if (!modelMatchesProvider(model, provider)) throw new AppError("BAD_MODEL", "Model không thuộc kết nối AI đang chọn", 400);
   if (provider === "codex_cli") return viaCodex(req, model);
   if (provider === "grok_cli") return viaGrok(req, model);

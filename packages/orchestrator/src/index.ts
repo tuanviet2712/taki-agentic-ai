@@ -79,6 +79,7 @@ export * from "./claude-chrome.ts";
 export * from "./flow-browser.ts";
 export * from "./assistant.ts";
 export * from "./agent-dialogue.ts";
+export * from "./agent-debate.ts"; // phòng tranh luận: 2 model / agent phản biện qua lại tới khi đồng thuận
 export * from "./brain.ts";
 export * from "./brain-auto.ts";
 export * from "./video-ai.ts";

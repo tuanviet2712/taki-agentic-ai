@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Radio, Telescope, HeartHandshake, PlaneTakeoff,
   Bell, BookOpen, BrainCircuit, Clapperboard, FileClock, FileText, Home, Library, Link2, Bot, CalendarDays, ChartLine, CheckCircle2,
-  Mail, Megaphone, Menu, MessageCircle, MessagesSquare, MonitorCog, Moon, Network, Octagon, PanelLeftClose, PanelLeftOpen, Rocket, Route, Send, Settings, SlidersHorizontal, Sparkles, Sun, Target, X,
+  Mail, Megaphone, Menu, MessageCircle, MessagesSquare, MonitorCog, Moon, Network, Octagon, PanelLeftClose, PanelLeftOpen, Rocket, Route, Send, Settings, SlidersHorizontal, Sparkles, Sun, Swords, Target, X,
 } from "lucide-react";
 import { api, useApi, useEvents } from "../lib/api";
 import { timeAgo } from "../lib/format";
@@ -20,6 +20,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     { to: "/plan", label: "Kế hoạch", icon: CalendarDays },
     { to: "/autopilot", label: "Lái tự động", icon: PlaneTakeoff, special: true },
     { to: "/agents", label: "Agent & Tác vụ", icon: Bot },
+    { to: "/debate", label: "Phòng tranh luận AI", icon: Swords, special: true },
     { to: "/approvals", label: "Duyệt & Phê duyệt", icon: CheckCircle2, badge: "approvals" },
   ] },
   { title: "Nội dung & kênh", items: [

@@ -29,7 +29,8 @@ export const cliAvailable = () => cliInfo().available;
 
 /* ---------------- Login state: `--version` cannot see an expired token ---------------- */
 
-const PROBE_MODEL = process.env.LLM_MODEL_SMALL ?? "claude-haiku-4-5";
+// Haiku 4.5 đã gỡ khỏi danh sách (xem RETIRED_MODELS ở index.ts) — .env cũ vẫn ghi tên này.
+const PROBE_MODEL = ((m: string) => (m === "claude-haiku-4-5" ? "claude-haiku-5-5" : m))(process.env.LLM_MODEL_SMALL ?? "claude-haiku-5-5");
 const PROBE_TIMEOUT_MS = Number(process.env.CLAUDE_CLI_PROBE_TIMEOUT_MS ?? 30_000);
 const AUTH_TTL_OK = 10 * 60_000; // a working login rarely drops; re-check sparingly
 const AUTH_TTL_BAD = 60_000; // after /login, pick the recovery up quickly
@@ -273,7 +274,10 @@ export function runClaudeCli(opts: CliRunOptions): Promise<CliResult> {
       }
       noteCliAuth(true);
       const mu = Object.entries(j.modelUsage ?? {}) as [string, any][];
-      const main = mu.sort((a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0))[0];
+      // Claude Code luôn gọi kèm 1 lượt Haiku nhỏ chạy nền; với câu trả lời ngắn lượt đó có thể nhiều token đầu ra hơn.
+      // Model được yêu cầu có trong modelUsage = model thật đã trả lời → báo đúng model đó, không báo nhầm sang Haiku.
+      const requested = mu.find(([k, v]) => k === opts.model || v?.canonicalModel === opts.model);
+      const main = requested ?? mu.sort((a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0))[0];
       const u = j.usage ?? {};
       resolve({
         structured: j.structured_output ?? safeJson(j.result),

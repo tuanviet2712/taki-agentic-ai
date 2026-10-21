@@ -31,7 +31,7 @@ describe("AI connections API", () => {
   it("changes provider/account without forcing one global account and restores provider-specific models", async () => {
     const before = (await call("GET", "/v1/llm")).json();
     const codex = (await call("PUT", "/v1/llm", { provider: "codex_cli", codexAccountId: id })).json();
-    expect(codex.settings.models).toEqual({ small: "default", medium: "default", large: "default" }); expect(codex.effective).toMatchObject({ provider: "codex_cli", ready: false });
+    expect(codex.settings.models).toEqual({ small: "gpt-6-luna", medium: "gpt-6.1-sol", large: "gpt-6-astra" }); expect(codex.effective).toMatchObject({ provider: "codex_cli", ready: false });
     expect((await call("PUT", "/v1/llm", { models: { medium: "gpt-example" } })).statusCode).toBe(200);
     const claude = (await call("PUT", "/v1/llm", { provider: "claude_cli" })).json(); expect(claude.settings.models).toEqual(before.settings.models);
     const again = (await call("PUT", "/v1/llm", { provider: "codex_cli" })).json(); expect(again.settings.models.medium).toBe("gpt-example");
