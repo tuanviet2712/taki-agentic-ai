@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Copy,
   Columns2,
   History,
   Loader2,
@@ -13,7 +14,9 @@ import {
   Minimize2,
   Plus,
   Send,
+  SlidersHorizontal,
   Sparkles,
+  Swords,
   Trash2,
   Users,
   X,
@@ -22,11 +25,36 @@ import { api, useApi, useEvents } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import { cx, useToast } from "./ui";
 
-const QUICK_PROMPTS = [
-  "Viết bài Facebook giới thiệu khóa học AI Marketing thực chiến cho chủ shop",
-  "Kịch bản TikTok 45s: 3 sai lầm khiến chạy quảng cáo đắt mà không ra đơn",
-  "Bài chia sẻ câu chuyện CEO 9h tối vẫn ngồi sửa bài cho nhân viên",
+/** Việc Hội đồng làm khi gõ đề bài trực tiếp: mỗi việc có agent viết, giám khảo, kênh và gợi ý riêng (máy chủ: DIALOGUE_SCENARIOS). */
+type TaskDef = { id: string; label: string; icon: string; agent: string; reviewer: string; channels: string[]; placeholder: string; prompts: string[] };
+const TASKS: TaskDef[] = [
+  {
+    id: "content_review", label: "Bài MXH", icon: "📘", agent: "content", reviewer: "review", channels: ["facebook", "instagram", "tiktok", "zalo"],
+    placeholder: "Chủ đề bài viết…",
+    prompts: ["Giới thiệu khóa học AI Marketing thực chiến cho chủ shop", "Câu chuyện CEO 9h tối vẫn ngồi sửa bài cho nhân viên"],
+  },
+  {
+    id: "video_review", label: "Video ngắn", icon: "🎬", agent: "video_script", reviewer: "review", channels: ["tiktok", "facebook", "instagram", "youtube"],
+    placeholder: "Ý tưởng video…",
+    prompts: ["45 giây: 3 sai lầm khiến chạy quảng cáo đắt mà không ra đơn", "Demo dùng AI viết 10 bài đăng trong 5 phút"],
+  },
+  {
+    id: "seo_review", label: "Bài SEO", icon: "🌐", agent: "seo_web", reviewer: "review", channels: ["website"],
+    placeholder: "Từ khóa / chủ đề bài SEO…",
+    prompts: ["Ứng dụng AI trong marketing cho doanh nghiệp nhỏ", "Cách tự động hóa chăm sóc khách hàng bằng chatbot"],
+  },
+  {
+    id: "strategy_debate", label: "Chiến lược", icon: "🧭", agent: "strategy", reviewer: "market_research", channels: [],
+    placeholder: "Mục tiêu cần lên phương án…",
+    prompts: ["Kế hoạch 30 ngày tăng 200 lead cho khóa AI với 30 triệu ngân sách", "Ra mắt sản phẩm mới trong 2 tuần, ưu tiên kênh miễn phí"],
+  },
 ];
+const CHANNEL_LABEL: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok", zalo: "Zalo", youtube: "YouTube", website: "Website" };
+const taskOf = (id?: string | null) => TASKS.find((t) => t.id === id) ?? TASKS[0];
+const shortModel = (m?: string) => String(m ?? "").replace(/^claude-/, "").replace(/^gpt-/, "GPT-");
+/** Lời nhận xét của AI hay có **in đậm** / `mã`: bỏ ký hiệu markdown cho dễ đọc trong bong bóng chat. */
+const plain = (s: unknown) => String(s ?? "").replace(/\*\*|__|`/g, "");
+const draftText = (d: any) => [d?.title, d?.hook, d?.body, d?.cta, (d?.hashtags ?? []).join(" ")].filter(Boolean).join("\n\n");
 
 const store = {
   get: (k: string) => {
@@ -158,7 +186,7 @@ export function AgentDialoguePanel() {
   const latestScore = current.data?.result?.finalScore ?? (list.data?.[0]?.result?.finalScore as number | undefined);
 
   if (!open) {
-    if (location.pathname.startsWith("/brain")) return null;
+    if (location.pathname.startsWith("/brain") || location.pathname.startsWith("/debate")) return null;
     return (
       <button
         onClick={() => setOpen(true)}
@@ -218,6 +246,15 @@ export function AgentDialoguePanel() {
             >
               <Plus className="h-3.5 w-3.5" /> Mới
             </button>
+            <Link
+              to="/debate"
+              onClick={() => setOpen(false)}
+              className="grid h-8 w-8 place-items-center rounded-full bg-white/15 hover:bg-white/25"
+              title="Phòng tranh luận AI: 2 model / agent tranh luận tự do tới khi thống nhất"
+              aria-label="Mở Phòng tranh luận AI"
+            >
+              <Swords className="h-4 w-4" />
+            </Link>
             <button
               onClick={() => setShowHistory((v) => !v)}
               className={cx(
@@ -305,12 +342,26 @@ function SimpleChatView({
   toast: (msg: string, tone?: "ok" | "err" | "info") => void;
 }) {
   const providers = meta?.providers ?? [];
-  const [writerModel, setWriterModel] = useState("claude-sonnet-5");
+  const [writerModel, setWriterModel] = useState("claude-sonnet-5-5");
   const [reviewerModel, setReviewerModel] = useState("grok-4.6");
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [ctaLoading, setCtaLoading] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  // Việc + kênh + agent viết cho đề bài MỚI (nhớ việc chọn lần trước). Kênh / agent nằm trong "Tùy chỉnh" (ẩn sẵn).
+  const [taskId, setTaskId] = useState(() => store.get("council.task") ?? TASKS[0].id);
+  const task = taskOf(taskId);
+  const [channel, setChannel] = useState(() => taskOf(store.get("council.task")).channels[0] ?? "facebook");
+  const [writerAgent, setWriterAgent] = useState(() => taskOf(store.get("council.task")).agent);
+  const [showOptions, setShowOptions] = useState(false);
+  const pickTask = (id: string) => {
+    const t = taskOf(id);
+    setTaskId(t.id);
+    store.set("council.task", t.id);
+    setChannel(t.channels[0] ?? "facebook");
+    setWriterAgent(t.agent);
+  };
+  const writerAgents = (meta?.agents ?? []).filter((a: any) => a.role !== "reviewer");
 
   useEffect(() => {
     if (dialogue?.config) {
@@ -346,22 +397,25 @@ function SimpleChatView({
     setSending(true);
     if (!customPrompt) setText("");
 
+    // Không chờ cả vòng tranh luận (nhiều phút với CLI thật): máy chủ chạy nền, mỗi lượt Viết / Chấm hiện ngay khi xong
+    // qua sự kiện agent_dialogue.updated.
     try {
       if (!dialogueId) {
         const created = await api.post("agent-dialogues", {
-          scenario: "content_review",
+          scenario: task.id,
           topic: val,
-          channel: "facebook",
+          channel: task.channels.length ? channel : "facebook",
           maxRounds: 3,
           passThreshold: 82,
           mode: "auto",
-          writer: { agentKey: "content", provider: inferProvider(writerModel), model: writerModel },
-          reviewer: { agentKey: "review", provider: inferProvider(reviewerModel), model: reviewerModel },
+          writer: { agentKey: writerAgent, provider: inferProvider(writerModel), model: writerModel },
+          reviewer: { agentKey: task.reviewer, provider: inferProvider(reviewerModel), model: reviewerModel },
+          runImmediately: false,
         });
         setDialogueId(created.id);
         reloadAll();
       } else {
-        await api.post(`agent-dialogues/${dialogueId}/intervene`, { text: val, wait: true });
+        await api.post(`agent-dialogues/${dialogueId}/intervene`, { text: val, wait: false });
         reloadAll();
       }
     } catch (e: any) {
@@ -407,53 +461,155 @@ function SimpleChatView({
   const messages = dialogue?.messages ?? [];
   const res = dialogue?.result ?? {};
   const isTargetAudit = Boolean(dialogue?.config?.target || res.councilVerdict);
+  const live = Boolean(dialogue && (dialogue.status === "running" || messages.some((m: any) => m.status === "streaming")));
+  const anyStreaming = messages.some((m: any) => m.status === "streaming");
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!anyStreaming) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [anyStreaming]);
+  // Dự phòng khi mất kết nối sự kiện: hỏi lại nhẹ trong lúc Hội đồng đang trao đổi.
+  useEffect(() => {
+    if (!live) return;
+    const t = window.setInterval(reloadAll, 4000);
+    return () => window.clearInterval(t);
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
+  const modelKnown = (m: string) => modelGroups.some((g: any) => g.models.some((x: any) => x.id === m));
+  // C. Điểm qua từng vòng (74 → 91) + bản đầu / bản chốt để thấy rõ Hội đồng đã sửa gì.
+  const scoreTrail: number[] = messages
+    .filter((m: any) => m.role === "reviewer" && m.status === "done" && typeof m.result?.score === "number")
+    .map((m: any) => Math.round(m.result.score));
+  const drafts = messages.filter((m: any) => m.role === "writer" && m.status === "done" && m.result?.body);
+  const firstDraft = drafts[0]?.result;
+  const finalDraft = res.finalDraft ?? drafts.at(-1)?.result;
+  const publishable = !["strategy", "brief"].includes(dialogue?.config?.kind);
+  const [compare, setCompare] = useState<"first" | "final" | null>(null);
+  useEffect(() => setCompare(null), [dialogue?.id]);
+  const copyFinal = () => {
+    void navigator.clipboard?.writeText(draftText(finalDraft)).then(
+      () => toast("Đã sao chép bản chốt", "ok"),
+      () => toast("Không sao chép được", "err"),
+    );
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-soft/30">
-      {/* Compact 1-Line Model Selector Bar */}
-      <div className="flex items-center gap-1.5 border-b border-line bg-card px-3 py-2 text-xs">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-line bg-soft/60 px-2.5 py-1.5">
-          <span className="shrink-0 text-[11px] font-semibold text-violet-600 dark:text-violet-400">✍️ Viết:</span>
-          <select
-            value={writerModel}
-            onChange={(e) => setWriterModel(e.target.value)}
-            aria-label="Model viết bài"
-            className="min-w-0 flex-1 truncate bg-transparent text-xs font-semibold text-ink focus:outline-none"
-          >
-            {modelGroups.map((g: any) => (
-              <optgroup key={g.id} label={g.label}>
-                {g.models.map((m: any) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+      {dialogue ? (
+        /* Đang xem 1 phiên: chỉ 1 dòng tóm tắt việc + 2 model, không lặp lại bộ chọn */
+        <div className="flex items-center gap-1.5 border-b border-line bg-card px-3.5 py-2 text-[11px] text-muted">
+          <span className="shrink-0">{taskOf(dialogue.scenario).icon}</span>
+          <span className="shrink-0 font-semibold text-ink">{taskOf(dialogue.scenario).label}</span>
+          {taskOf(dialogue.scenario).channels.length > 0 && <span className="shrink-0">· {CHANNEL_LABEL[dialogue.channel] ?? dialogue.channel}</span>}
+          <span className="ml-auto min-w-0 truncate font-mono text-[10px]">
+            ✍️ {shortModel(dialogue.config?.writer?.model)} ⇄ ⚖️ {shortModel(dialogue.config?.reviewer?.model)}
+          </span>
         </div>
-
-        <ArrowLeftRight className="h-3.5 w-3.5 shrink-0 text-muted" />
-
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-line bg-soft/60 px-2.5 py-1.5">
-          <span className="shrink-0 text-[11px] font-semibold text-amber-600 dark:text-amber-400">⚖️ Phản biện:</span>
-          <select
-            value={reviewerModel}
-            onChange={(e) => setReviewerModel(e.target.value)}
-            aria-label="Model chấm điểm"
-            className="min-w-0 flex-1 truncate bg-transparent text-xs font-semibold text-ink focus:outline-none"
-          >
-            {modelGroups.map((g: any) => (
-              <optgroup key={g.id} label={g.label}>
-                {g.models.map((m: any) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </optgroup>
+      ) : (
+        <div className="space-y-2 border-b border-line bg-card px-3 py-2.5 text-xs">
+          {/* A. Chọn việc */}
+          <div className="grid grid-cols-4 gap-1 rounded-xl bg-soft/70 p-1" role="tablist" aria-label="Hội đồng làm việc gì">
+            {TASKS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={task.id === t.id}
+                onClick={() => pickTask(t.id)}
+                data-testid={`council-task-${t.id}`}
+                className={cx(
+                  "rounded-lg px-1 py-1.5 text-[11px] font-semibold transition",
+                  task.id === t.id ? "bg-card text-emerald-700 shadow-2xs dark:text-emerald-300" : "text-muted hover:text-ink",
+                )}
+              >
+                <span className="mr-0.5">{t.icon}</span>
+                {t.label}
+              </button>
             ))}
-          </select>
+          </div>
+          {/* Model 2 bên + nút Tùy chỉnh */}
+          <div className="flex items-center gap-1.5">
+            <label className="flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-line bg-soft/60 px-2 py-1.5">
+              <span className="shrink-0 text-[11px] font-semibold text-violet-600 dark:text-violet-400">✍️</span>
+              <select
+                value={writerModel}
+                onChange={(e) => setWriterModel(e.target.value)}
+                aria-label="Model viết"
+                className="min-w-0 flex-1 truncate bg-transparent text-xs font-semibold text-ink focus:outline-none"
+              >
+                {/* Danh sách model chưa tải xong / model không có trong danh sách: vẫn hiện model đang chọn, không để ô trống. */}
+                {!modelKnown(writerModel) && <option value={writerModel}>{writerModel}</option>}
+                {modelGroups.map((g: any) => (
+                  <optgroup key={g.id} label={g.label}>
+                    {g.models.map((m: any) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            <ArrowLeftRight className="h-3.5 w-3.5 shrink-0 text-muted" />
+            <label className="flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-line bg-soft/60 px-2 py-1.5">
+              <span className="shrink-0 text-[11px] font-semibold text-amber-600 dark:text-amber-400">⚖️</span>
+              <select
+                value={reviewerModel}
+                onChange={(e) => setReviewerModel(e.target.value)}
+                aria-label="Model chấm điểm"
+                className="min-w-0 flex-1 truncate bg-transparent text-xs font-semibold text-ink focus:outline-none"
+              >
+                {!modelKnown(reviewerModel) && <option value={reviewerModel}>{reviewerModel}</option>}
+                {modelGroups.map((g: any) => (
+                  <optgroup key={g.id} label={g.label}>
+                    {g.models.map((m: any) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowOptions((v) => !v)}
+              aria-expanded={showOptions}
+              title="Tùy chỉnh kênh và agent viết"
+              className={cx("grid h-8 w-8 shrink-0 place-items-center rounded-xl border transition", showOptions ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700" : "border-line text-muted hover:text-ink")}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {/* B. Tùy chỉnh (ẩn sẵn): kênh + agent viết */}
+          {showOptions && (
+            <div className="grid grid-cols-2 gap-1.5">
+              {task.channels.length > 1 && (
+                <label className="text-[11px] text-muted">
+                  Kênh
+                  <select value={channel} onChange={(e) => setChannel(e.target.value)} className="mt-0.5 w-full rounded-lg border border-line bg-card px-2 py-1.5 text-xs text-ink focus:outline-none">
+                    {task.channels.map((c) => (
+                      <option key={c} value={c}>
+                        {CHANNEL_LABEL[c] ?? c}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className={cx("text-[11px] text-muted", task.channels.length > 1 ? "" : "col-span-2")}>
+                Agent viết
+                <select value={writerAgent} onChange={(e) => setWriterAgent(e.target.value)} className="mt-0.5 w-full rounded-lg border border-line bg-card px-2 py-1.5 text-xs text-ink focus:outline-none">
+                  {writerAgents.map((a: any) => (
+                    <option key={a.key} value={a.key}>
+                      {String(a.label).replace(/\s*\(.*\)$/, "")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Chat Messages Area */}
       <div className="flex-1 space-y-3 overflow-y-auto px-3.5 py-4">
@@ -474,12 +630,12 @@ function SimpleChatView({
             <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-600">
               <Sparkles className="h-6 w-6" />
             </div>
-            <p className="text-sm font-semibold text-ink">Hội đồng Agent tự phản biện & đồng thuận</p>
-            <p className="mt-1 max-w-xs text-xs text-muted">
-              Bấm nút <strong>"Hội đồng thảo luận"</strong> ở bất kỳ mục nào trong Kế hoạch / Ads, hoặc giao đề bài mới bên dưới.
+            <p className="text-sm font-semibold text-ink">
+              {task.icon} {task.label}: 1 AI viết, 1 AI chấm
             </p>
+            <p className="mt-1 max-w-xs text-xs text-muted">Nhập đề bài bên dưới. Hai bên sửa qua lại tới khi đạt ≥ 82 điểm.</p>
             <div className="mt-4 w-full space-y-1.5 text-left">
-              {QUICK_PROMPTS.map((q, i) => (
+              {task.prompts.map((q, i) => (
                 <button
                   key={i}
                   onClick={() => void handleSend(q)}
@@ -493,11 +649,19 @@ function SimpleChatView({
         )}
 
         {messages.map((m: any) => (
-          <CleanBubble key={m.id} msg={m} passThreshold={dialogue?.pass_threshold ?? 82} />
+          <CleanBubble key={m.id} msg={m} passThreshold={dialogue?.pass_threshold ?? 82} now={now} />
         ))}
 
+        {dialogue?.status === "failed" && (
+          <div className="rounded-2xl border border-rose-500/40 bg-rose-500/[0.06] p-3 text-xs text-rose-700 dark:text-rose-300" data-testid="council-error">
+            <p className="font-semibold">Hội đồng dừng giữa chừng</p>
+            <p className="mt-1 break-words leading-relaxed">{res.error || "Có lỗi khi gọi AI."}</p>
+            <p className="mt-1 text-[11px] text-muted">Gửi góp ý bên dưới (VD: "chạy lại") để Hội đồng làm vòng mới, hoặc đổi model ở thanh trên.</p>
+          </div>
+        )}
+
         {/* In-Chat Council Conclusion & Direct CTA Bubble */}
-        {dialogue && !sending && !auditingLabel && (isTargetAudit || res.finalDraft) && (
+        {dialogue && !live && dialogue.status !== "failed" && !sending && !auditingLabel && (isTargetAudit || res.finalDraft) && (
           <div
             data-testid="council-conclusion-card"
             className="rounded-2xl border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-500/[0.08] to-teal-500/[0.04] p-3.5 text-xs shadow-sm"
@@ -509,9 +673,15 @@ function SimpleChatView({
                   ? "Kết luận Hội đồng: Đã tự sửa & cập nhật Kế hoạch"
                   : res.councilVerdict === "goal_audited"
                     ? "Kết luận Hội đồng: Đã tối ưu toàn Kế hoạch"
-                    : "Kết luận Hội đồng: Đạt chuẩn duyệt ngay"}
+                    : res.passed === false
+                      ? "Hết vòng: chưa đạt ngưỡng điểm"
+                      : "Kết luận Hội đồng: Đạt chuẩn"}
               </span>
-              {typeof res.finalScore === "number" && (
+              {!isTargetAudit && scoreTrail.length > 0 ? (
+                <span className="rounded-lg bg-emerald-600 px-2 py-0.5 text-[11px] font-bold text-white" title="Điểm qua từng vòng">
+                  {scoreTrail.join(" → ")}đ
+                </span>
+              ) : typeof res.finalScore === "number" && (
                 <span className="rounded-lg bg-emerald-600 px-2 py-0.5 text-[11px] font-bold text-white">
                   {res.initialScore && res.initialScore !== res.finalScore
                     ? `${res.initialScore}đ → ${res.finalScore}đ`
@@ -570,29 +740,69 @@ function SimpleChatView({
                     </button>
                   )}
                 </>
-              ) : dialogue.approval_id ? (
-                <Link
-                  to="/approvals"
-                  className="inline-flex flex-1 items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700"
-                >
-                  Xem trong Hộp Duyệt →
-                </Link>
               ) : (
-                <button
-                  onClick={() => void handlePromote()}
-                  disabled={Boolean(ctaLoading)}
-                  data-testid="promote-dialogue-btn"
-                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-2xs transition hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {ctaLoading === "promote" ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Check className="h-3.5 w-3.5" />
+                <>
+                  <button
+                    onClick={copyFinal}
+                    disabled={!finalDraft}
+                    className="inline-flex items-center gap-1 rounded-xl border border-line bg-card px-3 py-2 text-xs font-semibold text-ink transition hover:bg-soft disabled:opacity-50"
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Sao chép
+                  </button>
+                  {drafts.length > 1 && (
+                    <button
+                      onClick={() => setCompare((v) => (v ? null : "first"))}
+                      aria-expanded={Boolean(compare)}
+                      data-testid="council-compare-btn"
+                      className={cx(
+                        "inline-flex items-center gap-1 rounded-xl border px-3 py-2 text-xs font-semibold transition",
+                        compare ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700" : "border-line bg-card text-ink hover:bg-soft",
+                      )}
+                    >
+                      <ArrowLeftRight className="h-3.5 w-3.5" /> So sánh
+                    </button>
                   )}
-                  Đưa vào Hộp Duyệt
-                </button>
+                  {publishable &&
+                    (dialogue.approval_id ? (
+                      <Link
+                        to="/approvals"
+                        className="inline-flex flex-1 items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700"
+                      >
+                        Duyệt & lên lịch đăng →
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() => void handlePromote()}
+                        disabled={Boolean(ctaLoading)}
+                        data-testid="promote-dialogue-btn"
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-2xs transition hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {ctaLoading === "promote" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        Đưa vào Hộp Duyệt
+                      </button>
+                    ))}
+                </>
               )}
             </div>
+
+            {compare && firstDraft && finalDraft && (
+              <div className="mt-2.5 rounded-xl border border-line bg-card p-2.5" data-testid="council-compare">
+                <div className="mb-2 grid grid-cols-2 gap-1 rounded-lg bg-soft/70 p-0.5 text-[11px] font-semibold">
+                  {(["first", "final"] as const).map((k) => (
+                    <button
+                      key={k}
+                      onClick={() => setCompare(k)}
+                      className={cx("rounded-md py-1 transition", compare === k ? "bg-card text-ink shadow-2xs" : "text-muted hover:text-ink")}
+                    >
+                      {k === "first" ? `Bản đầu${scoreTrail[0] != null ? ` · ${scoreTrail[0]}đ` : ""}` : `Bản chốt${scoreTrail.length ? ` · ${scoreTrail.at(-1)}đ` : ""}`}
+                    </button>
+                  ))}
+                </div>
+                <div className="max-h-64 overflow-y-auto whitespace-pre-line text-[11.5px] leading-relaxed text-ink/90">
+                  {draftText(compare === "first" ? firstDraft : finalDraft)}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -618,7 +828,7 @@ function SimpleChatView({
                 void handleSend();
               }
             }}
-            placeholder={dialogue ? "Góp ý thêm cho Hội đồng (VD: nhấn mạnh ưu đãi)..." : "Nhập chủ đề cần viết hoặc bấm Hội đồng từ Kế hoạch..."}
+            placeholder={dialogue ? "Góp ý để Hội đồng sửa tiếp (VD: nhấn mạnh ưu đãi)…" : task.placeholder}
             className="max-h-24 flex-1 resize-none bg-transparent py-1 text-xs text-ink placeholder:text-muted focus:outline-none"
           />
           <button
@@ -637,8 +847,38 @@ function SimpleChatView({
 
 // ==================== CLEAN MESSAGE BUBBLES ====================
 
-function CleanBubble({ msg, passThreshold }: { msg: any; passThreshold: number }) {
+function CleanBubble({ msg, passThreshold, now }: { msg: any; passThreshold: number; now: number }) {
   const [expanded, setExpanded] = useState(false);
+  const isWriter = msg.role === "writer";
+
+  // Lượt đang chạy trên CLI: hiện ai đang làm gì + số giây đã chờ (Grok / Claude thật mất 30 giây đến vài phút mỗi lượt).
+  if ((isWriter || msg.role === "reviewer") && (msg.status === "streaming" || msg.status === "failed")) {
+    const secs = Math.max(0, Math.round((now - new Date(msg.created_at).getTime()) / 1000));
+    const failed = msg.status === "failed";
+    return (
+      <div className={isWriter ? "mr-4" : "ml-4"}>
+        <div
+          className={cx(
+            "flex items-start gap-2 rounded-2xl border px-3.5 py-2.5 text-xs",
+            failed
+              ? "border-rose-500/40 bg-rose-500/[0.06] text-rose-700 dark:text-rose-300"
+              : isWriter
+                ? "rounded-tl-xs border-violet-500/30 bg-violet-500/[0.04] text-muted"
+                : "rounded-tr-xs border-amber-500/40 bg-amber-500/[0.04] text-muted",
+          )}
+        >
+          {failed ? <X className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <Loader2 className={cx("mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin", isWriter ? "text-violet-600" : "text-amber-600")} />}
+          <span className="min-w-0 break-words">
+            <b className={cx("font-semibold", failed ? "" : isWriter ? "text-violet-700 dark:text-violet-300" : "text-amber-700 dark:text-amber-300")}>
+              {isWriter ? "✍️" : "⚖️"} {msg.agent_label}
+            </b>{" "}
+            <span className="font-mono text-[10px]">({msg.model})</span>{" "}
+            {failed ? `— lỗi: ${msg.text}` : `${isWriter ? `đang viết bản v${msg.round}` : `đang đọc & chấm bản v${msg.round}`}… ${secs}s`}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   // 1. CEO Prompt Bubble (Right-aligned, super clean)
   if (msg.role === "ceo") {
@@ -672,6 +912,11 @@ function CleanBubble({ msg, passThreshold }: { msg: any; passThreshold: number }
         <div className="rounded-2xl rounded-tl-xs border border-line bg-card p-3.5 shadow-2xs">
           {draft.title ? (
             <div className="space-y-2 text-xs">
+              {draft.replyToPeer && (
+                <p className="rounded-lg border-l-2 border-violet-500/60 bg-violet-500/[0.06] px-2.5 py-1.5 leading-relaxed text-ink/90">
+                  💬 {plain(draft.replyToPeer)}
+                </p>
+              )}
               <p className="font-bold text-ink">{draft.title}</p>
               {draft.hook && (
                 <p className="rounded-lg bg-violet-500/5 px-2.5 py-1.5 font-medium text-ink/90">
@@ -763,12 +1008,14 @@ function CleanBubble({ msg, passThreshold }: { msg: any; passThreshold: number }
           </div>
         )}
 
-        {/* Short Summary */}
-        <p className="leading-relaxed text-ink/90">
-          {passed
-            ? "Bản thảo đã khắc phục hết lỗi, câu mở đầu thu hút, không còn mùi văn mẫu AI và đúng chuẩn DNA."
-            : rev.rewriteDirective || rev.replyToWriter || msg.text}
-        </p>
+        {/* Lời Giám khảo nói trực tiếp với người viết (phản biện) + yêu cầu sửa cho vòng sau */}
+        <p className="leading-relaxed text-ink/90">💬 {plain(rev.replyToWriter || msg.text)}</p>
+        {!passed && rev.rewriteDirective && rev.rewriteDirective !== rev.replyToWriter && (
+          <p className="mt-2 rounded-lg bg-card/80 px-2.5 py-1.5 leading-relaxed text-ink/85">
+            <b className="font-semibold text-amber-700 dark:text-amber-300">Yêu cầu sửa: </b>
+            {plain(rev.rewriteDirective)}
+          </p>
+        )}
 
         {/* Issues list (only when needing revision, max 3 short bullets) */}
         {!passed && issues.length > 0 && (
@@ -836,7 +1083,7 @@ function SimpleHistoryView({
   return (
     <div className="flex-1 space-y-2 overflow-y-auto p-3">
       {dialogues.map((d: any) => {
-        const wModel = d.config?.writer?.model ?? "claude-sonnet-5";
+        const wModel = d.config?.writer?.model ?? "claude-sonnet-5-5";
         const rModel = d.config?.reviewer?.model ?? "grok-4.6";
         const score = d.result?.finalScore;
         return (
@@ -849,9 +1096,9 @@ function SimpleHistoryView({
             )}
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate font-semibold text-ink">{d.title}</p>
+              <p className="truncate font-semibold text-ink">{d.config?.target ? "📋" : taskOf(d.scenario).icon} {d.title}</p>
               <p className="mt-1 text-[11px] text-muted">
-                {wModel} ⇄ {rModel} · {timeAgo(d.updated_at)}
+                {shortModel(wModel)} ⇄ {shortModel(rModel)} · {timeAgo(d.updated_at)}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">

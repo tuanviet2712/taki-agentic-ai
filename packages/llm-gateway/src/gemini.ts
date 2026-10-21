@@ -45,7 +45,36 @@ export function stopGemini(child: ChildProcess) {
   } else child.kill("SIGTERM");
 }
 
-export function geminiLoggedIn(): { loggedIn: boolean; authMode?: "api_key" | "oauth"; detail?: string } {
+/**
+ * Google đã ngừng cho Gemini CLI dùng tài khoản Google cá nhân miễn phí (IneligibleTierError / UNSUPPORTED_CLIENT:
+ * "no longer supported for Gemini Code Assist for individuals"). Có tệp oauth_creds.json không có nghĩa là gọi được:
+ * lần gọi bị từ chối thì ghi nhớ (qua cả lần khởi động lại) để báo "chưa sẵn sàng" đúng sự thật thay vì để từng lượt lỗi.
+ */
+const OAUTH_BLOCK_FILE = join(tmpdir(), "taki-gemini-oauth-blocked.json");
+export const GEMINI_OAUTH_BLOCKED_REASON = "Google đã ngừng cho Gemini CLI dùng tài khoản Google cá nhân miễn phí. Dán GEMINI_API_KEY (Google AI Studio) trong Kết nối AI → Gemini để dùng Gemini.";
+function activeGoogleAccount(): string | undefined {
+  try {
+    return JSON.parse(readFileSync(join(geminiHome(), "google_accounts.json"), "utf8")).active;
+  } catch {
+    return undefined;
+  }
+}
+export function noteGeminiOauth(blocked: boolean) {
+  try {
+    if (blocked) writeFileSync(OAUTH_BLOCK_FILE, JSON.stringify({ email: activeGoogleAccount() ?? null, at: new Date().toISOString() }));
+    else rmSync(OAUTH_BLOCK_FILE, { force: true });
+  } catch { /* ignore */ }
+}
+function oauthBlocked(): boolean {
+  try {
+    const mark = JSON.parse(readFileSync(OAUTH_BLOCK_FILE, "utf8"));
+    return (mark.email ?? null) === (activeGoogleAccount() ?? null); // đăng nhập tài khoản Google khác → thử lại
+  } catch {
+    return false;
+  }
+}
+
+export function geminiLoggedIn(): { loggedIn: boolean; authMode?: "api_key" | "oauth"; detail?: string; blocked?: string } {
   const apiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)?.trim();
   if (apiKey) return { loggedIn: true, authMode: "api_key", detail: `API Key (${apiKey.slice(0, 6)}…)` };
   const oauthPath = join(geminiHome(), "oauth_creds.json");
@@ -53,12 +82,9 @@ export function geminiLoggedIn(): { loggedIn: boolean; authMode?: "api_key" | "o
     try {
       const creds = JSON.parse(readFileSync(oauthPath, "utf8"));
       if (creds.access_token || creds.refresh_token) {
-        let email: string | undefined;
-        try {
-          const accts = JSON.parse(readFileSync(join(geminiHome(), "google_accounts.json"), "utf8"));
-          email = accts.active;
-        } catch { /* ignore */ }
-        return { loggedIn: true, authMode: "oauth", detail: email ?? "Tài khoản Google (OAuth)" };
+        const detail = activeGoogleAccount() ?? "Tài khoản Google (OAuth)";
+        if (oauthBlocked()) return { loggedIn: false, authMode: "oauth", detail, blocked: GEMINI_OAUTH_BLOCKED_REASON };
+        return { loggedIn: true, authMode: "oauth", detail };
       }
     } catch { /* ignore */ }
   }
@@ -98,7 +124,7 @@ export function geminiInfo() {
     authMode: auth.authMode ?? null,
     authMethod: auth.authMode ?? null,
     authDetail: auth.detail ?? null,
-    authError: !info.available ? "Chưa cài Gemini CLI" : !loggedIn ? "Gemini CLI chưa đăng nhập (chạy `gemini` hoặc nhập GEMINI_API_KEY)" : undefined,
+    authError: !info.available ? "Chưa cài Gemini CLI" : auth.blocked ? auth.blocked : !loggedIn ? "Gemini CLI chưa đăng nhập (chạy `gemini` hoặc nhập GEMINI_API_KEY)" : undefined,
   };
 }
 
@@ -177,10 +203,12 @@ export async function runGeminiAgent(opts: GeminiRunOptions): Promise<AgentRunRe
         if (code !== 0 || !text) {
           const rawErr = `${err}\n${out}`.trim();
           if (/IneligibleTierError|UNSUPPORTED_CLIENT/i.test(rawErr)) {
-            return reject(new AppError("GEMINI_AUTH", "Gemini CLI yêu cầu GEMINI_API_KEY (từ Google AI Studio) hoặc tài khoản Workspace. Hãy dán GEMINI_API_KEY trong Kết nối AI → Gemini.", 401));
+            if (geminiLoggedIn().authMode === "oauth") noteGeminiOauth(true);
+            return reject(new AppError("GEMINI_AUTH", GEMINI_OAUTH_BLOCKED_REASON, 401));
           }
           return reject(new AppError("GEMINI_FAILED", `Gemini CLI lỗi: ${rawErr.slice(0, 280) || "Không có phản hồi"}`, 502));
         }
+        if (geminiLoggedIn().authMode === "oauth") noteGeminiOauth(false);
         opts.onStep?.({ at: new Date().toISOString(), kind: "text", text });
         const structured = opts.jsonSchema ? extractJsonObject(text) : text;
         done({ text, structured, model, usage, costMicros: 0, durationMs: Date.now() - start, turns: 1, denials: [] });

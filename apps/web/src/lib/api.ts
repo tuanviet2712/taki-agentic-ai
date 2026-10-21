@@ -76,6 +76,8 @@ function ensureStream() {
     "action.executed", "conversation.message_in", "conversation.message_out", "conversation.handoff", "conversation.suggestion", "lead.graded", "messenger.synced", "chat_insight.updated", "order.created", "order.updated",
     "post.comment_linked", "metrics.updated", "alert.raised", "proposal.created", "proposal.applied", "goal.created", "creative.updated", "automation.ran", "assistant.updated", "brain.updated",
     "autopilot.ran", "autopilot.settings_changed", "autopilot.goal_created", "goal.updated", "llm.updated",
+    // Hội đồng Agent + Phòng tranh luận AI: mỗi lượt nói phát sự kiện để giao diện hiện ngay
+    "agent_dialogue.updated", "agent_debate.updated",
     "content.image", "content.image_progress", // ảnh bài viết / ảnh bài SEO vừa tạo xong · tiến độ tạo ảnh bài SEO
     // Chăm khách từ bình luận (packages/orchestrator/src/nurture.ts + chat-engine/optout.ts)
     "nurture.comment_in", "nurture.comments_classified", "nurture.lead_created", "nurture.dm_sent", "nurture.phone", "nurture.friend_requested", "nurture.friend_accepted",

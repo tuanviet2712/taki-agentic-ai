@@ -8,6 +8,8 @@ import {
   llmSettings,
   modelMatchesProvider,
   providerReadiness,
+  resolveGrokModel,
+  currentModel,
   type Provider,
 } from "@dotaka/llm-gateway";
 import { AppError, logger } from "@dotaka/shared";
@@ -18,7 +20,8 @@ import { approvalExpiresAt, approveTask } from "./runtime.ts";
 import { decideApproval } from "./approvals.ts";
 
 let _tablesReady = false;
-function ensureDialogueTables() {
+/** Phòng tranh luận (agent-debate.ts) dùng chung 2 bảng này với scenario = DEBATE_SCENARIO. */
+export function ensureDialogueTables() {
   if (_tablesReady) return;
   try {
     db().exec(`
@@ -69,7 +72,7 @@ export const DIALOGUE_SCENARIOS = [
     rubricKey: "content_social",
     kind: "social_post",
     defaultChannel: "facebook",
-    writer: { agentKey: "content", label: "Content Agent", provider: "claude_cli" as Provider, model: "claude-sonnet-5" },
+    writer: { agentKey: "content", label: "Content Agent", provider: "claude_cli" as Provider, model: "claude-sonnet-5-5" },
     reviewer: { agentKey: "review", label: "Review Agent · Kiểm duyệt MKT", provider: "grok_cli" as Provider, model: "grok-4.6" },
   },
   {
@@ -79,17 +82,17 @@ export const DIALOGUE_SCENARIOS = [
     rubricKey: "video_script",
     kind: "video_script",
     defaultChannel: "tiktok",
-    writer: { agentKey: "video_script", label: "Video Script Agent", provider: "claude_cli" as Provider, model: "claude-sonnet-5" },
+    writer: { agentKey: "video_script", label: "Video Script Agent", provider: "claude_cli" as Provider, model: "claude-sonnet-5-5" },
     reviewer: { agentKey: "review", label: "Review Agent · Kiểm duyệt MKT", provider: "grok_cli" as Provider, model: "grok-4.6" },
   },
   {
     id: "seo_review",
     label: "Bài chuẩn SEO ↔ Kiểm duyệt SEO & AI Trace",
-    description: "SEO/Web Agent (Gemini / Claude) lập dàn ý & bài viết chuẩn SEO, Review Agent (Grok Bot) chấm cấu trúc H2/H3, mật độ từ khóa và khử mùi văn AI.",
+    description: "SEO/Web Agent (Claude Sonnet 5.5) lập dàn ý & bài viết chuẩn SEO, Review Agent (Grok Bot) chấm cấu trúc H2/H3, mật độ từ khóa và khử mùi văn AI.",
     rubricKey: "seo_article",
     kind: "seo_article",
     defaultChannel: "website",
-    writer: { agentKey: "seo_web", label: "SEO/Web Agent", provider: "gemini_cli" as Provider, model: "gemini-2.5-pro" },
+    writer: { agentKey: "seo_web", label: "SEO/Web Agent", provider: "claude_cli" as Provider, model: "claude-sonnet-5-5" },
     reviewer: { agentKey: "review", label: "Review Agent · Kiểm duyệt MKT", provider: "grok_cli" as Provider, model: "grok-4.6" },
   },
   {
@@ -99,7 +102,7 @@ export const DIALOGUE_SCENARIOS = [
     rubricKey: "strategy",
     kind: "strategy",
     defaultChannel: "facebook",
-    writer: { agentKey: "strategy", label: "Strategy Agent", provider: "claude_cli" as Provider, model: "claude-opus-5" },
+    writer: { agentKey: "strategy", label: "Strategy Agent", provider: "claude_cli" as Provider, model: "claude-opus-5-5" },
     reviewer: { agentKey: "market_research", label: "Market Research · Phản biện", provider: "grok_cli" as Provider, model: "grok-4.7" },
   },
 ] as const;
@@ -126,7 +129,8 @@ export const PROVIDER_META: Record<Provider, { label: string; short: string; bad
 export function sanitizePromptInput(raw: string, maxLen = 4000): string {
   const cleaned = String(raw ?? "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
-    .replace(/<\/?(?:untrusted_context|system|instruction|prompt)[^>]*>/gi, "[tag-stripped]")
+    // Bắt cả biến thể có khoảng trắng như "< /untrusted_context >" (lời agent khác có thể cố đóng thẻ dữ liệu sớm).
+    .replace(/<\s*\/?\s*(?:untrusted_context|system|instruction|prompt)\b[^>]*>/gi, "[tag-stripped]")
     .trim()
     .slice(0, maxLen);
   return `<untrusted_context>\n${cleaned}\n</untrusted_context>`;
@@ -145,7 +149,7 @@ export function normalizeParticipant(
     input?.provider && ["claude_cli", "grok_cli", "codex_cli", "gemini_cli", "sandbox"].includes(input.provider)
       ? input.provider
       : fallback.provider;
-  let model = input?.model?.trim() || fallback.model;
+  let model = currentModel(input?.model?.trim() || fallback.model);
 
   const inferred = inferProviderFromModel(model);
   if (inferred && (!input?.provider || provider !== "sandbox")) {
@@ -157,8 +161,64 @@ export function normalizeParticipant(
   if (provider === "sandbox") {
     model = "sandbox";
   }
+  // Model Grok tài khoản không có (vd grok-4.3 trong cài đặt cũ) → model dùng được, để tên hiển thị khớp model chạy thật.
+  if (provider === "grok_cli") model = resolveGrokModel(model);
   return { agentKey, label, provider, model };
 }
+
+/**
+ * Mỗi loại việc có định dạng viết + 5 tiêu chí chấm riêng (trước đây mọi loại đều chấm theo tiêu chí bài Facebook).
+ * Khóa = kind của agent viết (DIALOGUE_AGENTS); loại lạ → bài mạng xã hội.
+ */
+type KindGuide = { label: string; writerFormat: string; criteria: (dna: Dna) => string[] };
+const KIND_GUIDES: Record<string, KindGuide> = {
+  social_post: {
+    label: "bài mạng xã hội",
+    writerFormat: "title = tiêu đề bài; hook = câu mở đầu giữ chân 3 giây; body = thân bài; cta = 1 hành động cụ thể; hashtags = tối đa 5.",
+    criteria: (dna) => [
+      `1. Hook 3 giây đầu (tối đa 20đ): Có chạm đúng tình huống thật của khách không?`,
+      `2. Đúng nỗi đau & ngôn ngữ ICP (tối đa 25đ): Có nói đúng ngôn ngữ người kinh doanh thực chiến không?`,
+      `3. Cơ chế & Bằng chứng thật từ DNA (tối đa 20đ): Có số liệu/cơ chế cụ thể từ DNA của ${dna.company.name}, không bịa giá hay cam kết cấm không?`,
+      `4. Giọng văn tự nhiên & Khử mùi AI (tối đa 20đ): Không sáo rỗng, không dùng câu mẫu AI hay ký tự cấm (${(dna.bannedChars ?? []).join(" ")}).`,
+      `5. CTA rõ ràng, dễ hành động (tối đa 15đ): Bảo khách làm đúng 1 hành động cụ thể.`,
+    ],
+  },
+  video_script: {
+    label: "kịch bản video ngắn",
+    writerFormat: "title = tên video; hook = câu nói/hình ảnh 3 giây đầu; body = kịch bản theo cảnh, mỗi cảnh 1 dòng dạng \"[0-3s] Hình: … | Thoại: …\", tổng 30-60 giây; cta = lời kêu gọi cuối video; hashtags = tối đa 5.",
+    criteria: (dna) => [
+      `1. Hook 3 giây đầu (tối đa 25đ): Câu nói/hình ảnh mở đầu có khiến người xem dừng lướt không?`,
+      `2. Nhịp cảnh & độ dài (tối đa 20đ): Mỗi cảnh có hình + thoại rõ ràng, nhịp nhanh, tổng 30-60 giây, quay được ngay.`,
+      `3. Thoại tự nhiên như người thật nói (tối đa 20đ): Không văn viết, không mùi AI, không ký tự cấm (${(dna.bannedChars ?? []).join(" ")}).`,
+      `4. Đúng DNA & bằng chứng (tối đa 20đ): Đúng sản phẩm/giá/cơ chế trong DNA của ${dna.company.name}, không bịa cam kết.`,
+      `5. CTA cuối video (tối đa 15đ): 1 hành động cụ thể, dễ làm.`,
+    ],
+  },
+  seo_article: {
+    label: "bài chuẩn SEO cho website",
+    writerFormat: "title = tiêu đề H1 có từ khóa chính; hook = meta description ≤ 160 ký tự; body = bài viết markdown có các mục ## H2 / ### H3, tối thiểu khoảng 800 chữ; cta = lời kêu gọi cuối bài; hashtags = 3-5 từ khóa phụ (không có dấu #).",
+    criteria: (dna) => [
+      `1. Đúng ý định tìm kiếm & từ khóa (tối đa 25đ): Từ khóa chính ở tiêu đề, meta, đoạn đầu và H2; trả lời đúng điều người tìm cần.`,
+      `2. Cấu trúc H2/H3 dễ đọc (tối đa 20đ): Dàn ý logic, đoạn ngắn, có danh sách/bước khi cần.`,
+      `3. Chiều sâu & chính xác (tối đa 20đ): Thông tin cụ thể, đúng DNA của ${dna.company.name}, không bịa số liệu.`,
+      `4. Văn tự nhiên, không mùi AI (tối đa 20đ): Không sáo rỗng, không ký tự cấm (${(dna.bannedChars ?? []).join(" ")}).`,
+      `5. Meta description & CTA (tối đa 15đ): Meta ≤ 160 ký tự hấp dẫn; CTA cuối bài rõ ràng.`,
+    ],
+  },
+  strategy: {
+    label: "phương án chiến lược / kế hoạch",
+    writerFormat: "title = tên phương án; hook = thông điệp lõi trong 1 câu; body = kế hoạch gồm: mục tiêu & KPI đo được, tệp khách hàng, kênh & phân bổ ngân sách, lịch triển khai theo tuần, rủi ro & phương án dự phòng; cta = việc cần làm ngay trong tuần này; hashtags = tối đa 5 KPI chính.",
+    criteria: (dna) => [
+      `1. Mục tiêu & KPI đo được (tối đa 20đ): Có con số, mốc thời gian, cách đo.`,
+      `2. Insight khách hàng đúng (tối đa 20đ): Đúng tệp và nỗi đau trong DNA của ${dna.company.name}.`,
+      `3. Kênh & ngân sách khả thi (tối đa 25đ): Phân bổ hợp lý, làm được với nguồn lực thật, không hứa hẹn quá đà.`,
+      `4. Rủi ro & phương án dự phòng (tối đa 20đ): Nêu rủi ro chính và cách xử lý.`,
+      `5. Hành động cụ thể (tối đa 15đ): Bước đầu tiên làm được ngay tuần này.`,
+    ],
+  },
+};
+KIND_GUIDES.brief = KIND_GUIDES.strategy;
+const kindGuide = (kind: string | undefined) => KIND_GUIDES[kind ?? ""] ?? KIND_GUIDES.social_post;
 
 const WriterTurnSchema = z.object({
   replyToPeer: z.string().describe("Lời nhắn trao đổi trực tiếp gửi tới Agent chấm điểm / phản biện (nêu rõ đã tiếp thu và sửa những điểm nào, hoặc lý do chọn góc tiếp cận này)"),
@@ -192,6 +252,16 @@ const ReviewerTurnSchema = z.object({
 export type ReviewerTurnOutput = z.infer<typeof ReviewerTurnSchema>;
 
 const runningDialogues = new Map<string, { abort: boolean }>();
+/** Phiên còn "running" nhưng cập nhật lần cuối TRƯỚC lần khởi động này = vòng chạy đã chết theo tiến trình cũ. */
+const BOOTED_AT = new Date().toISOString();
+
+function reconcileStale(d: Row): Row {
+  if (d.status !== "running" || runningDialogues.has(d.id) || String(d.updated_at) >= BOOTED_AT) return d;
+  const error = "Bị gián đoạn do máy chủ khởi động lại. Gửi góp ý cho Hội đồng để chạy lại vòng mới.";
+  update("agent_dialogue", d.id, { status: "failed", result: { ...(d.result ?? {}), error } });
+  q.run("UPDATE agent_dialogue_msg SET status = 'failed', text = ? WHERE dialogue_id = ? AND status = 'streaming'", "Bị gián đoạn (máy chủ khởi động lại)", d.id);
+  return { ...d, status: "failed", result: { ...(d.result ?? {}), error } };
+}
 
 export function dialogueMeta(bizId: string) {
   ensureDialogueTables();
@@ -217,20 +287,22 @@ export function dialogueMeta(bizId: string) {
 
 export function listDialogues(bizId: string, limit = 30) {
   ensureDialogueTables();
+  // Phiên tranh luận tự do có trang riêng (/debate) — không lẫn vào lịch sử Hội đồng duyệt nội dung.
   return q.all<Row>(
-    "SELECT * FROM agent_dialogue WHERE biz_id = ? ORDER BY updated_at DESC LIMIT ?",
+    "SELECT * FROM agent_dialogue WHERE biz_id = ? AND scenario != 'free_debate' ORDER BY updated_at DESC LIMIT ?",
     bizId,
     limit,
-  ).map((d) => ({
-    ...d,
-    running: runningDialogues.has(d.id) || d.status === "running",
-  }));
+  ).map((row) => {
+    const d = reconcileStale(row);
+    return { ...d, running: runningDialogues.has(d.id) || d.status === "running" };
+  });
 }
 
 export function getDialogue(bizId: string, id: string): Row & { running: boolean; messages: Row[] } {
   ensureDialogueTables();
-  const d = byId<Row>("agent_dialogue", id);
-  if (!d || d.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
+  const found = byId<Row>("agent_dialogue", id);
+  if (!found || found.biz_id !== bizId || found.scenario === "free_debate") throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
+  const d = reconcileStale(found);
   const messages = q.all<Row>(
     "SELECT * FROM agent_dialogue_msg WHERE dialogue_id = ? ORDER BY created_at ASC, round ASC",
     id,
@@ -245,7 +317,7 @@ export function getDialogue(bizId: string, id: string): Row & { running: boolean
 export function stopDialogue(bizId: string, id: string, actor = "ceo") {
   ensureDialogueTables();
   const d = byId<Row>("agent_dialogue", id);
-  if (!d || d.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
+  if (!d || d.biz_id !== bizId || d.scenario === "free_debate") throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
   const ctrl = runningDialogues.get(id);
   if (ctrl) ctrl.abort = true;
   runningDialogues.delete(id);
@@ -258,7 +330,7 @@ export function stopDialogue(bizId: string, id: string, actor = "ceo") {
 export function deleteDialogue(bizId: string, id: string, actor = "ceo") {
   ensureDialogueTables();
   const d = byId<Row>("agent_dialogue", id);
-  if (!d || d.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
+  if (!d || d.biz_id !== bizId || d.scenario === "free_debate") throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
   const ctrl = runningDialogues.get(id);
   if (ctrl) ctrl.abort = true;
   runningDialogues.delete(id);
@@ -356,7 +428,7 @@ export async function createAndStartDialogue(bizId: string, input: StartDialogue
 export async function interveneDialogue(bizId: string, dialogueId: string, instruction: string, actor = "ceo", wait = true) {
   ensureDialogueTables();
   const d = byId<Row>("agent_dialogue", dialogueId);
-  if (!d || d.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
+  if (!d || d.biz_id !== bizId || d.scenario === "free_debate") throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
   const text = String(instruction ?? "").trim();
   if (!text) throw new AppError("VALIDATION_ERROR", "Nội dung chỉ đạo không được để trống", 400);
 
@@ -405,14 +477,16 @@ export async function interveneDialogue(bizId: string, dialogueId: string, instr
 export async function executeDialogueLoop(bizId: string, dialogueId: string, startRound?: number, ceoDirective?: string) {
   ensureDialogueTables();
   const d = byId<Row>("agent_dialogue", dialogueId);
-  if (!d || d.biz_id !== bizId) return;
+  if (!d || d.biz_id !== bizId || d.scenario === "free_debate") return;
 
   const ctrl = { abort: false };
+  // Lượt do vòng này mở: bị dừng / Sếp chỉ đạo lại giữa chừng thì không được nằm "đang soạn" mãi.
+  const mine: string[] = [];
   runningDialogues.set(dialogueId, ctrl);
 
   const dnaRow = activeDna(bizId);
   if (!dnaRow) {
-    runningDialogues.delete(dialogueId);
+    if (runningDialogues.get(dialogueId) === ctrl) runningDialogues.delete(dialogueId);
     update("agent_dialogue", dialogueId, { status: "failed", result: { error: "Chưa có DNA doanh nghiệp đang hiệu lực" } });
     return;
   }
@@ -454,6 +528,7 @@ export async function executeDialogueLoop(bizId: string, dialogueId: string, sta
         log: [`Khởi chạy ${cfg.writer.label} (${cfg.writer.model}) — Vòng ${round}/${maxRounds}`],
         meta: {},
       });
+      mine.push(writerMsg.id);
       emit(bizId, "agent_dialogue.updated", { dialogueId, messageId: writerMsg.id, round, phase: "writer_start" });
 
       const writerTurn = await runWriterTurn({
@@ -511,6 +586,7 @@ export async function executeDialogueLoop(bizId: string, dialogueId: string, sta
         log: [`Khởi chạy ${cfg.reviewer.label} (${cfg.reviewer.model}) chấm bản thảo v${round}`],
         meta: {},
       });
+      mine.push(reviewerMsg.id);
       emit(bizId, "agent_dialogue.updated", { dialogueId, messageId: reviewerMsg.id, round, phase: "reviewer_start" });
 
       const reviewerTurn = await runReviewerTurn({
@@ -592,14 +668,25 @@ export async function executeDialogueLoop(bizId: string, dialogueId: string, sta
     }
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
-    update("agent_dialogue", dialogueId, {
-      status: "failed",
-      result: { ...(d.result ?? {}), error: errMsg },
-    });
+    for (const msgId of mine) {
+      q.run("UPDATE agent_dialogue_msg SET status = 'failed', text = ? WHERE id = ? AND status = 'streaming'", errMsg, msgId);
+    }
+    // Vòng này đã bị thay bằng vòng mới (Sếp chỉ đạo lại): không ghi đè trạng thái của vòng mới.
+    if (!ctrl.abort) {
+      const latest = byId<Row>("agent_dialogue", dialogueId);
+      update("agent_dialogue", dialogueId, {
+        status: "failed",
+        result: { ...(latest?.result ?? d.result ?? {}), error: errMsg },
+      });
+    }
     emit(bizId, "agent_dialogue.updated", { dialogueId, status: "failed", error: errMsg });
     logger.error("agent_dialogue.failed", { dialogueId, error: errMsg });
   } finally {
-    runningDialogues.delete(dialogueId);
+    if (runningDialogues.get(dialogueId) === ctrl) runningDialogues.delete(dialogueId);
+    for (const msgId of mine) {
+      q.run("UPDATE agent_dialogue_msg SET status = 'stopped', text = ? WHERE id = ? AND status = 'streaming'", "Đã dừng giữa chừng (Sếp gửi chỉ đạo mới hoặc bấm dừng)", msgId);
+    }
+    emit(bizId, "agent_dialogue.updated", { dialogueId, phase: "loop_end" });
   }
 }
 
@@ -643,7 +730,7 @@ async function runWriterTurn(opts: {
   const log: string[] = [
     `Agent: ${cfg.writer.label} (${cfg.writer.agentKey})`,
     `CLI: ${PROVIDER_META[cfg.writer.provider].label} · Model: ${cfg.writer.model}`,
-    `Playbook nạp: ${pb.parts.join(", ") || "taki-dna"}`,
+    `Playbook nạp: ${pb.parts.map((p) => p.key).join(", ") || "taki-dna"}`,
   ];
 
   if (useSim) {
@@ -672,6 +759,7 @@ async function runWriterTurn(opts: {
     `1. Tuyệt đối tuân thủ DNA thương hiệu (${dna.company.name}), không dùng các tuyên bố cấm (${(dna.forbiddenClaims ?? []).join(", ")}), không dùng ký tự cấm (${(dna.bannedChars ?? []).join(" ")}), chỉ nêu đúng giá sản phẩm có trong DNA.`,
     `2. Viết tiếng Việt tự nhiên, sắc bén, đi thẳng vào nỗi đau & cơ chế thật; khử sạch văn mẫu AI.`,
     `3. Ở vòng >= 2, phải đọc kỹ từng lỗi và yêu cầu sửa của ${cfg.reviewer.label} (và chỉ đạo của Sếp nếu có), trả lời trực tiếp trong trường replyToPeer và sửa triệt để trong bản thảo mới.`,
+    `4. Sản phẩm lần này là ${kindGuide(cfg.kind).label}. Điền các trường theo đúng định dạng: ${kindGuide(cfg.kind).writerFormat}`,
   ].join("\n");
 
   const userParts: string[] = [
@@ -788,7 +876,7 @@ async function runReviewerTurn(opts: {
     `Giám khảo: ${cfg.reviewer.label} (${cfg.reviewer.agentKey})`,
     `CLI: ${PROVIDER_META[cfg.reviewer.provider].label} · Model: ${cfg.reviewer.model}`,
     `Kiểm tra DNA tự động: ${dnaIssues.length === 0 ? "ĐẠT (0 vi phạm cứng)" : `PHÁT HIỆN ${dnaIssues.length} VI PHẠM: ${dnaIssues.join("; ")}`}`,
-    `Playbook chấm điểm: ${pb.parts.join(", ") || "mkt-kiem-duyet, cham-diem-noi-dung, remove-ai-marks"}`,
+    `Playbook chấm điểm: ${pb.parts.map((p) => p.key).join(", ") || "mkt-kiem-duyet, cham-diem-noi-dung, remove-ai-marks"}`,
   ];
 
   if (useSim) {
@@ -812,12 +900,8 @@ async function runReviewerTurn(opts: {
   const system = [
     `Bạn là ${cfg.reviewer.label} (chạy trên ${PROVIDER_META[cfg.reviewer.provider].label} - model ${cfg.reviewer.model}) trong Hội đồng Agent Đa Model của ${dna.company.name}.`,
     `Nhiệm vụ: Chấm điểm, kiểm duyệt DNA và phản biện trực tiếp bản thảo của ${cfg.writer.label} (${PROVIDER_META[cfg.writer.provider].label} - model ${cfg.writer.model}).`,
-    `Chấm thật, sắc bén, không nể nang theo đúng 5 tiêu chí (Tổng 100 điểm):`,
-    `1. Hook 3 giây đầu (tối đa 20đ): Có chạm đúng tình huống thật của khách không?`,
-    `2. Đúng nỗi đau & ngôn ngữ ICP (tối đa 25đ): Có nói đúng ngôn ngữ người kinh doanh thực chiến không?`,
-    `3. Cơ chế & Bằng chứng thật từ DNA (tối đa 20đ): Có số liệu/cơ chế cụ thể từ DNA của ${dna.company.name}, không bịa giá hay cam kết cấm không?`,
-    `4. Giọng văn tự nhiên & Khử mùi AI (tối đa 20đ): Không sáo rỗng, không dùng câu mẫu AI hay ký tự cấm (${(dna.bannedChars ?? []).join(" ")}).`,
-    `5. CTA rõ ràng, dễ hành động (tối đa 15đ): Bảo khách làm đúng 1 hành động cụ thể.`,
+    `Loại sản phẩm cần chấm: ${kindGuide(cfg.kind).label}. Chấm thật, sắc bén, không nể nang theo đúng 5 tiêu chí (Tổng 100 điểm):`,
+    ...kindGuide(cfg.kind).criteria(dna),
     `Ngưỡng ĐẠT (verdict = "dat"): Tổng điểm >= ${passThreshold}/100 VÀ không có bất kỳ vi phạm DNA nào (dnaViolations rỗng).`,
   ].join("\n");
 
@@ -1125,7 +1209,7 @@ function formatReviewerMessage(out: ReviewerTurnOutput, round: number, passThres
 export function promoteDialogueToApproval(bizId: string, dialogueId: string, actor = "ceo") {
   ensureDialogueTables();
   const d = byId<Row>("agent_dialogue", dialogueId);
-  if (!d || d.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
+  if (!d || d.biz_id !== bizId || d.scenario === "free_debate") throw new AppError("NOT_FOUND", "Không tìm thấy phiên hội đồng Agent", 404);
   if (d.approval_id && d.content_item_id) {
     const existingApproval = byId<Row>("approval", d.approval_id);
     if (existingApproval) {
@@ -1363,7 +1447,7 @@ export async function auditAndOptimizeTarget(bizId: string, input: AuditTargetIn
       agentKey: ["content", "video_script", "seo_web", "strategy", "brief"].includes(task.agent_key) ? task.agent_key : "content",
       label: AGENTS[task.agent_key]?.label ?? "Content Agent",
       provider: "claude_cli",
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
     },
   );
   const reviewer = normalizeParticipant(
@@ -1852,7 +1936,7 @@ async function auditAdsTarget(
     agentKey: "strategy",
     label: "Ads Strategy Agent",
     provider: "claude_cli",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
   });
   const reviewer = normalizeParticipant(input.reviewer, {
     agentKey: "review",
@@ -2104,7 +2188,7 @@ export async function auditAndOptimizeGoal(
       agentKey: "content",
       label: "Đội Thực thi (Claude Code)",
       provider: "claude_cli",
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
     },
   );
   const reviewer = normalizeParticipant(
@@ -2278,7 +2362,7 @@ export async function executeDialogueCta(
 ) {
   ensureDialogueTables();
   const d = byId<Row>("agent_dialogue", dialogueId);
-  if (!d || d.biz_id !== bizId) throw new AppError("NOT_FOUND", "Không tìm thấy phiên Hội đồng Agent", 404);
+  if (!d || d.biz_id !== bizId || d.scenario === "free_debate") throw new AppError("NOT_FOUND", "Không tìm thấy phiên Hội đồng Agent", 404);
 
   const res = (d.result ?? {}) as Record<string, any>;
   const targetType = res.targetType ?? d.config?.target?.targetType;

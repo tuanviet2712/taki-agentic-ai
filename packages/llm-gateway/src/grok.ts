@@ -45,6 +45,45 @@ export function grokEnv(): NodeJS.ProcessEnv {
   return { ...env, GROK_HOME: grokHome() };
 }
 
+/**
+ * Môi trường cho MỘT LƯỢT GỌI Grok từ hệ thống (không dùng cho đăng nhập / kiểm tra đăng nhập).
+ * Grok CLI tự quét skill/agent/plugin/MCP của Claude Code trong thư mục người dùng (~/.claude/skills, ~/.claude/plugins,
+ * ~/.claude.json) và chèn danh sách vào MỖI câu hỏi. Máy có vài trăm skill → đo thực tế ~85.000 token nền và 80–90 giây cho
+ * câu 1 dòng; lượt tranh luận của agent có skill playbook vượt 240 giây và bị cắt. Trỏ HOME/USERPROFILE sang 1 thư mục trống
+ * riêng (GROK_HOME vẫn là thư mục thật → giữ đăng nhập, cấu hình, danh sách model): còn ~14.000 token, ~20 giây
+ * (lượt tranh luận có playbook: 152 → 38 giây). Grok dùng hằng ngày của người dùng không bị ảnh hưởng.
+ */
+export function grokRunEnv(): NodeJS.ProcessEnv {
+  const home = process.env.GROK_RUN_HOME?.trim() || join(tmpdir(), "taki-grok-home");
+  mkdirSync(home, { recursive: true });
+  return { ...grokEnv(), HOME: home, USERPROFILE: home };
+}
+
+/** Trần thời gian 1 lượt gọi Grok (lượt tranh luận / chấm bài của agent có skill playbook dài + suy luận). */
+const GROK_TIMEOUT_MS = Number(process.env.GROK_CLI_TIMEOUT_MS ?? 420_000);
+
+/** Model Grok mà tài khoản đang đăng nhập thực sự dùng được (bộ nhớ đệm `grok models` của CLI). null = chưa biết. */
+export function grokAvailableModels(): { id: string; name: string; description?: string }[] | null {
+  try {
+    const cache = JSON.parse(readFileSync(join(grokHome(), "models_cache.json"), "utf8")) as { models?: Record<string, { info?: Record<string, unknown> }> };
+    const list = Object.values(cache.models ?? {})
+      .map((m) => m?.info)
+      .filter((i): i is Record<string, unknown> => Boolean(i && typeof i.id === "string" && !i.hidden))
+      .map((i) => ({ id: String(i.id), name: String(i.name ?? i.id), ...(typeof i.description === "string" ? { description: i.description } : {}) }));
+    return list.length ? list : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Model không có trong tài khoản (vd grok-4.3 / grok-build-0.1 trong cài đặt cũ) → model gần nhất dùng được thay vì lỗi. */
+export function resolveGrokModel(model: string | undefined): string {
+  const want = model && model !== "default" ? model : "grok-4.6";
+  const avail = grokAvailableModels();
+  if (!avail || avail.some((m) => m.id === want)) return want;
+  return (avail.find((m) => m.id === "grok-4.6") ?? avail[0]).id;
+}
+
 export function stopGrok(child: ChildProcess) {
   if (!child.pid) return;
   if (process.platform === "win32") {
@@ -261,7 +300,7 @@ export function grokFailure(raw: string): AppError {
   if (/usage limit|rate.limit|quota|credits|429/i.test(raw)) {
     return new AppError("GROK_QUOTA", "Tài khoản Grok đã đạt hạn mức. Chờ hạn mức khôi phục hoặc đổi sang model/CLI khác.", 429);
   }
-  if (/model.*(?:not found|not supported|not available|does not exist)/i.test(raw)) {
+  if (/model.*(?:not found|not supported|not available|does not exist)|unknown model/i.test(raw)) {
     return new AppError("GROK_MODEL", "Model Grok không khả dụng với tài khoản này. Chọn grok-4.6 hoặc grok-4.5.", 400);
   }
   return new AppError("GROK_FAILED", `Grok CLI chưa hoàn tất yêu cầu: ${raw.trim().slice(0, 280) || "Kiểm tra đăng nhập và kết nối mạng"}`, 502);
@@ -287,7 +326,8 @@ export async function runGrokAgent(opts: GrokRunOptions): Promise<AgentRunResult
 
     const cmd = grokCommand();
     const hasMcp = Boolean(opts.mcp && Object.keys(opts.mcp).length);
-    const modelArg = opts.model && opts.model !== "default" ? ["-m", opts.model] : ["-m", "grok-4.6"];
+    const model = resolveGrokModel(opts.model);
+    const modelArg = ["-m", model];
     const args = [
       ...cmd.args,
       "--prompt-file", promptFile,
@@ -304,7 +344,7 @@ export async function runGrokAgent(opts: GrokRunOptions): Promise<AgentRunResult
     ];
     const start = Date.now();
     return await new Promise((done, reject) => {
-      const child = spawn(cmd.bin, args, { cwd: work, env: grokEnv(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(cmd.bin, args, { cwd: work, env: grokRunEnv(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       let out = "";
       let err = "";
       let buf = "";
@@ -317,7 +357,7 @@ export async function runGrokAgent(opts: GrokRunOptions): Promise<AgentRunResult
       let costMicros = 0;
 
       const cancel = () => { stopped = true; stopGrok(child); };
-      const timer = setTimeout(cancel, opts.timeoutMs ?? 240_000);
+      const timer = setTimeout(cancel, opts.timeoutMs ?? GROK_TIMEOUT_MS);
       opts.signal?.addEventListener("abort", cancel, { once: true });
 
       const consumeLine = (line: string) => {
@@ -389,8 +429,11 @@ export async function runGrokAgent(opts: GrokRunOptions): Promise<AgentRunResult
         const text = (parts.filter((p) => p.trim()).join("\n\n") || finalText || out.trim()).trim();
         if (code !== 0 && !text) return reject(grokFailure(`${err}\n${out}`));
         if (!text) return reject(grokFailure(err || "Grok không trả về nội dung"));
+        // CLI báo lỗi bằng 1 sự kiện JSON {"type":"error"} (vd model không có trong tài khoản): báo đúng lỗi, không để nơi gọi hiểu nhầm là "sai schema".
+        const errEvent = extractJsonObject(text) as { type?: unknown; message?: unknown } | null;
+        if (errEvent?.type === "error" && typeof errEvent.message === "string") return reject(grokFailure(errEvent.message));
         const structured = opts.jsonSchema ? extractJsonObject(text) : text;
-        done({ text, structured, model: opts.model || "grok-4.6", usage, costMicros, durationMs: Date.now() - start, turns: 1, denials: [], sessionId });
+        done({ text, structured, model, usage, costMicros, durationMs: Date.now() - start, turns: 1, denials: [], sessionId });
       });
     });
   } finally {

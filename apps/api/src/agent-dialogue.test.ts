@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Dna } from "@dotaka/agents";
 import { DEFAULT_SETTINGS, byId, closeDb, insert, openDb, type Row } from "@dotaka/db";
 import { sanitizePromptInput } from "@dotaka/orchestrator";
@@ -119,7 +119,7 @@ describe("Multi-Agent Cross-CLI Council (/v1/agent-dialogues)", () => {
     expect(d.result.finalScore).toBeGreaterThanOrEqual(82);
     expect(d.result.passed).toBe(true);
     expect(d.config.writer.provider).toBe("claude_cli");
-    expect(d.config.writer.model).toBe("claude-sonnet-5");
+    expect(d.config.writer.model).toBe("claude-sonnet-5-5"); // claude-sonnet-5 đã gỡ → tự nâng cấp
     expect(d.config.reviewer.provider).toBe("grok_cli");
     expect(d.config.reviewer.model).toBe("grok-4.6");
 
@@ -131,6 +131,26 @@ describe("Multi-Agent Cross-CLI Council (/v1/agent-dialogues)", () => {
     expect(r1Review.result.score).toBeLessThan(82);
     expect(r2Review.result.verdict).toBe("dat");
     expect(r2Review.result.score).toBeGreaterThanOrEqual(82);
+  });
+
+  it("returns at once when the chat panel starts a council (runImmediately: false), then turns land one by one", async () => {
+    const res = await call("POST", "/v1/agent-dialogues", {
+      scenario: "content_review",
+      topic: "Viết bài Facebook giới thiệu khóa học AI Marketing thực chiến cho chủ shop",
+      mode: "simulate",
+      runImmediately: false,
+    });
+    expect(res.statusCode).toBe(200);
+    const started = res.json();
+    // Giao diện có ngay mã phiên để hiện từng lượt, không phải chờ cả vòng (trước đây quay mãi tới khi xong hết).
+    expect(started.status).toBe("running");
+    expect(started.running).toBe(true);
+    await vi.waitFor(async () => {
+      const d = (await call("GET", `/v1/agent-dialogues/${started.id}`)).json();
+      expect(d.status).toBe("consensus");
+      expect(d.messages.every((m: any) => m.status !== "streaming")).toBe(true);
+      expect(d.messages.find((m: any) => m.role === "writer").result.replyToPeer).toBeTruthy();
+    });
   });
 
   it("allows CEO mid-stream intervention and updates the final draft accordingly", async () => {
