@@ -35,6 +35,13 @@ describe("giao việc riêng cho từng agent", () => {
     expect(q.scalar<number>("SELECT COUNT(*) FROM task")).toBe(1);
   });
 
+  it("giao việc kèm model (Hội đồng Agent → Giao việc): việc lưu đúng model để chạy bằng model đó; không chọn thì không ép", async () => {
+    const withModel = await assignAgentTask(B, { agent: "content", instruction: "Bài giới thiệu khóa AI", model: "gpt-6.1-sol" }, "test") as any;
+    expect(byId<any>("task", withModel.taskId)!.input.model).toBe("gpt-6.1-sol");
+    const plain = await assignAgentTask(B, { agent: "content", instruction: "Bài giới thiệu khóa AI" }, "test") as any;
+    expect(byId<any>("task", plain.taskId)!.input.model).toBeUndefined();
+  });
+
   it("bài riêng mặc định chỉ viết, không đăng sau khi duyệt", async () => {
     const r = await assignAgentTask(B, { agent: "content", instruction: "Bài case học viên spa" }, "test") as any;
     expect(byId<any>("task", r.taskId)!.input.noPublish).toBe(true);

@@ -47,6 +47,8 @@ export const AssignInput = z.object({
   /** Bài / kịch bản: Sếp duyệt xong thì lên lịch đăng (mặc định KHÔNG — chỉ viết rồi dừng). */
   publishAfterApproval: z.boolean().default(false),
   threadId: z.string().nullable().optional(),
+  /** Model AI riêng cho việc này (chọn trong Hội đồng Agent → Giao việc); trống = model đang cài cho agent. */
+  model: z.string().trim().min(1).max(120).optional(),
 });
 export type AssignInput = z.infer<typeof AssignInput>;
 
@@ -69,6 +71,7 @@ export async function assignAgentTask(bizId: string, raw: unknown, actor: string
     const format = p.format ?? (p.agent === "video_script" ? "reel" : p.agent === "seo_web" ? "article" : "text");
     const input: Row = {
       standalone: true, instruction: p.instruction, basedOn, dispatchedBy: actor,
+      ...(p.model ? { model: p.model } : {}),
       ...(p.budgetAds != null ? { budgetAds: p.budgetAds } : {}),
       ...(isPiece ? {
         item: { channel, format, topic: p.instruction.slice(0, 300), angle: p.instruction, funnel: p.funnel ?? "tofu", yeuCauCuaCeo: p.instruction },

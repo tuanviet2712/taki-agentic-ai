@@ -222,6 +222,8 @@ export async function runTask(taskId: string) {
       system: systemPrefix(dna, def), systemSuffix: playbook.text, user: def.buildUser(task.input, ctx), schema: def.output,
       budget: { perRun: cfg.token_budget_run, perDay: cfg.token_budget_day },
       allowCrossProvider: true,
+      // Việc giao kèm model riêng (Hội đồng Agent → Giao việc): chạy đúng model đó, đúng CLI của model đó.
+      ...(typeof task.input?.model === "string" && task.input.model ? { model: task.input.model } : {}),
       sandbox: () => def.sandbox(task.input, ctx),
     });
   } catch (e) {

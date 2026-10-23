@@ -33,10 +33,24 @@ let info: { available: boolean; version?: string; checkedAt: number } | undefine
 export function codexInfo() {
   if (!info || Date.now() - info.checkedAt > 60_000) {
     const cmd = codexCommand();
+    // Nhanh, không chạy lệnh: có tệp khởi chạy của npm thì đọc phiên bản ngay từ package.json (như Gemini). `codex --version` chạy
+    // ĐỒNG BỘ (chặn cả máy chủ) và mất ~4 giây lúc nguội — máy bận thì quá 10 giây và bị báo nhầm "chưa cài Codex".
+    const launcher = cmd.args[0] && existsSync(cmd.args[0]) ? cmd.args[0] : null;
+    if (launcher) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(dirname(dirname(launcher)), "package.json"), "utf8"));
+        info = { available: true, version: `codex-cli ${pkg.version ?? "đã cài"}`, checkedAt: Date.now() };
+        return info;
+      } catch { /* không đọc được package.json → hỏi bằng lệnh bên dưới */ }
+    }
     try {
       const version = execFileSync(cmd.bin, [...cmd.args, "--version"], { encoding: "utf8", timeout: 10_000, windowsHide: true }).trim();
       info = { available: true, version, checkedAt: Date.now() };
-    } catch { info = { available: false, checkedAt: Date.now() }; }
+    } catch {
+      // Quá giờ / lỗi tạm khi máy đang bận không có nghĩa là CLI biến mất: nếu lần trước dùng được thì giữ nguyên kết quả đó,
+      // và (chưa từng thấy) thì hỏi lại sau ~30 giây thay vì ghi nhớ "chưa cài" cả phút làm mọi lượt gọi ChatGPT báo sai.
+      info = info?.available ? { ...info, checkedAt: Date.now() } : { available: false, checkedAt: Date.now() - 30_000 };
+    }
   }
   return info;
 }

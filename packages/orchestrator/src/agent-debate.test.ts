@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, closeDb, insert, openDb, type Row } from "@dotaka/db"
  * Phòng tranh luận ở chế độ THẬT với model giả: generate() trả lời theo kịch bản từng lượt (không gọi CLI thật),
  * để kiểm vòng chạy, đồng thuận 2 chiều, chen ngang, dừng giữa lượt và việc không bao giờ dùng lời mẫu thay model thật.
  */
-type Call = { agentKey: string; provider: string; model: string; system: string; user: string };
+type Call = { agentKey: string; provider: string; model: string; system: string; user: string; effort?: string; suffixLen: number };
 type Step = Row | ((req: any) => Row | Promise<Row>);
 const calls: Call[] = [];
 let script: Step[] = [];
@@ -19,7 +19,7 @@ vi.mock("@dotaka/llm-gateway", async (orig) => {
     ...real,
     providerReadiness: () => ({ ready: true }),
     generate: vi.fn(async (req: any) => {
-      calls.push({ agentKey: req.agentKey, provider: req.providerOverride, model: req.model, system: req.system, user: req.user });
+      calls.push({ agentKey: req.agentKey, provider: req.providerOverride, model: req.model, system: req.system, user: req.user, effort: req.effort, suffixLen: (req.systemSuffix ?? "").length });
       if (sandboxNext) {
         // Như generate() thật khi Claude CLI mất đăng nhập: tự chuyển sang hàm sandbox của nơi gọi.
         sandboxNext = false;
@@ -61,6 +61,9 @@ describe("agent-debate (chế độ thật, model giả)", () => {
     expect(d.status).toBe("consensus");
     expect(calls.map((c) => c.provider)).toEqual(["claude_cli", "grok_cli", "claude_cli", "grok_cli"]);
     expect(calls.every((c) => c.agentKey === "debate")).toBe(true);
+    // Tốc độ: lượt thảo luận chạy mức suy luận thấp, skill playbook cắt gọn (đo thật: Claude 56s → 22s mỗi lượt)
+    expect(calls.every((c) => c.effort === "low" && c.suffixLen <= 5000)).toBe(true);
+    expect(calls[0].system).toContain("NGẮN GỌN");
     expect(calls[1].user).toContain("BẮT BUỘC phản biện");
     expect(calls[1].user).toMatch(/<untrusted_context>\s*A: nên làm X/);
     expect(turnsOf(d)[1].result.agree).toBe(false);
@@ -116,7 +119,7 @@ describe("agent-debate (chế độ thật, model giả)", () => {
     release();
     await vi.waitFor(() => expect(getDebate(bizId, created.id).turnsDone).toBe(2));
     await vi.waitFor(() => expect(getDebate(bizId, created.id).status).toBe("waiting"));
-    expect(calls[1].user).toContain("Người dùng chen ngang · gửi cả hai");
+    expect(calls[1].user).toContain("Người dùng hỏi tiếp · gửi cả đội");
     expect(calls[1].user).toContain("Ngân sách tối đa 200 triệu");
   });
 

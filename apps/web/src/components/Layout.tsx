@@ -10,7 +10,7 @@ import { Button, Chevron, Collapse, Modal, cx, useOpen, useToast } from "./ui";
 import { AccountMenu, PROFILE_EVENT } from "./Account";
 import { BusinessSwitcher } from "./BusinessSwitcher";
 
-type NavItem = { to: string; label: string; icon: any; badge?: "unread" | "approvals"; special?: boolean; children?: { to: string; label: string; icon: any }[] };
+type NavItem = { to: string; label: string; icon: any; badge?: "unread" | "approvals"; special?: boolean; children?: { to: string; label: string; icon: any }[]; /** Mục mở 1 khung (không phải trang) */ action?: () => void };
 const NAV: { title: string; items: NavItem[] }[] = [
   { title: "Điều hành", items: [
     { to: "/", label: "Tổng quan", icon: Home },
@@ -20,7 +20,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     { to: "/plan", label: "Kế hoạch", icon: CalendarDays },
     { to: "/autopilot", label: "Lái tự động", icon: PlaneTakeoff, special: true },
     { to: "/agents", label: "Agent & Tác vụ", icon: Bot },
-    { to: "/debate", label: "Phòng tranh luận AI", icon: Swords, special: true },
+    { to: "#council", label: "Hội đồng Agent", icon: Swords, special: true, action: () => window.dispatchEvent(new CustomEvent("council:open")) },
     { to: "/approvals", label: "Duyệt & Phê duyệt", icon: CheckCircle2, badge: "approvals" },
   ] },
   { title: "Nội dung & kênh", items: [
@@ -140,6 +140,17 @@ export function Layout({ children }: { children: ReactNode }) {
       {NAV.map((g) => {
         const rows = g.items.map((n) => {
           const count = n.badge ? sys?.counts?.[n.badge] : 0;
+          if (n.action) {
+            return (
+              <div key={n.to}>
+                <button type="button" onClick={n.action} title={compact ? n.label : undefined} aria-label={compact ? n.label : undefined}
+                  className={cx("group relative flex min-h-9 w-full items-center rounded-xl text-[13.5px] text-ink/80 transition-colors hover:bg-soft hover:text-ink", compact ? "justify-center px-0" : "gap-3 px-3")}>
+                  <n.icon className={cx("h-[18px] w-[18px] shrink-0", n.special && "text-violet-600 dark:text-violet-400")} aria-hidden />
+                  {!compact && <span className="min-w-0 flex-1 truncate text-left" title={n.label}>{n.label}</span>}
+                </button>
+              </div>
+            );
+          }
           return (
             <div key={n.to}>
               <NavLink to={n.to} end={n.to === "/" || n.to === "/ads"} title={compact ? n.label : undefined} aria-label={compact ? n.label : undefined}

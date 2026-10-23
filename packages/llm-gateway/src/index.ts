@@ -271,6 +271,8 @@ export interface GenerateRequest<T> {
   systemSuffix?: string;
   images?: GenerateImage[];
   fast?: boolean;
+  /** Mức suy luận riêng cho lượt gọi này (thấp = nhanh hơn rõ rệt); trống = theo Cài đặt → Chế độ AI. */
+  effort?: "low" | "medium" | "high";
 }
 export type GenerateImage = { path: string; mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" };
 export interface GenerateResult<T> {
@@ -365,7 +367,7 @@ async function viaGrok<T>(req: GenerateRequest<T>, model: string): Promise<Gener
   let prompt = req.user;
   for (let round = 0; round < 3; round++) {
     if (req.budget?.perDay && tokensUsedToday(req.bizId, req.agentKey) >= req.budget.perDay) throw new BudgetExceeded("Agent đã đạt trần token/ngày");
-    const r = await runGrokCli({ prompt, system: req.system, model, jsonSchema, effort: llmSettings(req.bizId).effort });
+    const r = await runGrokCli({ prompt, system: req.system, model, jsonSchema, effort: req.effort ?? llmSettings(req.bizId).effort });
     totals.input += r.usage.input; totals.output += r.usage.output; totals.cached += r.usage.cached; totals.costMicros += r.costMicros;
     record(req, "grok_cli", r.model, r.usage, r.durationMs, r.costMicros);
     if (req.budget?.perRun && totals.input + totals.output > req.budget.perRun) throw new BudgetExceeded(`Task vượt trần ${req.budget.perRun} token/lần chạy.`);
@@ -402,7 +404,7 @@ async function viaCodex<T>(req: GenerateRequest<T>, model: string): Promise<Gene
     let prompt = req.user;
     for (let round = 0; round < 3; round++) {
       if (req.budget?.perDay && tokensUsedToday(req.bizId, req.agentKey) >= req.budget.perDay) throw new BudgetExceeded("Agent đã đạt trần token/ngày");
-      const r = await runCodexCli({ home, signal, prompt, system: req.system, model, jsonSchema, effort: llmSettings(req.bizId).effort, images: req.images?.map((i) => i.path) });
+      const r = await runCodexCli({ home, signal, prompt, system: req.system, model, jsonSchema, effort: req.effort ?? llmSettings(req.bizId).effort, images: req.images?.map((i) => i.path) });
       totals.input += r.usage.input; totals.output += r.usage.output; totals.cached += r.usage.cached;
       record(req, "codex_cli", r.model, r.usage, r.durationMs, 0);
       if (req.budget?.perRun && totals.input + totals.output > req.budget.perRun) throw new BudgetExceeded(`Task vượt trần ${req.budget.perRun} token/lần chạy.`);
@@ -444,7 +446,7 @@ async function cliRounds<T>(req: GenerateRequest<T>, model: string, jsonSchema: 
     const started = Date.now();
     // Chỉ vòng đầu chạy nhanh; sai schema → các vòng sửa dùng chế độ schema (chắc chắn đúng định dạng).
     const fast = Boolean(req.fast) && !imageDir && round === 0;
-    const r = await runClaudeCli({ prompt, system: req.system, model, jsonSchema, effort: llmSettings(req.bizId).effort, ...(imageDir ? { imageDir } : {}), ...(fast ? { fast } : {}), ...(req.agentKey === "chat" || req.agentKey === "chat_vision" ? { priority: true } : {}) });
+    const r = await runClaudeCli({ prompt, system: req.system, model, jsonSchema, effort: req.effort ?? llmSettings(req.bizId).effort, ...(imageDir ? { imageDir } : {}), ...(fast ? { fast } : {}), ...(req.agentKey === "chat" || req.agentKey === "chat_vision" ? { priority: true } : {}) });
     totals.input += r.usage.input; totals.output += r.usage.output; totals.cached += r.usage.cached; totals.costMicros += r.costMicros;
     record(req, "claude_cli", r.model, r.usage, Date.now() - started, r.costMicros);
     if (req.budget?.perRun && totals.input + totals.output > req.budget.perRun) throw new BudgetExceeded(`Task vượt trần ${req.budget.perRun} token/lần chạy.`);

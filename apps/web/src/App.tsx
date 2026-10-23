@@ -37,7 +37,6 @@ import { AdsReports } from "./pages/AdsReports";
 import { Scout } from "./pages/Scout";
 import { Nurture } from "./pages/Nurture";
 import { Autopilot } from "./pages/Autopilot";
-import { Debate } from "./pages/Debate";
 
 /** Redirect keeping the query string (e.g. ?type=…, ?p=…). */
 function Keep({ to }: { to: string }) {
@@ -66,7 +65,8 @@ export function App() {
           <Route path="/plan" element={<Plan />} />
           <Route path="/autopilot" element={<Autopilot />} />
           <Route path="/agents" element={<Agents />} />
-          <Route path="/debate" element={<Debate />} />
+          {/* Phòng tranh luận đã gộp vào ô chat Hội đồng Agent (nút góc phải / menu trái) */}
+          <Route path="/debate" element={<Navigate to="/" replace />} />
           <Route path="/content" element={<Content />} />
           <Route path="/publish" element={<Publish />} />
           <Route path="/channels" element={<Channels />} />

@@ -26,9 +26,11 @@ const Debater = z
 
 const CreateBody = z.object({
   question: z.string().min(3).max(4000),
+  /** 2–4 thành viên Hội đồng; trống → tự xếp đội theo AI đã kết nối. */
+  seats: z.array(Debater.unwrap()).min(2).max(4).optional(),
   a: Debater,
   b: Debater,
-  maxTurns: z.number().int().min(4).max(20).optional(),
+  maxTurns: z.number().int().min(4).max(24).optional(),
   consensusThreshold: z.number().int().min(60).max(100).optional(),
   pace: z.enum(["auto", "step"]).optional(),
   mode: z.enum(["auto", "live", "simulate"]).optional(),
@@ -38,23 +40,23 @@ const CreateBody = z.object({
 
 const SayBody = z.object({
   text: z.string().min(1).max(4000),
-  to: z.enum(["both", "a", "b"]).optional(),
+  to: z.union([z.enum(["all", "both", "a", "b"]), z.number().int().min(0).max(3)]).optional(),
   wait: z.boolean().optional(),
 });
 
 const AdvanceBody = z.object({
   steps: z.enum(["one", "auto"]).optional(),
   pace: z.enum(["auto", "step"]).optional(),
-  extraTurns: z.number().int().min(1).max(10).optional(),
+  extraTurns: z.number().int().min(1).max(12).optional(),
   wait: z.boolean().optional(),
 });
 
-/** Phòng tranh luận AI (packages/orchestrator/src/agent-debate.ts). */
+/** Hội đồng Agent · Hỏi cả đội (packages/orchestrator/src/agent-debate.ts). */
 export function agentDebateRoutes(app: FastifyInstance) {
   const r = routes(app);
   // Chỉ người dùng trên giao diện điều khiển tranh luận; công cụ của Ngân Nguyệt / MCP (ký x-taki-actor) thì không.
   const ownerOnly = (c: Ctx) => {
-    if (c.req.headers["x-taki-actor"]) throw new AppError("FORBIDDEN", "Chỉ người dùng mới được điều khiển Phòng tranh luận", 403);
+    if (c.req.headers["x-taki-actor"]) throw new AppError("FORBIDDEN", "Chỉ người dùng mới được điều khiển Hội đồng Agent", 403);
   };
 
   r.get("/v1/agent-debates/meta", ({ bizId }) => debateMeta(bizId));
